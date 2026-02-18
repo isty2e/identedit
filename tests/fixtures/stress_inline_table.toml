@@ -1,0 +1,13 @@
+title = "stress"
+
+[env]
+servers.alpha = { ip = "10.0.0.1", ports = [80, 443], metadata = { zone = "us-east-1", active = true } }
+servers.beta = { ip = "10.0.0.2", ports = [8080], metadata = { zone = "us-east-1", active = false } }
+
+[[deploy.targets]]
+name = "edge-a"
+labels = { team = "platform", tier = "backend" }
+
+[[deploy.targets]]
+name = "edge-b"
+labels = { team = "platform", tier = "frontend" }

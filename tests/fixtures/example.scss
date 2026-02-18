@@ -1,0 +1,17 @@
+$primary: #0a84ff;
+
+@mixin card($padding) {
+  padding: $padding;
+  border-radius: 8px;
+  background-color: $primary;
+}
+
+@function doubled($value) {
+  @return $value * 2;
+}
+
+.dashboard {
+  @include card(12px);
+  color: $primary;
+  width: doubled(10px);
+}

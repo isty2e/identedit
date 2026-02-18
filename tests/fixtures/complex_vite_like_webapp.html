@@ -1,0 +1,78 @@
+<!--
+  Adapted from Vite vanilla template and Bootstrap starter patterns (MIT Licenses).
+  Sources:
+  - https://github.com/vitejs/vite/tree/main/packages/create-vite/template-vanilla
+  - https://github.com/twbs/examples
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite-like task console</title>
+    <style>
+      :root {
+        --surface: #f8fafc;
+        --text: #1f2937;
+        --accent: #2563eb;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background: var(--surface);
+      }
+
+      .queue-item > button {
+        border: 1px solid #94a3b8;
+        border-radius: 999px;
+        background: #fff;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "lit": "https://esm.sh/lit@3.2.1"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Task queue</h1>
+    </header>
+
+    <template id="task-item-template">
+      <li class="queue-item"><button type="button">Retry</button></li>
+    </template>
+
+    <main id="app-main" class="app-shell">
+      <section aria-label="queue">
+        <ul id="task-queue">
+          <li class="queue-item"><button type="button">Retry</button></li>
+          <li class="queue-item"><button type="button">Retry</button></li>
+          <li class="queue-item"><button type="button">Drop</button></li>
+        </ul>
+      </section>
+
+      <section aria-label="log">
+        <pre id="event-log">select -&gt; transform -&gt; apply</pre>
+      </section>
+    </main>
+
+    <script type="module">
+      const template = document.querySelector("#task-item-template");
+      const queue = document.querySelector("#task-queue");
+      const serializedClosingTag = "<\\/script>";
+
+      if (template instanceof HTMLTemplateElement && queue instanceof HTMLElement) {
+        const clone = template.content.cloneNode(true);
+        queue.append(clone);
+      }
+
+      window.__kanna_probe = { serializedClosingTag };
+    </script>
+    <noscript>Enable JavaScript to preview queue rendering.</noscript>
+  </body>
+</html>

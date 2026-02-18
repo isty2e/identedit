@@ -1,0 +1,7 @@
+service_a:
+  enabled: true
+  name: a
+
+service_b:
+  enabled: true
+  name: b

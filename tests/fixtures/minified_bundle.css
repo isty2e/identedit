@@ -1,0 +1,2 @@
+/* Adapted from normalize-style resets and utility bundles (MIT License). Sources: https://github.com/necolas/normalize.css, https://github.com/twbs/bootstrap */
+:root{--ink:#111827;--surface:#f8fafc}.mini-card{padding:1rem;border:1px solid #cbd5e1;background:var(--surface);color:var(--ink)}.mini-card .title{font-weight:600}.badge{display:inline-block;padding:.125rem .5rem;border-radius:999px}

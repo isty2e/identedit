@@ -1,0 +1,5 @@
+service:
+  name: identedit
+  retries: 2
+environment: dev
+message: hello

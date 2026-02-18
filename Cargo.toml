@@ -1,0 +1,52 @@
+[package]
+name = "identedit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+blake3 = "1"
+clap = { version = "4", features = ["derive"] }
+fs2 = "0.4"
+glob = "0.3"
+libloading = "0.8"
+miette = { version = "7", features = ["fancy"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tree-sitter = "0.26"
+tree-sitter-language = "0.1"
+tree-sitter-c = "0.24.1"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-c-sharp = "0.23.1"
+tree-sitter-bash = "0.25.1"
+tree-sitter-zsh = "0.53.0"
+tree-sitter-fish = "3.6.0"
+tree-sitter-css = "0.25"
+tree-sitter-dockerfile = { package = "tree-sitter-dockerfile-updated", version = "0.2.0" }
+tree-sitter-go = "0.25"
+tree-sitter-html = "0.23.2"
+tree-sitter-javascript = "0.25"
+tree-sitter-java = "0.23.5"
+tree-sitter-kotlin = { package = "tree-sitter-kotlin-ng", version = "1.1.0" }
+tree-sitter-hcl = "1.1.0"
+tree-sitter-lua = "0.4.1"
+tree-sitter-markdown = { package = "tree-sitter-md", version = "0.5.2" }
+tree-sitter-json = "0.24"
+tree-sitter-proto = "0.2.0"
+tree-sitter-php = "0.24.2"
+tree-sitter-perl = "1.1.2"
+tree-sitter-python = "0.25"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-sequel = "0.3.11"
+tree-sitter-scss = "1.0.0"
+tree-sitter-swift = "0.7.1"
+tree-sitter-rust = "0.24"
+tree-sitter-toml = { package = "tree-sitter-toml-ng", version = "0.7.0" }
+tree-sitter-typescript = "0.23.2"
+tree-sitter-xml = "0.7.0"
+tree-sitter-yaml = "0.7.2"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"

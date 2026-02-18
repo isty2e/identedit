@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="style.xsl"?>
+<catalog>
+  <!-- standard item -->
+  <item id="a">
+    <name>Identedit</name>
+    <description><![CDATA[Agent <safe> content]]></description>
+  </item>
+  <item id="b">
+    <name>Identedit</name>
+    <description>Agent <em>structured</em> edits</description>
+  </item>
+</catalog>

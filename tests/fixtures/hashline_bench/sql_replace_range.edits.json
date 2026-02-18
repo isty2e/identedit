@@ -1,0 +1,9 @@
+[
+  {
+    "replace_lines": {
+      "start_anchor": "{{line:2}}",
+      "end_anchor": "{{line:5}}",
+      "new_text": "  customer_id,\n  total\nFROM invoices\nWHERE total > 250"
+    }
+  }
+]

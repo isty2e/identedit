@@ -1,0 +1,85 @@
+/*!
+ * Adapted from modern-normalize and Open Props style patterns (MIT Licenses).
+ * Sources:
+ * - https://github.com/sindresorhus/modern-normalize
+ * - https://github.com/argyleink/open-props
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  line-height: 1.5;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+:root {
+  --surface: hsl(220 20% 98%);
+  --text: hsl(220 40% 18%);
+  --brand: hsl(252 84% 59%);
+  --radius: 0.75rem;
+  --space: 1rem;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  padding: 0.2rem 0.55rem;
+  background: rgba(124, 58, 237, 0.16);
+}
+
+.chip {
+  display: inline-flex;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  padding: 0.2rem 0.55rem;
+  background: rgba(124, 58, 237, 0.16);
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space);
+}
+
+.dashboard :where(.card) {
+  grid-column: span 12;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  animation: fade-in 300ms ease-out;
+}
+
+@media (min-width: 64rem) {
+  .dashboard > .card {
+    grid-column: span 6;
+  }
+}
+
+@supports (display: grid) {
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space);
+  }
+
+  .card-grid > .card {
+    padding: 1.25rem;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

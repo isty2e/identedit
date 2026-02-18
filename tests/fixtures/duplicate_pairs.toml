@@ -1,0 +1,7 @@
+[alpha]
+enabled = true
+name = "alpha"
+
+[beta]
+enabled = true
+name = "beta"

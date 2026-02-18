@@ -1,0 +1,17 @@
+title = "identedit"
+
+[server]
+host = "127.0.0.1"
+port = 8080
+
+[database.settings]
+max_connections = 32
+enabled = true
+
+[[pipelines]]
+name = "lint"
+steps = ["fmt", "clippy"]
+
+[[pipelines]]
+name = "test"
+steps = ["unit", "integration"]

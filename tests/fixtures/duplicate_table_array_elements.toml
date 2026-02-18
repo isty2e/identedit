@@ -1,0 +1,7 @@
+[[targets]]
+name = "edge"
+labels = { team = "platform" }
+
+[[targets]]
+name = "edge"
+labels = { team = "platform" }

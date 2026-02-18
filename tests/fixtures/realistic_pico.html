@@ -1,0 +1,77 @@
+<!--
+  Adapted from Pico CSS documentation starter template (MIT License).
+  Source: https://picocss.com/docs/
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pico demo page</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"
+    />
+  </head>
+  <body>
+    <header class="container">
+      <hgroup>
+        <h1>Project status</h1>
+        <p>Weekly highlights and risks</p>
+      </hgroup>
+      <nav>
+        <ul>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#metrics">Metrics</a></li>
+          <li><a href="#contact">Contact</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="container">
+      <article id="overview">
+        <header>
+          <h2>Overview</h2>
+        </header>
+        <p>Build health is stable and release blockers are being tracked.</p>
+      </article>
+
+      <section id="metrics">
+        <h3>Key metrics</h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Metric</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Open incidents</td>
+              <td>2</td>
+            </tr>
+            <tr>
+              <td>Tests passed</td>
+              <td>642</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="contact">
+        <h3>Feedback</h3>
+        <form>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required />
+          <label for="notes">Notes</label>
+          <textarea id="notes" name="notes"></textarea>
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <footer class="container">
+      <small>© 2026 Identedit Team</small>
+    </footer>
+  </body>
+</html>

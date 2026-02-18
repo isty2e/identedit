@@ -1,0 +1,26 @@
+/*!
+ * Adapted from Bootstrap utility patterns (MIT License).
+ * Source: https://github.com/twbs/bootstrap
+ */
+
+.alert-pill {
+  display: inline-flex;
+  gap: 0.25rem;
+  color: #0f172a;
+}
+
+@media (min-width: 48rem) {
+  .alert-pill {
+    display: inline-flex;
+    gap: 0.25rem;
+    color: #0f172a;
+  }
+}
+
+@media (min-width: 64rem) {
+  .alert-pill {
+    display: inline-flex;
+    gap: 0.25rem;
+    color: #0f172a;
+  }
+}

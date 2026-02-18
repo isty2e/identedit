@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "python_set_line",
+      "description": "Single-line update in a Python function body.",
+      "source": "python_set_line.py",
+      "edits_template": "python_set_line.edits.json"
+    },
+    {
+      "id": "sql_replace_range",
+      "description": "Multi-line SQL clause replacement.",
+      "source": "sql_replace_range.sql",
+      "edits_template": "sql_replace_range.edits.json"
+    },
+    {
+      "id": "markdown_insert_after",
+      "description": "Insert a line after a markdown heading.",
+      "source": "markdown_insert_after.md",
+      "edits_template": "markdown_insert_after.edits.json"
+    }
+  ]
+}

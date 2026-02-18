@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package identedit.v1;
+
+option go_package = "example.com/identedit/v1;kannav1";
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_READY = 1;
+}
+
+message Request {
+  string id = 1;
+  Status status = 2;
+}
+
+message Response {
+  string message = 1;
+}
+
+service KannaService {
+  rpc GetStatus(Request) returns (Response);
+}

@@ -1,0 +1,11 @@
+---
+shared: &shared
+  host: localhost
+  port: 8080
+primary: *shared
+...
+---
+template: &template
+  retries: 2
+  timeout: 30
+consumer: *template

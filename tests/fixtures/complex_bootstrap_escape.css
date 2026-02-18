@@ -1,0 +1,50 @@
+/*!
+ * Adapted from Bootstrap form-select styles and Tailwind escaped utility naming (MIT Licenses).
+ * Sources:
+ * - https://github.com/twbs/bootstrap/blob/main/dist/css/bootstrap.css
+ * - https://github.com/tailwindlabs/tailwindcss
+ */
+
+:root {
+  --identedit-border: #94a3b8;
+  --identedit-surface: #f8fafc;
+  --identedit-accent: #0d6efd;
+}
+
+.form-select {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--identedit-border);
+  padding: 0.375rem 2.25rem 0.375rem 0.75rem;
+  appearance: none;
+  background-color: var(--identedit-surface);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+}
+
+.btn\:primary:hover {
+  color: #fff;
+  background-color: var(--identedit-accent);
+}
+
+.btn\:primary:hover {
+  color: #fff;
+  background-color: var(--identedit-accent);
+}
+
+.icon\+badge::before {
+  content: "+";
+  margin-right: 0.25rem;
+}
+
+.menu\@panel[data-state="open"] {
+  border-color: color-mix(in srgb, var(--identedit-accent) 50%, #fff);
+}
+
+@media (min-width: 48rem) {
+  .grid\@md > .card\+card {
+    margin-inline-start: 1rem;
+  }
+}

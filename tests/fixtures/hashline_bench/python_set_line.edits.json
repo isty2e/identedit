@@ -1,0 +1,8 @@
+[
+  {
+    "set_line": {
+      "anchor": "{{line:3}}",
+      "new_text": "    return normalized.upper()"
+    }
+  }
+]
