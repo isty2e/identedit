@@ -55,7 +55,7 @@ Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#
 
 ### Prebuilt binaries (GitHub Releases)
 
-1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and pick your tag (for example `v0.1.1`).
+1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and pick your tag (for example `v0.1.2`).
 2. Download the matching asset:
    - `identedit-<tag>-x86_64-unknown-linux-gnu.tar.gz`
    - `identedit-<tag>-aarch64-unknown-linux-gnu.tar.gz`
