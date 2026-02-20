@@ -509,6 +509,7 @@ Use config-aware path targeting when you need to update nested keys without larg
 
 ```bash
 identedit patch --config-path service.retries --set-value 5 example.yaml
+identedit patch --config-path items --append-value 4 example.json
 identedit patch --config-path database.settings.enabled --delete example.toml
 ```
 
@@ -530,26 +531,52 @@ JSON mode:
 }
 ```
 
-Path syntax is dot/bracket only (for example `a.b[1].c`). Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
+Append JSON variant:
+
+```json
+{
+  "command": "patch",
+  "file": "example.json",
+  "target": {
+    "type": "config_path",
+    "path": "items"
+  },
+  "op": {
+    "type": "append",
+    "new_text": "4"
+  }
+}
+```
+
+Path syntax is dot/bracket only (for example `a.b[1].c`).
+
+Config path rules:
+- `set` updates an existing path; use `create_missing: true` (JSON mode) or `--create-missing` (flag mode) only when creating missing map/table keys.
+- `append` requires the resolved target path to be an existing array/sequence.
+- `delete` and `append` reject `create_missing`.
+- Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 
 ---
 
 ## Multi-File Transactions
 
-JSON mode supports editing multiple files atomically via `identedit apply --json`:
+Use `edit` to compile a multi-file changeset first, then apply it atomically:
 
 ```bash
-echo '{
-  "command": "apply",
-  "changeset": {
-    "files": [
-      { "file": "src/auth.py", "operations": [...] },
-      { "file": "src/routes.py", "operations": [...] }
-    ],
-    "transaction": { "mode": "all_or_nothing" }
-  }
+# request.json contains the edit request (single-file or files[] batch shape)
+identedit edit --json < request.json > changeset.json
+
+# commit from plan file
+identedit apply changeset.json
+
+# equivalent wrapped stdin mode (when you need command envelope)
+jq -n --slurpfile plan changeset.json '{
+  command: "apply",
+  changeset: $plan[0]
 }' | identedit apply --json
 ```
+
+`apply --json` expects a compiled changeset (the output of `identedit edit --json`), not a raw edit request.
 
 If any file fails, all files are rolled back to their original state.
 
@@ -585,7 +612,11 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 
 ## Feedback
 
-This tool is under active development. When you use identedit and encounter friction — confusing errors, unexpected behavior, missing features, awkward workflow steps — append a short note to `docs/reports/identedit-field-notes.md` with:
+This tool is under active development. When you encounter friction (confusing errors, unexpected behavior, missing features, awkward workflow steps), open an issue at:
+
+- https://github.com/isty2e/identedit/issues
+
+Include:
 - What you were trying to do
 - What happened (include the error or unexpected output)
 - What you expected instead

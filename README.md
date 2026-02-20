@@ -21,6 +21,7 @@ Three entry points covering different editing needs:
 identedit patch src/example.py --identity abc123 --replace 'def f(): ...'
 identedit patch src/example.py --at "42:9e0f1a2b3c4d" --set-line "    return x + y"
 identedit patch config.yaml --config-path server.port --set-value 8080
+identedit patch config.json --config-path items --append-value 4
 ```
 
 **`read` → `edit` → `apply`** — multi-op or multi-file atomic pipeline:
@@ -33,8 +34,10 @@ identedit edit --json < request.json | identedit apply        # commit to disk
 **`read --mode line`** — line-level precision edits:
 ```bash
 identedit read --mode line example.py   # display LINE:HASH|content
-identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anchor "5:..."
+identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anchor "5:7f6e5d4c3b2a"
 ```
+
+Legacy aliases (`select`, `transform`, `hashline`, `changeset`) remain available for compatibility, but new workflows should use `read`, `edit`, `apply`, and `patch`.
 
 ### Key Properties
 
@@ -49,6 +52,18 @@ identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anc
 Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL, Dockerfile
 
 ## Install
+
+### Prebuilt binaries (GitHub Releases)
+
+1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and pick your tag (for example `v0.1.1`).
+2. Download the matching asset:
+   - `identedit-<tag>-x86_64-unknown-linux-gnu.tar.gz`
+   - `identedit-<tag>-aarch64-unknown-linux-gnu.tar.gz`
+   - `identedit-<tag>-x86_64-apple-darwin.tar.gz`
+   - `identedit-<tag>-aarch64-apple-darwin.tar.gz`
+3. Extract and place `identedit` on your `PATH`.
+
+### From source
 
 ```bash
 cargo install --path .
@@ -78,6 +93,9 @@ identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + 
 
 # Update a config key
 identedit patch config.yaml --config-path server.port --set-value 8080
+
+# Append to an array-valued config path
+identedit patch config.json --config-path items --append-value 4
 ```
 
 ### Multi-file atomic edit
@@ -121,7 +139,7 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 
 1. If `patch` fails with `precondition_failed` or `target_missing`: re-run `read`, rebuild request, retry once.
 2. If `ambiguous_target`: add `span_hint` from `read` output, retry once.
-3. Maximum 2 attempts per target. If the second attempt fails, fall back to `Edit`/`Write`.
+3. Maximum 2 attempts per target. If the second attempt fails, fall back to direct file editing.
 
 ## Docs
 
