@@ -26,7 +26,7 @@ fn write_json_file(value: &Value) -> tempfile::NamedTempFile {
 
 fn build_replace_changeset(file: &Path, identity: &str, replacement: &str) -> Value {
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -68,7 +68,6 @@ fn changeset_merge_combines_two_files_without_manual_stitching() {
     let file_b_json = write_json_file(&change_b);
 
     let output = run_identedit(&[
-        "changeset",
         "merge",
         file_a_json.path().to_str().expect("path should be utf-8"),
         file_b_json.path().to_str().expect("path should be utf-8"),
@@ -114,7 +113,6 @@ fn changeset_merge_allows_non_overlapping_operations_on_same_file() {
     let helper_json = write_json_file(&helper_change);
 
     let output = run_identedit(&[
-        "changeset",
         "merge",
         process_json.path().to_str().expect("path should be utf-8"),
         helper_json.path().to_str().expect("path should be utf-8"),
@@ -163,7 +161,6 @@ fn changeset_merge_rejects_conflicting_same_file_operations() {
     let change_two_json = write_json_file(&change_two);
 
     let output = run_identedit(&[
-        "changeset",
         "merge",
         change_one_json
             .path()
@@ -241,7 +238,6 @@ fn changeset_merge_rejects_move_with_content_edit_on_same_file() {
     let edit_json = write_json_file(&edit_change);
     let move_json = write_json_file(&move_change);
     let output = run_identedit(&[
-        "changeset",
         "merge",
         edit_json.path().to_str().expect("path should be utf-8"),
         move_json.path().to_str().expect("path should be utf-8"),

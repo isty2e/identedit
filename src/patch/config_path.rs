@@ -135,7 +135,11 @@ pub fn resolve_config_path_operation(
         match strict_resolved {
             Ok(resolved) => {
                 return build_resolved_patch_from_container_edit(
-                    file, &source, source_text, resolved, new_text,
+                    file,
+                    &source,
+                    source_text,
+                    resolved,
+                    new_text,
                 );
             }
             Err(error) if !is_missing_config_path_error(&error) => return Err(error),
@@ -225,9 +229,7 @@ fn resolve_config_path_set_with_create_missing(
     if matches!(request.format, ConfigFormat::Yaml) {
         validate_yaml_create_missing_safety(request.tree, request.source_text)?;
     }
-    if matches!(request.format, ConfigFormat::Toml)
-        && has_toml_comments(request.tree.root_node())
-    {
+    if matches!(request.format, ConfigFormat::Toml) && has_toml_comments(request.tree.root_node()) {
         return Err(IdenteditError::InvalidRequest {
             message: "Config path create-missing does not support TOML comments yet".to_string(),
         });
@@ -664,14 +666,14 @@ fn render_append_array_replacement(
     new_text: &str,
     raw_path: &str,
 ) -> Result<String, IdenteditError> {
-    let array_text = source_text.get(container_span.start..container_span.end).ok_or_else(|| {
-        IdenteditError::InvalidRequest {
+    let array_text = source_text
+        .get(container_span.start..container_span.end)
+        .ok_or_else(|| IdenteditError::InvalidRequest {
             message: format!(
                 "Invalid append span [{}, {}) while resolving config path '{raw_path}'",
                 container_span.start, container_span.end
             ),
-        }
-    })?;
+        })?;
 
     match container_kind {
         "array" | "flow_sequence" => {
@@ -836,13 +838,16 @@ fn validate_yaml_create_missing_safety(
     let document_count = count_nodes_by_kind(tree.root_node(), "document");
     if document_count > 1 {
         return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing does not support multiple YAML documents in one file".to_string(),
+            message:
+                "Config path create-missing does not support multiple YAML documents in one file"
+                    .to_string(),
         });
     }
 
     if has_yaml_anchor_or_alias(tree.root_node(), source_text) {
         return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing does not support YAML anchor/alias documents".to_string(),
+            message: "Config path create-missing does not support YAML anchor/alias documents"
+                .to_string(),
         });
     }
 
@@ -1022,17 +1027,16 @@ fn parse_tree_for_format(format: &ConfigFormat, source: &[u8]) -> Result<Tree, I
         })?;
 
     let parse_buffer;
-    let parse_source: &[u8] = if matches!(format, ConfigFormat::Toml)
-        && has_cr_only_newlines(source)
-    {
-        parse_buffer = source
-            .iter()
-            .map(|byte| if *byte == b'\r' { b'\n' } else { *byte })
-            .collect::<Vec<_>>();
-        &parse_buffer
-    } else {
-        source
-    };
+    let parse_source: &[u8] =
+        if matches!(format, ConfigFormat::Toml) && has_cr_only_newlines(source) {
+            parse_buffer = source
+                .iter()
+                .map(|byte| if *byte == b'\r' { b'\n' } else { *byte })
+                .collect::<Vec<_>>();
+            &parse_buffer
+        } else {
+            source
+        };
 
     let tree = parser
         .parse(parse_source, None)
@@ -1259,7 +1263,10 @@ fn resolve_json_path(
                         },
                         ConfigPathOperation::Append { .. } => {
                             if value_node.kind() != "array" {
-                                return Err(append_requires_array_error(raw_path, value_node.kind()));
+                                return Err(append_requires_array_error(
+                                    raw_path,
+                                    value_node.kind(),
+                                ));
                             }
                             ResolvedContainerEdit {
                                 container_span: span_from_node(value_node),
@@ -1401,7 +1408,10 @@ fn resolve_yaml_path(
                             if value_node.kind() != "block_sequence"
                                 && value_node.kind() != "flow_sequence"
                             {
-                                return Err(append_requires_array_error(raw_path, value_node.kind()));
+                                return Err(append_requires_array_error(
+                                    raw_path,
+                                    value_node.kind(),
+                                ));
                             }
                             ResolvedContainerEdit {
                                 container_span: span_from_node(value_node),
@@ -1573,7 +1583,11 @@ fn resolve_toml_path(
             if selected.set_kind != "array" {
                 return Err(append_requires_array_error(raw_path, &selected.set_kind));
             }
-            (selected.set_span, selected.set_kind.clone(), selected.set_span)
+            (
+                selected.set_span,
+                selected.set_kind.clone(),
+                selected.set_span,
+            )
         }
         ConfigPathOperation::Delete => (
             selected.container_span,

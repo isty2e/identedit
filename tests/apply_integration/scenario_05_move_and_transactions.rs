@@ -770,7 +770,7 @@ fn apply_json_mode_treats_env_token_file_path_as_literal() {
 fn apply_json_mode_rejects_non_apply_command() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "changeset": {
             "file": file_path.to_string_lossy().to_string(),
             "operations": []
@@ -1555,7 +1555,7 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
     );
 
     let transform_request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": source_file.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1584,7 +1584,7 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
     });
 
     let transform_output =
-        run_identedit_with_stdin(&["transform", "--json"], &transform_request.to_string());
+        run_identedit_with_stdin(&["edit", "--json"], &transform_request.to_string());
     assert!(
         transform_output.status.success(),
         "transform should build cross-file structural move changeset: {}",

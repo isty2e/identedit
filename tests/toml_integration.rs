@@ -39,14 +39,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -65,7 +63,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind(file: &Path, kind: &str) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -99,7 +98,8 @@ fn select_covers_toml_kinds_and_provider_routing() {
 
     let malformed = write_temp_source(".toml", "title = \"broken\"\n[server\nport = 8080\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "document",
@@ -125,7 +125,8 @@ fn select_covers_toml_kinds_and_provider_routing() {
 fn transform_replace_and_apply_support_toml_pair_rewrite() {
     let file_path = copy_fixture_to_temp("example.toml", ".toml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -149,7 +150,7 @@ fn transform_replace_and_apply_support_toml_pair_rewrite() {
 
     let replacement = "title = \"identedit-updated\"";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -197,7 +198,8 @@ fn stress_select_and_transform_cover_inline_tables_dotted_keys_and_array_tables(
     let file_path = copy_fixture_to_temp("stress_inline_table.toml", ".toml");
 
     let inline_table_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "inline_table",
@@ -220,7 +222,8 @@ fn stress_select_and_transform_cover_inline_tables_dotted_keys_and_array_tables(
     );
 
     let table_array_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "table_array_element",
@@ -243,7 +246,8 @@ fn stress_select_and_transform_cover_inline_tables_dotted_keys_and_array_tables(
     );
 
     let dotted_key_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "dotted_key",
@@ -266,7 +270,7 @@ fn stress_select_and_transform_cover_inline_tables_dotted_keys_and_array_tables(
         .expect("servers.alpha dotted_key should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         dotted_key_identity,
         "--replace",
@@ -298,7 +302,8 @@ fn stress_select_and_transform_cover_inline_tables_dotted_keys_and_array_tables(
 fn transform_reports_ambiguous_target_for_duplicate_toml_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_pairs.toml", ".toml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -333,7 +338,7 @@ fn transform_reports_ambiguous_target_for_duplicate_toml_pair_identity() {
         .expect("fixture should include duplicate identity for enabled pairs");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -354,7 +359,8 @@ fn transform_reports_ambiguous_target_for_duplicate_toml_pair_identity() {
 fn transform_json_span_hint_disambiguates_duplicate_toml_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_pairs.toml", ".toml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -382,7 +388,7 @@ fn transform_json_span_hint_disambiguates_duplicate_toml_pair_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -403,7 +409,7 @@ fn transform_json_span_hint_disambiguates_duplicate_toml_pair_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate TOML identity: {}",
@@ -428,7 +434,8 @@ fn transform_json_span_hint_disambiguates_duplicate_toml_pair_identity() {
 fn transform_json_duplicate_toml_identity_with_missed_span_hint_returns_ambiguous_target() {
     let file_path = copy_fixture_to_temp("duplicate_pairs.toml", ".toml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -450,7 +457,7 @@ fn transform_json_duplicate_toml_identity_with_missed_span_hint_returns_ambiguou
         .expect("expected duplicate enabled pair handle");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -468,7 +475,7 @@ fn transform_json_duplicate_toml_identity_with_missed_span_hint_returns_ambiguou
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate TOML targets"
@@ -490,7 +497,8 @@ fn select_handles_quoted_dotted_key_pair() {
     let source = "title = \"quoted\"\n\"servers.alpha\" = 1\n";
     let file_path = write_temp_source(".toml", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -519,7 +527,8 @@ fn select_handles_quoted_dotted_key_pair() {
 fn transform_reports_ambiguous_target_for_duplicate_toml_table_array_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_table_array_elements.toml", ".toml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -562,7 +571,7 @@ fn transform_reports_ambiguous_target_for_duplicate_toml_table_array_pair_identi
     );
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -583,7 +592,8 @@ fn transform_reports_ambiguous_target_for_duplicate_toml_table_array_pair_identi
 fn transform_json_span_hint_disambiguates_duplicate_toml_table_array_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_table_array_elements.toml", ".toml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "pair",
@@ -621,7 +631,7 @@ fn transform_json_span_hint_disambiguates_duplicate_toml_table_array_pair_identi
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -639,7 +649,7 @@ fn transform_json_span_hint_disambiguates_duplicate_toml_table_array_pair_identi
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate TOML pair identity: {}",
@@ -664,14 +674,16 @@ fn transform_json_span_hint_disambiguates_duplicate_toml_table_array_pair_identi
 fn select_duplicate_toml_table_array_elements_is_deterministic() {
     let file_path = fixture_path("duplicate_table_array_elements.toml");
     let output_a = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "table_array_element",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     let output_b = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "table_array_element",

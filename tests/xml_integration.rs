@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_contains_text(file: &Path, kind: &str, snippet: &str) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -142,7 +141,8 @@ fn select_reports_parse_failure_for_syntax_invalid_xml() {
         "<?xml version=\"1.0\"?><root><item><name>broken</name></root>",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -167,7 +167,8 @@ fn select_reports_parse_failure_for_syntax_invalid_xml() {
 fn transform_replace_and_apply_support_xml_element() {
     let file_path = copy_fixture_to_temp("example.xml", ".xml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -195,7 +196,7 @@ fn transform_replace_and_apply_support_xml_element() {
 
     let replacement = "<description><![CDATA[Agent <safe> updated]]></description>";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -226,7 +227,8 @@ fn transform_reports_ambiguous_target_for_duplicate_xml_element_identity() {
     let source = "<root><entry>same</entry><entry>same</entry></root>";
     let file_path = write_temp_source(".xml", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -260,7 +262,7 @@ fn transform_reports_ambiguous_target_for_duplicate_xml_element_identity() {
         .expect("fixture should include duplicate element identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -282,7 +284,8 @@ fn transform_json_span_hint_disambiguates_duplicate_xml_element_identity() {
     let source = "<root><entry>same</entry><entry>same</entry></root>";
     let file_path = write_temp_source(".xml", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -326,7 +329,7 @@ fn transform_json_span_hint_disambiguates_duplicate_xml_element_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -344,7 +347,7 @@ fn transform_json_span_hint_disambiguates_duplicate_xml_element_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate XML element identity: {}",
@@ -370,7 +373,8 @@ fn transform_json_duplicate_xml_identity_with_missed_span_hint_returns_ambiguous
     let source = "<root><entry>same</entry><entry>same</entry></root>";
     let file_path = write_temp_source(".xml", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -408,7 +412,7 @@ fn transform_json_duplicate_xml_identity_with_missed_span_hint_returns_ambiguous
         .expect("duplicate element handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -426,7 +430,7 @@ fn transform_json_duplicate_xml_identity_with_missed_span_hint_returns_ambiguous
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate XML targets"
@@ -441,7 +445,8 @@ fn transform_json_duplicate_xml_identity_with_missed_span_hint_returns_ambiguous
 fn apply_reports_stale_target_error_after_xml_source_mutation() {
     let file_path = copy_fixture_to_temp("example.xml", ".xml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "StyleSheetPI",
@@ -461,7 +466,7 @@ fn apply_reports_stale_target_error_after_xml_source_mutation() {
 
     let replacement = "<?xml-stylesheet type=\"text/xsl\" href=\"theme.xsl\"?>";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -502,7 +507,8 @@ fn select_ignores_empty_tag_tokens_inside_comments_and_cdata() {
     let source = "<root><!-- <ghost/> --><![CDATA[<ghost/>]]><real/></root>";
     let file_path = write_temp_source(".xml", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "EmptyElemTag",
@@ -533,7 +539,8 @@ fn transform_replace_and_apply_preserve_crlf_xml_source_segments() {
     let source = "<?xml version=\"1.0\"?>\r\n<root>\r\n  <value>old</value>\r\n</root>\r\n";
     let file_path = write_temp_source(".xml", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -561,7 +568,7 @@ fn transform_replace_and_apply_preserve_crlf_xml_source_segments() {
 
     let replacement = "<value>new</value>";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

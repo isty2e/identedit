@@ -8,7 +8,6 @@ use tempfile::tempdir;
 
 fn run_identedit(arguments: &[&str], kanna_home: &Path) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.env("IDENTEDIT_HOME", kanna_home);
     command.output().expect("failed to run identedit binary")
@@ -246,7 +245,8 @@ fn grammar_install_with_local_repo_enables_runtime_selection() {
 
     let select_output = run_identedit(
         &[
-            "select",
+            "read",
+            "--json",
             "--kind",
             "object",
             target_file.to_str().expect("path should be utf-8"),
@@ -351,7 +351,8 @@ fn corrupted_manifest_is_ignored_and_bundled_provider_still_works() {
 
     let select_output = run_identedit(
         &[
-            "select",
+            "read",
+            "--json",
             "--kind",
             "function_definition",
             target_file.to_str().expect("path should be utf-8"),
@@ -412,7 +413,8 @@ fn dynamic_provider_wins_over_json_provider_on_extension_collision() {
 
     let select_output = run_identedit(
         &[
-            "select",
+            "read",
+            "--json",
             "--kind",
             "object",
             target_file.to_str().expect("path should be utf-8"),
@@ -469,7 +471,8 @@ fn missing_dynamic_library_entry_in_manifest_is_ignored_at_runtime() {
 
     let select_output = run_identedit(
         &[
-            "select",
+            "read",
+            "--json",
             "--kind",
             "function_definition",
             target_file.to_str().expect("path should be utf-8"),

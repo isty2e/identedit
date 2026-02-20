@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn transform_json_mode_rejects_invalid_json_payload() {
-    let output = run_identedit_with_stdin(&["transform", "--json"], "{");
+    let output = run_identedit_with_stdin(&["edit", "--json"], "{");
     assert!(
         !output.status.success(),
         "transform should fail for malformed JSON payload"
@@ -16,11 +16,11 @@ fn transform_json_mode_rejects_invalid_json_payload() {
 #[test]
 fn transform_json_mode_rejects_missing_operations_field() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string()
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject missing operations field"
@@ -34,11 +34,11 @@ fn transform_json_mode_rejects_missing_operations_field() {
 #[test]
 fn transform_json_mode_rejects_missing_file_field() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject missing file field"
@@ -57,7 +57,7 @@ fn transform_json_mode_accepts_batch_files_shape() {
     let handle_b = select_first_handle(&file_b, "function_definition", Some("process_*"));
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "files": [
             {
                 "file": file_a.to_string_lossy().to_string(),
@@ -96,7 +96,7 @@ fn transform_json_mode_accepts_batch_files_shape() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "batch files transform should succeed: {}",
@@ -122,13 +122,13 @@ fn transform_json_mode_accepts_batch_files_shape() {
 #[test]
 fn transform_json_mode_rejects_ambiguous_single_and_batch_shapes() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [],
         "files": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject ambiguous payload containing both 'file' and 'files'"
@@ -151,7 +151,7 @@ fn transform_json_mode_rejects_batch_request_with_top_level_handle_table() {
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let old_text = handle["text"].as_str().expect("text should be string");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "handle_table": {
             "h1": {
                 "identity": handle["identity"],
@@ -168,7 +168,7 @@ fn transform_json_mode_rejects_batch_request_with_top_level_handle_table() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "batch transform should reject top-level handle_table namespace"
@@ -191,7 +191,7 @@ fn transform_json_mode_rejects_batch_request_with_top_level_handle_table() {
 fn transform_json_mode_rejects_handle_ref_without_handle_table() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -204,7 +204,7 @@ fn transform_json_mode_rejects_handle_ref_without_handle_table() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject handle_ref targets without handle_table"
@@ -227,7 +227,7 @@ fn transform_json_mode_rejects_unknown_handle_ref() {
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let old_text = handle["text"].as_str().expect("text should be string");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "handle_table": {
             "known": {
@@ -248,7 +248,7 @@ fn transform_json_mode_rejects_unknown_handle_ref() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject unknown handle_ref keys"
@@ -268,11 +268,11 @@ fn transform_json_mode_rejects_unknown_handle_ref() {
 #[test]
 fn transform_json_mode_rejects_empty_batch_files_array() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "files": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject empty batch files array"
@@ -292,13 +292,13 @@ fn transform_json_mode_rejects_empty_batch_files_array() {
 #[test]
 fn transform_json_mode_rejects_unknown_top_level_field() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [],
         "unexpected": true
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject unknown top-level fields"
@@ -318,14 +318,14 @@ fn transform_json_mode_rejects_unknown_top_level_field() {
 #[test]
 fn transform_json_mode_rejects_operations_object_type() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": {
             "identity": "nope"
         }
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject non-array operations payload"
@@ -344,7 +344,7 @@ fn transform_json_mode_rejects_unknown_operation_field() {
         Some("process_*"),
     );
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -362,7 +362,7 @@ fn transform_json_mode_rejects_unknown_operation_field() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject unknown operation fields"
@@ -382,7 +382,7 @@ fn transform_json_mode_rejects_unknown_operation_field() {
 #[test]
 fn transform_json_mode_rejects_missing_operation_identity_field() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -396,7 +396,7 @@ fn transform_json_mode_rejects_missing_operation_identity_field() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject operations missing identity fields"
@@ -416,7 +416,7 @@ fn transform_json_mode_rejects_missing_operation_identity_field() {
 #[test]
 fn transform_json_mode_rejects_unsupported_operation_type() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -430,7 +430,7 @@ fn transform_json_mode_rejects_unsupported_operation_type() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject unsupported op.type"
@@ -449,7 +449,7 @@ fn transform_json_mode_rejects_unknown_replace_payload_field() {
         Some("process_*"),
     );
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -467,7 +467,7 @@ fn transform_json_mode_rejects_unknown_replace_payload_field() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject unknown replace payload fields"
@@ -492,7 +492,7 @@ fn transform_json_mode_rejects_operation_expected_old_hash_number_type() {
         Some("process_*"),
     );
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -511,7 +511,7 @@ fn transform_json_mode_rejects_operation_expected_old_hash_number_type() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject numeric expected_old_hash"
@@ -525,12 +525,12 @@ fn transform_json_mode_rejects_operation_expected_old_hash_number_type() {
 #[test]
 fn transform_json_mode_rejects_operations_null_type() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": Value::Null
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject null operations payload"
@@ -546,29 +546,29 @@ fn transform_json_mode_rejects_non_object_operation_entries() {
     let file = fixture_path("example.py").to_string_lossy().to_string();
     let payloads = [
         json!({
-            "command": "transform",
+            "command": "edit",
             "file": file,
             "operations": [Value::Null]
         }),
         json!({
-            "command": "transform",
+            "command": "edit",
             "file": file,
             "operations": [123]
         }),
         json!({
-            "command": "transform",
+            "command": "edit",
             "file": file,
             "operations": ["not-an-object"]
         }),
         json!({
-            "command": "transform",
+            "command": "edit",
             "file": file,
             "operations": [true]
         }),
     ];
 
     for payload in payloads {
-        let output = run_identedit_with_stdin(&["transform", "--json"], &payload.to_string());
+        let output = run_identedit_with_stdin(&["edit", "--json"], &payload.to_string());
         assert!(
             !output.status.success(),
             "transform should reject non-object entries inside operations array: {payload}"
@@ -595,7 +595,7 @@ fn transform_json_mode_rejects_non_transform_command() {
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject command mismatch in JSON mode"
@@ -619,7 +619,7 @@ fn transform_json_mode_rejects_missing_command_field() {
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject missing command field in JSON mode"
@@ -644,7 +644,7 @@ fn transform_json_mode_rejects_command_with_trailing_whitespace() {
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject trailing-whitespace command token"
@@ -663,7 +663,7 @@ fn transform_json_mode_rejects_uppercase_command_token() {
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject uppercase command token"
@@ -677,7 +677,7 @@ fn transform_json_mode_rejects_uppercase_command_token() {
 #[test]
 fn transform_json_mode_rejects_missing_operation_kind_field() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -690,7 +690,7 @@ fn transform_json_mode_rejects_missing_operation_kind_field() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject operation missing kind field"
@@ -710,7 +710,7 @@ fn transform_json_mode_rejects_missing_operation_kind_field() {
 #[test]
 fn transform_json_mode_rejects_operation_op_missing_type_tag() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -722,7 +722,7 @@ fn transform_json_mode_rejects_operation_op_missing_type_tag() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject operation payload missing tagged op.type"
@@ -742,7 +742,7 @@ fn transform_json_mode_rejects_operation_op_missing_type_tag() {
 #[test]
 fn transform_json_mode_rejects_replace_op_missing_new_text() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": [
             {
@@ -756,7 +756,7 @@ fn transform_json_mode_rejects_replace_op_missing_new_text() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject replace payload missing new_text"
@@ -778,7 +778,7 @@ fn transform_json_mode_returns_precondition_failed_when_hash_mismatches() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -797,7 +797,7 @@ fn transform_json_mode_returns_precondition_failed_when_hash_mismatches() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail for hash mismatch"
@@ -829,7 +829,7 @@ fn transform_json_mode_treats_canonically_equivalent_unicode_reorder_as_stale() 
     fs::write(&file_path, mutated_source).expect("fixture mutation should succeed");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -848,7 +848,7 @@ fn transform_json_mode_treats_canonically_equivalent_unicode_reorder_as_stale() 
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail for canonically equivalent but byte-different source"
@@ -870,7 +870,7 @@ fn transform_json_mode_returns_target_missing_when_kind_mismatches() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -891,7 +891,7 @@ fn transform_json_mode_returns_target_missing_when_kind_mismatches() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail when kind guard does not match"
@@ -918,7 +918,7 @@ fn transform_json_mode_returns_target_missing_for_json_kind_mismatch_with_stale_
     fs::write(&file_path, mutated).expect("fixture mutation should succeed");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -939,7 +939,7 @@ fn transform_json_mode_returns_target_missing_for_json_kind_mismatch_with_stale_
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail when stale span_hint resolves only wrong kinds"
@@ -955,7 +955,7 @@ fn transform_json_mode_rejects_span_hint_with_start_greater_than_end() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -976,7 +976,7 @@ fn transform_json_mode_rejects_span_hint_with_start_greater_than_end() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject invalid span_hint boundaries"
@@ -999,7 +999,7 @@ fn transform_json_mode_rejects_zero_length_span_hint() {
     let handle = select_first_handle(&fixture, "function_definition", Some("duplicate"));
     let start = handle["span"]["start"].as_u64().expect("span start");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1020,7 +1020,7 @@ fn transform_json_mode_rejects_zero_length_span_hint() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject zero-length span_hint"
@@ -1042,7 +1042,7 @@ fn transform_json_mode_accepts_extreme_span_values_when_target_is_unique() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1063,7 +1063,7 @@ fn transform_json_mode_accepts_extreme_span_values_when_target_is_unique() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should accept extreme span_hint values when kind/hash resolves uniquely: {}",
@@ -1088,7 +1088,7 @@ fn transform_json_mode_accepts_non_matching_span_hint_for_unique_target() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1109,7 +1109,7 @@ fn transform_json_mode_accepts_non_matching_span_hint_for_unique_target() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should accept non-matching span_hint when target remains uniquely resolvable: {}",

@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -126,7 +125,8 @@ fn select_supports_case_insensitive_java_extension() {
 fn transform_replace_and_apply_support_java_method_declaration() {
     let file_path = copy_fixture_to_temp("example.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -149,7 +149,7 @@ fn transform_replace_and_apply_support_java_method_declaration() {
 
     let replacement = "public int processData(int value) {\n        return value + 2;\n    }";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -194,7 +194,8 @@ fn select_reports_parse_failure_for_syntax_invalid_java() {
         "public class Broken {\n    public void run() {\n        System.out.println(\"x\")\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -218,7 +219,8 @@ fn select_reports_parse_failure_for_syntax_invalid_java() {
 fn transform_reports_ambiguous_target_for_duplicate_java_method_identity() {
     let file_path = copy_fixture_to_temp("duplicate_methods.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -252,7 +254,7 @@ fn transform_reports_ambiguous_target_for_duplicate_java_method_identity() {
         .expect("fixture should include duplicate configure method identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -273,7 +275,8 @@ fn transform_reports_ambiguous_target_for_duplicate_java_method_identity() {
 fn transform_json_span_hint_disambiguates_duplicate_java_method_identity() {
     let file_path = copy_fixture_to_temp("duplicate_methods.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -300,7 +303,7 @@ fn transform_json_span_hint_disambiguates_duplicate_java_method_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -318,7 +321,7 @@ fn transform_json_span_hint_disambiguates_duplicate_java_method_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate Java method identity: {}",
@@ -349,7 +352,8 @@ fn transform_json_span_hint_disambiguates_duplicate_java_method_identity() {
 fn transform_json_duplicate_java_identity_with_missed_span_hint_returns_ambiguous_target() {
     let file_path = copy_fixture_to_temp("duplicate_methods.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -370,7 +374,7 @@ fn transform_json_duplicate_java_identity_with_missed_span_hint_returns_ambiguou
         .expect("configure handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -388,7 +392,7 @@ fn transform_json_duplicate_java_identity_with_missed_span_hint_returns_ambiguou
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate Java methods"
@@ -403,7 +407,8 @@ fn transform_json_duplicate_java_identity_with_missed_span_hint_returns_ambiguou
 fn transform_json_rejects_zero_length_span_hint_for_java() {
     let file_path = copy_fixture_to_temp("example.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -426,7 +431,7 @@ fn transform_json_rejects_zero_length_span_hint_for_java() {
         .as_u64()
         .expect("span.start should be a number");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -444,7 +449,7 @@ fn transform_json_rejects_zero_length_span_hint_for_java() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should reject zero-length Java span_hint"
@@ -463,7 +468,8 @@ fn transform_json_rejects_zero_length_span_hint_for_java() {
 fn transform_json_accepts_non_matching_span_hint_for_unique_java_target() {
     let file_path = copy_fixture_to_temp("example.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -489,7 +495,7 @@ fn transform_json_accepts_non_matching_span_hint_for_unique_java_target() {
         .as_u64()
         .expect("span.end should be a number");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -507,7 +513,7 @@ fn transform_json_accepts_non_matching_span_hint_for_unique_java_target() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should accept non-matching span_hint when target remains uniquely resolvable: {}",
@@ -532,7 +538,8 @@ fn transform_json_accepts_non_matching_span_hint_for_unique_java_target() {
 fn apply_reports_precondition_failed_after_java_source_mutation() {
     let file_path = copy_fixture_to_temp("example.java", ".java");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -554,7 +561,7 @@ fn apply_reports_precondition_failed_after_java_source_mutation() {
         .expect("processData identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -592,7 +599,8 @@ fn apply_reports_precondition_failed_after_java_source_mutation() {
 fn select_reports_parse_failure_for_nul_in_java_source() {
     let file_path = write_temp_bytes(".java", b"class Broken {\0}\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -615,7 +623,7 @@ fn select_reports_parse_failure_for_nul_in_java_source() {
 fn transform_reports_parse_failure_for_nul_in_java_source() {
     let file_path = write_temp_bytes(".java", b"class Broken {\0}\n");
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "deadbeef",
         "--replace",
@@ -683,7 +691,8 @@ fn select_supports_utf8_bom_prefixed_java_files() {
     let source = b"\xEF\xBB\xBFclass BomClass {\n    void run() {}\n}\n";
     let file_path = write_temp_bytes(".java", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -709,7 +718,8 @@ fn transform_replace_and_apply_support_crlf_java_source() {
     let source = "class CrlfClass {\r\n    int run(int value) {\r\n        return value + 1;\r\n    }\r\n}\r\n";
     let file_path = write_temp_source(".java", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -732,7 +742,7 @@ fn transform_replace_and_apply_support_crlf_java_source() {
 
     let replacement = "int run(int value) {\r\n        return value + 2;\r\n    }";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

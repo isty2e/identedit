@@ -272,10 +272,10 @@ fn select_input_from_stdin(verbose: bool) -> Result<SelectInput, IdenteditError>
     let request: StdinSelectRequest = serde_json::from_str(&request_body)
         .map_err(|error| IdenteditError::InvalidJsonRequest { source: error })?;
 
-    if request.command != "select" {
+    if request.command != "select" && request.command != "read" {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
-                "Unsupported command '{}' in stdin JSON mode; expected 'select'",
+                "Unsupported command '{}' in stdin JSON mode; expected 'select' or 'read'",
                 request.command
             ),
         });

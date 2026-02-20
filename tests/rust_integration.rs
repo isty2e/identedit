@@ -28,14 +28,12 @@ fn copy_fixture_to_temp(name: &str, suffix: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -54,7 +52,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -97,7 +96,8 @@ fn select_covers_rust_kinds_and_provider() {
 fn transform_replace_and_apply_support_rust_function_item() {
     let file_path = copy_fixture_to_temp("example.rs", ".rs");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_item",
         "--name",
@@ -118,7 +118,7 @@ fn transform_replace_and_apply_support_rust_function_item() {
 
     let replacement = "pub fn process_data(value: i32) -> i32 {\n    value - 1\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -164,7 +164,8 @@ fn transform_replace_and_apply_support_rust_function_item() {
 fn select_transform_apply_pipeline_supports_rust_enum_rewrite() {
     let file_path = copy_fixture_to_temp("example.rs", ".rs");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "enum_item",
         "--name",
@@ -185,7 +186,7 @@ fn select_transform_apply_pipeline_supports_rust_enum_rewrite() {
 
     let replacement = "pub enum Mode {\n    Fast,\n    Slow,\n    Turbo,\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

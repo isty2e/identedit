@@ -1,7 +1,6 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use identedit::cli::hashline::HashlineCommandOutput;
 use identedit::cli::read::ReadCommandOutput;
 use identedit::cli::{Cli, Commands};
 use identedit::error::IdenteditError;
@@ -59,66 +58,5 @@ fn run() -> Result<String, IdenteditError> {
             serde_json::to_string_pretty(&response)
                 .map_err(|source| IdenteditError::ResponseSerialization { source })
         }
-        Commands::LegacySelect(args) => {
-            if !legacy_commands_allowed() {
-                return Err(legacy_command_removed_error("select"));
-            }
-            let response = identedit::cli::select::run_select(args)?;
-            serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source })
-        }
-        Commands::LegacyTransform(args) => {
-            if !legacy_commands_allowed() {
-                return Err(legacy_command_removed_error("transform"));
-            }
-            let response = identedit::cli::transform::run_transform(args)?;
-            serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source })
-        }
-        Commands::LegacyChangeset(args) => {
-            if !legacy_commands_allowed() {
-                return Err(legacy_command_removed_error("changeset"));
-            }
-            let response = identedit::cli::changeset::run_changeset(args)?;
-            serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source })
-        }
-        Commands::LegacyHashline(args) => {
-            if !legacy_commands_allowed() {
-                return Err(legacy_command_removed_error("hashline"));
-            }
-            match identedit::cli::hashline::run_hashline(*args)? {
-                HashlineCommandOutput::Text(output) => Ok(output),
-                HashlineCommandOutput::Json(response) => serde_json::to_string_pretty(&response)
-                    .map_err(|source| IdenteditError::ResponseSerialization { source }),
-            }
-        }
-    }
-}
-
-fn legacy_commands_allowed() -> bool {
-    std::env::var("IDENTEDIT_ALLOW_LEGACY").ok().as_deref() == Some("1")
-}
-
-fn legacy_command_removed_error(command: &str) -> IdenteditError {
-    let guidance = match command {
-        "select" => {
-            "Use 'identedit read --mode ast ...' for structural handles, or 'identedit read --mode line ...' for line anchors."
-        }
-        "transform" => {
-            "Use 'identedit edit ...' (flag mode) or 'identedit edit --json' (request mode)."
-        }
-        "changeset" => "Use 'identedit merge <plan1.json> <plan2.json> ...'.",
-        "hashline" => {
-            "Use 'identedit read --mode line', 'identedit patch --at <line:hash> ...', or 'identedit apply --repair'."
-        }
-        _ => "Use canonical commands: read, edit, apply, patch, merge, grammar.",
-    };
-
-    IdenteditError::InvalidRequest {
-        message: format!(
-            "Legacy command '{}' has been removed from the canonical CLI surface. {} Set IDENTEDIT_ALLOW_LEGACY=1 only for transitional test flows.",
-            command, guidance
-        ),
     }
 }

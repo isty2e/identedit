@@ -19,14 +19,12 @@ fn write_temp_tsx(source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -50,8 +48,24 @@ fn tsx_generic_and_jsx_mixture_select_is_deterministic() {
     );
     let path = file_path.to_str().expect("path should be utf-8");
 
-    let first = run_identedit(&["select", "--kind", "arrow_function", path]);
-    let second = run_identedit(&["select", "--kind", "arrow_function", path]);
+    let first = run_identedit(&[
+        "read",
+        "--json",
+        "--mode",
+        "ast",
+        "--kind",
+        "arrow_function",
+        path,
+    ]);
+    let second = run_identedit(&[
+        "read",
+        "--json",
+        "--mode",
+        "ast",
+        "--kind",
+        "arrow_function",
+        path,
+    ]);
     assert!(
         first.status.success(),
         "first select failed: {}",
@@ -73,7 +87,8 @@ fn tsx_generic_and_jsx_mixture_select_is_deterministic() {
     );
 
     let function_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -104,7 +119,8 @@ fn tsx_generic_function_can_be_transformed_and_applied_without_parser_drift() {
     let path = file_path.to_str().expect("path should be utf-8");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -124,7 +140,7 @@ fn tsx_generic_function_can_be_transformed_and_applied_without_parser_drift() {
 
     let replacement = "export function View<T extends { id: number }>(props: T): JSX.Element {\n  return <article>{identity<Box<number>>({ value: props.id }).value}</article>;\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

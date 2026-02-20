@@ -15,8 +15,7 @@ fn fixture_path(name: &str) -> PathBuf {
 
 fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -28,8 +27,7 @@ fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
 
 fn run_select_json(arguments: &[&str], payload: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
     for argument in arguments {
         command.arg(argument);
     }
@@ -138,7 +136,7 @@ fn select_verbose_includes_handle_text_field() {
 fn select_json_mode_verbose_includes_handle_text_field() {
     let fixture = fixture_path("example.json");
     let payload = serde_json::json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "object",

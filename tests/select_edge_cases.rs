@@ -15,8 +15,7 @@ fn fixture_path(name: &str) -> PathBuf {
 
 fn run_select(arguments: &[&str], file: Option<&PathBuf>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -31,8 +30,7 @@ fn run_select(arguments: &[&str], file: Option<&PathBuf>) -> Output {
 
 fn run_select_with_files(arguments: &[&str], files: &[&Path]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -51,8 +49,12 @@ fn run_select_json_mode(request_json: &str) -> Output {
 
 fn run_select_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select").arg("--json");
+    command
+        .arg("read")
+        .arg("--mode")
+        .arg("ast")
+        .arg("--json")
+        .arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -79,7 +81,6 @@ fn run_shell_script(script: &str, root: &Path) -> Output {
         .arg("-c")
         .arg(script)
         .env("IDENTEDIT_BIN", env!("CARGO_BIN_EXE_identedit"))
-        .env("IDENTEDIT_ALLOW_LEGACY", "1")
         .env("IDENTEDIT_ROOT", root)
         .output()
         .expect("failed to run shell command")
@@ -89,7 +90,7 @@ fn run_shell_script(script: &str, root: &Path) -> Output {
 fn accepts_valid_json_request_for_python_selection() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -212,7 +213,7 @@ fn json_mode_supports_files_array_and_returns_flat_handles() {
     let python_fixture = fixture_path("example.py");
     let json_fixture = fixture_path("example.json");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             python_fixture.to_string_lossy().to_string(),
             json_fixture.to_string_lossy().to_string()
@@ -247,7 +248,7 @@ fn json_mode_response_includes_file_preconditions_for_all_scanned_files() {
     let python_fixture = fixture_path("example.py");
     let json_fixture = fixture_path("example.json");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             python_fixture.to_string_lossy().to_string(),
             json_fixture.to_string_lossy().to_string()
@@ -309,7 +310,7 @@ fn json_mode_response_includes_file_preconditions_for_all_scanned_files() {
 fn json_mode_rejects_mixed_file_and_files_fields() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "files": [fixture.to_string_lossy().to_string()],
         "selector": {
@@ -337,7 +338,7 @@ fn json_mode_rejects_mixed_file_and_files_fields() {
 #[test]
 fn json_mode_rejects_empty_files_array() {
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [],
         "selector": {
             "kind": "function_definition",
@@ -365,7 +366,7 @@ fn json_mode_rejects_empty_files_array() {
 fn json_mode_rejects_positional_file_arguments() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -396,7 +397,7 @@ fn json_mode_rejects_positional_file_arguments() {
 fn json_mode_rejects_kind_flag_argument() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -426,7 +427,7 @@ fn json_mode_rejects_kind_flag_argument() {
 fn json_mode_rejects_name_and_exclude_kind_flag_arguments() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -508,7 +509,7 @@ fn json_mode_rejects_duplicate_file_entries_by_canonical_path() {
         .join(canonical_path.file_name().expect("file name should exist"));
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             canonical_path.to_string_lossy().to_string(),
             alias_path.to_string_lossy().to_string()
@@ -578,7 +579,7 @@ fn json_mode_rejects_duplicate_file_entries_for_hardlink_alias() {
     fs::hard_link(&canonical_path, &hardlink_path).expect("hardlink should be created");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             canonical_path.to_string_lossy().to_string(),
             hardlink_path.to_string_lossy().to_string()
@@ -660,7 +661,7 @@ fn json_mode_rejects_non_adjacent_hardlink_duplicates_with_middle_file() {
     fs::hard_link(&canonical_path, &hardlink_path).expect("hardlink should be created");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             canonical_path.to_string_lossy().to_string(),
             middle_path.to_string_lossy().to_string(),
@@ -752,7 +753,7 @@ fn json_mode_rejects_three_hardlink_aliases_with_middle_file() {
     fs::hard_link(&canonical_path, &hardlink_z).expect("hardlink_z should be created");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             hardlink_z.to_string_lossy().to_string(),
             middle_path.to_string_lossy().to_string(),
@@ -857,7 +858,7 @@ fn json_mode_file_preconditions_follow_input_order_for_multi_file_success() {
     fs::write(&file_b, "def b_target():\n    return 2\n").expect("file_b write should succeed");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             file_c.to_string_lossy().to_string(),
             file_a.to_string_lossy().to_string(),
@@ -964,7 +965,7 @@ fn json_mode_multi_file_failure_follows_input_order_without_partial_handles() {
     let missing_python = workspace.path().join("missing.py");
 
     let io_first_request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             missing_python.to_string_lossy().to_string(),
             invalid_python.to_string_lossy().to_string()
@@ -989,7 +990,7 @@ fn json_mode_multi_file_failure_follows_input_order_without_partial_handles() {
     );
 
     let parse_first_request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             invalid_python.to_string_lossy().to_string(),
             missing_python.to_string_lossy().to_string()
@@ -1018,7 +1019,7 @@ fn json_mode_multi_file_failure_follows_input_order_without_partial_handles() {
 fn accepts_valid_json_request_for_json_selection() {
     let fixture = fixture_path("example.json");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "key",
@@ -1051,7 +1052,7 @@ fn accepts_valid_json_request_for_json_selection() {
 fn json_mode_python_selector_with_no_matches_returns_success_and_empty_handles() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -1077,7 +1078,7 @@ fn json_mode_python_selector_with_no_matches_returns_success_and_empty_handles()
 fn json_mode_json_selector_with_no_matches_returns_success_and_empty_handles() {
     let fixture = fixture_path("example.json");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "key",
@@ -1201,15 +1202,18 @@ fn returns_error_when_kind_flag_is_missing() {
     let fixture = fixture_path("example.py");
     let output = run_select(&[], Some(&fixture));
 
-    assert!(!output.status.success(), "missing --kind should fail");
+    assert!(
+        output.status.success(),
+        "missing --kind should still succeed with unconstrained read: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let response: Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
     assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("--kind is required")),
-        "expected missing kind message"
+        response["summary"]["matches"]
+            .as_u64()
+            .is_some_and(|matches| matches > 0),
+        "unconstrained read should return at least one AST handle"
     );
 }
 
@@ -1231,7 +1235,7 @@ fn returns_error_for_invalid_selector_glob_in_flag_mode() {
 fn returns_error_for_invalid_selector_glob_in_json_mode() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -1255,7 +1259,7 @@ fn returns_error_for_invalid_selector_glob_in_json_mode() {
 fn returns_error_for_whitespace_only_kind_in_json_mode() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "   ",
@@ -1295,7 +1299,7 @@ fn returns_error_for_invalid_json_payload_in_json_mode() {
 fn returns_error_when_selector_is_missing_in_json_mode() {
     let output = run_select_json_mode(
         r#"{
-  "command": "select",
+  "command": "read",
   "file": "tests/fixtures/example.py"
 }"#,
     );
@@ -1313,7 +1317,7 @@ fn returns_error_when_selector_is_missing_in_json_mode() {
 fn returns_error_when_file_is_missing_in_json_mode() {
     let output = run_select_json_mode(
         r#"{
-  "command": "select",
+  "command": "read",
   "selector": {
     "kind": "function_definition",
     "name_pattern": null,
@@ -1332,7 +1336,7 @@ fn returns_error_when_file_is_missing_in_json_mode() {
 fn returns_error_when_json_request_has_unknown_top_level_field() {
     let output = run_select_json_mode(
         r#"{
-  "command": "select",
+  "command": "read",
   "file": "tests/fixtures/example.py",
   "selector": {
     "kind": "function_definition",
@@ -1362,7 +1366,7 @@ fn returns_error_when_json_request_has_unknown_top_level_field() {
 fn returns_error_when_selector_has_unknown_field_in_json_mode() {
     let output = run_select_json_mode(
         r#"{
-  "command": "select",
+  "command": "read",
   "file": "tests/fixtures/example.py",
   "selector": {
     "kind": "function_definition",
@@ -1391,7 +1395,7 @@ fn returns_error_when_selector_has_unknown_field_in_json_mode() {
 #[test]
 fn json_mode_treats_env_token_in_file_path_as_literal_string() {
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": format!("${{IDENTEDIT_SELECT_JSON_PATH_{}}}/example.py", std::process::id()),
         "selector": {
             "kind": "function_definition",
@@ -1415,7 +1419,7 @@ fn json_mode_treats_env_token_in_file_path_as_literal_string() {
 fn returns_error_when_selector_exclude_kinds_has_wrong_type_in_json_mode() {
     let output = run_select_json_mode(
         r#"{
-  "command": "select",
+  "command": "read",
   "file": "tests/fixtures/example.py",
   "selector": {
     "kind": "function_definition",
@@ -1438,7 +1442,7 @@ fn returns_error_when_selector_exclude_kinds_has_wrong_type_in_json_mode() {
 fn returns_error_when_selector_kind_has_wrong_type_in_json_mode() {
     let output = run_select_json_mode(
         r#"{
-  "command": "select",
+  "command": "read",
   "file": "tests/fixtures/example.py",
   "selector": {
     "kind": 123,
@@ -1493,7 +1497,7 @@ fn supports_shell_variable_expanded_path_in_flag_mode() {
     fs::write(&file_path, source).expect("fixture write should succeed");
 
     let output = run_shell_script(
-        "\"$IDENTEDIT_BIN\" select --kind function_definition \"${IDENTEDIT_ROOT}/example.py\"",
+        "\"$IDENTEDIT_BIN\" read --mode ast --json --kind function_definition \"${IDENTEDIT_ROOT}/example.py\"",
         workspace.path(),
     );
     assert!(
@@ -1516,7 +1520,7 @@ fn single_quoted_env_token_path_remains_literal_in_flag_mode() {
     fs::write(&file_path, source).expect("fixture write should succeed");
 
     let output = run_shell_script(
-        "\"$IDENTEDIT_BIN\" select --kind function_definition '${IDENTEDIT_ROOT}/example.py'",
+        "\"$IDENTEDIT_BIN\" read --mode ast --json --kind function_definition '${IDENTEDIT_ROOT}/example.py'",
         workspace.path(),
     );
     assert!(
@@ -2061,8 +2065,7 @@ fn non_utf8_path_argument_returns_io_error_without_panicking() {
     use std::os::unix::ffi::OsStringExt;
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
     command.arg("--kind");
     command.arg("function_definition");
     command.arg(OsString::from_vec(vec![0xFF, 0x2E, 0x70, 0x79]));

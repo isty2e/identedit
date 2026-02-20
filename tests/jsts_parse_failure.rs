@@ -55,14 +55,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -105,7 +103,8 @@ fn select_reports_parse_failure_for_syntax_invalid_jsts_variants() {
     for case in invalid_syntax_cases() {
         let file_path = write_temp_source(case.suffix, case.source);
         let output = run_identedit(&[
-            "select",
+            "read",
+            "--json",
             "--kind",
             "function_declaration",
             file_path.to_str().expect("path should be utf-8"),
@@ -121,7 +120,7 @@ fn transform_reports_parse_failure_for_syntax_invalid_jsts_variants() {
     for case in invalid_syntax_cases() {
         let file_path = write_temp_source(case.suffix, case.source);
         let output = run_identedit(&[
-            "transform",
+            "edit",
             "--identity",
             "deadbeef",
             "--replace",

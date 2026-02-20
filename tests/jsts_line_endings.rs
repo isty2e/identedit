@@ -23,14 +23,12 @@ fn write_temp_text(suffix: &str, text: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -54,7 +52,8 @@ fn select_span_starts_after_utf8_bom_for_javascript_function() {
     let file_path = write_temp_bytes(".js", &bytes);
 
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -86,7 +85,8 @@ fn transform_apply_preserves_crlf_segments_for_typescript() {
     let path = file_path.to_str().expect("path should be utf-8");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -106,7 +106,7 @@ fn transform_apply_preserves_crlf_segments_for_typescript() {
 
     let replacement = "function processData(value: number): number {\r\n  return value - 1;\r\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -146,7 +146,8 @@ fn transform_apply_preserves_cr_only_segments_for_tsx() {
     let path = file_path.to_str().expect("path should be utf-8");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -166,7 +167,7 @@ fn transform_apply_preserves_cr_only_segments_for_tsx() {
 
     let replacement = "export function View(): JSX.Element {\r  return <main>Updated</main>;\r}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

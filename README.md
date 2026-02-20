@@ -37,7 +37,7 @@ identedit read --mode line example.py   # display LINE:HASH|content
 identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anchor "5:7f6e5d4c3b2a"
 ```
 
-Legacy aliases (`select`, `transform`, `hashline`, `changeset`) remain available for compatibility, but new workflows should use `read`, `edit`, `apply`, and `patch`.
+Use the canonical CLI entry points: `read`, `edit`, `apply`, `patch`, `merge`, `grammar`.
 
 ### Key Properties
 

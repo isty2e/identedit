@@ -18,7 +18,8 @@ fn select_mode_line_returns_line_handles_with_anchors() {
     let file_path = temp_file.keep().expect("temp file should persist").1;
 
     let output = common::run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--mode",
         "line",
         file_path.to_str().expect("path should be utf-8"),
@@ -47,7 +48,8 @@ fn select_mode_line_returns_line_handles_with_anchors() {
 fn select_mode_line_rejects_selector_flags() {
     let fixture = common::fixture_path("example.py");
     let output = common::run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--mode",
         "line",
         "--kind",
@@ -67,7 +69,8 @@ fn select_mode_line_rejects_selector_flags() {
 fn select_mode_ast_sets_node_target_type() {
     let fixture = common::fixture_path("example.py");
     let output = common::run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         fixture.to_str().expect("path should be utf-8"),
@@ -90,12 +93,12 @@ fn select_mode_ast_sets_node_target_type() {
 fn select_json_mode_rejects_mode_line() {
     let fixture = common::fixture_path("example.py");
     let request = serde_json::json!({
-      "command": "select",
+      "command": "read",
       "file": fixture.to_string_lossy().to_string(),
       "selector": { "kind": "function_definition" }
     });
     let output = common::run_identedit_with_stdin(
-        &["select", "--json", "--mode", "line"],
+        &["read", "--json", "--json", "--mode", "line"],
         &request.to_string(),
     );
     assert!(

@@ -461,7 +461,7 @@ fn apply_json_delete_changeset_second_apply_returns_target_missing() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--delete",
@@ -508,7 +508,7 @@ fn apply_json_replace_changeset_second_apply_returns_target_missing() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -553,7 +553,7 @@ fn apply_json_insert_before_changeset_second_apply_returns_span_hint_mismatch() 
     let handle = select_first_handle(&file_path, "key", Some("name"));
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -573,7 +573,7 @@ fn apply_json_insert_before_changeset_second_apply_returns_span_hint_mismatch() 
             }
         ]
     });
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform should succeed: {}",
@@ -1297,7 +1297,8 @@ fn apply_rejects_span_hint_with_start_greater_than_end() {
 fn apply_rejects_zero_length_span_hint() {
     let fixture = fixture_path("ambiguous.py");
     let handle_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",

@@ -42,14 +42,12 @@ fn copy_fixture_to_temp_json(name: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_in_dir(directory: &Path, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.current_dir(directory);
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
@@ -57,7 +55,6 @@ fn run_identedit_in_dir(directory: &Path, arguments: &[&str]) -> Output {
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +73,6 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn run_identedit_with_stdin_in_dir(directory: &Path, arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.current_dir(directory);
     command.args(arguments);
     command.stdin(Stdio::piped());
@@ -107,7 +103,8 @@ fn line_ref(source: &str, line: usize) -> String {
 
 fn select_function_handle_by_name(file_path: &Path, name: &str) -> Value {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -134,7 +131,8 @@ fn select_function_handle_by_name(file_path: &Path, name: &str) -> Value {
 fn select_transform_apply_pipeline_edits_file_end_to_end() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -156,7 +154,7 @@ fn select_transform_apply_pipeline_edits_file_end_to_end() {
 
     let replacement = "def process_data(value):\n    return value - 1";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -199,7 +197,8 @@ fn select_transform_apply_pipeline_edits_unknown_extension_via_fallback() {
     let file_path = temporary_file.keep().expect("temp file should persist").1;
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -221,7 +220,7 @@ fn select_transform_apply_pipeline_edits_unknown_extension_via_fallback() {
 
     let replacement = "def process_data(value):\n    return value - 3\n";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -264,7 +263,8 @@ fn select_transform_apply_pipeline_edits_fallback_js_unicode_escape_name() {
     let file_path = temporary_file.keep().expect("temp file should persist").1;
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -285,7 +285,7 @@ fn select_transform_apply_pipeline_edits_fallback_js_unicode_escape_name() {
 
     let replacement = "function \\u0066oo(value) {\n  return value - 2;\n}\n";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -332,7 +332,8 @@ fn select_transform_apply_pipeline_supports_relative_dot_segment_paths() {
     let select_output = run_identedit_in_dir(
         workspace.path(),
         &[
-            "select",
+            "read",
+            "--json",
             "--verbose",
             "--kind",
             "function_definition",
@@ -357,7 +358,7 @@ fn select_transform_apply_pipeline_supports_relative_dot_segment_paths() {
     let transform_output = run_identedit_in_dir(
         workspace.path(),
         &[
-            "transform",
+            "edit",
             "--identity",
             identity,
             "--replace",
@@ -401,7 +402,8 @@ fn transform_apply_pipeline_supports_mixed_node_and_line_targets() {
         .expect("helper return line should exist");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -419,7 +421,7 @@ fn transform_apply_pipeline_supports_mixed_node_and_line_targets() {
     let handle = &select_response["handles"][0];
 
     let transform_request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -447,7 +449,7 @@ fn transform_apply_pipeline_supports_mixed_node_and_line_targets() {
         ]
     });
     let transform_output =
-        run_identedit_with_stdin(&["transform", "--json"], &transform_request.to_string());
+        run_identedit_with_stdin(&["edit", "--json"], &transform_request.to_string());
     assert!(
         transform_output.status.success(),
         "transform with mixed targets failed: {}",
@@ -489,7 +491,8 @@ fn select_transform_apply_pipeline_supports_parent_segment_paths() {
     let select_output = run_identedit_in_dir(
         &nested,
         &[
-            "select",
+            "read",
+            "--json",
             "--verbose",
             "--kind",
             "function_definition",
@@ -514,7 +517,7 @@ fn select_transform_apply_pipeline_supports_parent_segment_paths() {
     let transform_output = run_identedit_in_dir(
         &nested,
         &[
-            "transform",
+            "edit",
             "--identity",
             identity,
             "--replace",
@@ -545,7 +548,8 @@ fn select_transform_apply_pipeline_supports_parent_segment_paths() {
 fn select_transform_apply_pipeline_supports_delete_operation() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -570,7 +574,7 @@ fn select_transform_apply_pipeline_supports_delete_operation() {
         .to_string();
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--delete",
@@ -606,7 +610,8 @@ fn select_transform_apply_pipeline_supports_delete_operation() {
 fn select_transform_apply_pipeline_supports_insert_before_and_after() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -632,7 +637,7 @@ fn select_transform_apply_pipeline_supports_insert_before_and_after() {
     let before_insert = "# e2e-before\n";
     let after_insert = "\n# e2e-after";
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -664,7 +669,7 @@ fn select_transform_apply_pipeline_supports_insert_before_and_after() {
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform failed: {}",
@@ -699,7 +704,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_before() {
     let destination_handle = select_function_handle_by_name(&file_path, "process_data");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -727,7 +732,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_before() {
             }
         ]
     });
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform same-file move_before failed: {}",
@@ -775,7 +780,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_after() {
     let destination_handle = select_function_handle_by_name(&file_path, "helper");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -803,7 +808,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_after() {
             }
         ]
     });
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform same-file move_after failed: {}",
@@ -855,7 +860,7 @@ fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
         select_function_handle_by_name(&destination_file, "destination_anchor");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": source_file.to_string_lossy().to_string(),
         "operations": [
             {
@@ -882,7 +887,7 @@ fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
             }
         ]
     });
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform cross-file move_to_before failed: {}",
@@ -939,7 +944,8 @@ fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
 fn select_transform_apply_pipeline_replaces_json_nested_object_without_side_effects() {
     let file_path = copy_fixture_to_temp_json("example.json");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "object",
@@ -962,7 +968,7 @@ fn select_transform_apply_pipeline_replaces_json_nested_object_without_side_effe
     let replacement =
         "{\n    \"enabled\": false,\n    \"retries\": 10,\n    \"mode\": \"safe\"\n  }";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -998,7 +1004,8 @@ fn select_transform_apply_pipeline_replaces_json_nested_object_without_side_effe
 fn select_transform_apply_pipeline_inserts_json_key_before_existing_key() {
     let file_path = copy_fixture_to_temp_json("example.json");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "key",
@@ -1022,7 +1029,7 @@ fn select_transform_apply_pipeline_inserts_json_key_before_existing_key() {
     let span_end = handle["span"]["end"].as_u64().expect("span end");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1038,7 +1045,7 @@ fn select_transform_apply_pipeline_inserts_json_key_before_existing_key() {
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform failed: {}",
@@ -1066,7 +1073,8 @@ fn select_transform_apply_pipeline_inserts_json_key_before_existing_key() {
 fn stale_json_delete_changeset_returns_precondition_failed_after_mutation() {
     let file_path = copy_fixture_to_temp_json("example.json");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "object",
@@ -1091,7 +1099,7 @@ fn stale_json_delete_changeset_returns_precondition_failed_after_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--delete",

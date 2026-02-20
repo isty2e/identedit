@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -13,12 +12,6 @@ fn run_identedit(args: &[&str]) -> std::process::Output {
 
 fn run_identedit_with_stdin(args: &[&str], input: &str) -> std::process::Output {
     common::run_identedit_with_stdin(args, input)
-}
-
-fn run_identedit_without_legacy_env(args: &[&str]) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.args(args);
-    command.output().expect("failed to run identedit binary")
 }
 
 fn copy_fixture_to_temp_python(name: &str) -> PathBuf {
@@ -66,7 +59,7 @@ fn top_level_help_exposes_new_command_surface() {
 }
 
 #[test]
-fn read_line_mode_matches_hashline_show_text_output() {
+fn read_line_mode_outputs_line_hash_anchors() {
     let file = copy_fixture_to_temp_python("example.py");
     let read_output = run_identedit(&[
         "read",
@@ -79,17 +72,9 @@ fn read_line_mode_matches_hashline_show_text_output() {
         "read --mode line should succeed: {}",
         String::from_utf8_lossy(&read_output.stderr)
     );
-    let hashline_output = run_identedit(&[
-        "hashline",
-        "show",
-        file.to_str().expect("path should be utf-8"),
-    ]);
-    assert!(
-        hashline_output.status.success(),
-        "legacy hashline show should succeed: {}",
-        String::from_utf8_lossy(&hashline_output.stderr)
-    );
-    assert_eq!(read_output.stdout, hashline_output.stdout);
+    let text = String::from_utf8(read_output.stdout).expect("stdout should be utf-8");
+    assert!(text.contains("1:"));
+    assert!(text.contains("|"));
 }
 
 #[test]
@@ -280,33 +265,20 @@ fn apply_repair_remaps_stale_line_anchors() {
 }
 
 #[test]
-fn legacy_commands_report_migration_diagnostics_without_compat_env() {
-    let output = run_identedit_without_legacy_env(&["transform", "--json"]);
+fn legacy_subcommands_are_no_longer_available() {
+    let output = run_identedit(&["transform", "--json"]);
     assert!(
         !output.status.success(),
-        "legacy transform command should fail without compat env"
+        "legacy transform command should fail"
     );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unrecognized subcommand 'transform'"));
 
-    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    let message = response["error"]["message"]
-        .as_str()
-        .expect("error message should be a string");
-    assert!(message.contains("Legacy command 'transform'"));
-    assert!(message.contains("identedit edit"));
-
-    let output =
-        run_identedit_without_legacy_env(&["hashline", "show", "tests/fixtures/example.py"]);
+    let output = run_identedit(&["hashline", "show", "tests/fixtures/example.py"]);
     assert!(
         !output.status.success(),
-        "legacy hashline command should fail without compat env"
+        "legacy hashline command should fail"
     );
-
-    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    let message = response["error"]["message"]
-        .as_str()
-        .expect("error message should be a string");
-    assert!(message.contains("Legacy command 'hashline'"));
-    assert!(message.contains("read --mode line"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unrecognized subcommand 'hashline'"));
 }

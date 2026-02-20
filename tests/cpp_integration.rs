@@ -39,14 +39,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -65,7 +63,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind(file: &Path, kind: &str) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -155,7 +154,8 @@ fn select_supports_bom_prefixed_h_header_for_cpp_content() {
 fn select_reports_parse_failure_for_syntax_invalid_h_when_both_parsers_fail() {
     let file_path = write_temp_source(".h", "int broken( {\n    return 1;\n}\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -180,7 +180,8 @@ fn select_reports_parse_failure_for_syntax_invalid_h_when_both_parsers_fail() {
 fn select_reports_parse_failure_for_syntax_invalid_cpp() {
     let file_path = write_temp_source(".cpp", "int broken( {\n    return 1;\n}\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -205,7 +206,8 @@ fn select_reports_parse_failure_for_syntax_invalid_cpp() {
 fn transform_replace_and_apply_support_cpp_function_definition() {
     let file_path = copy_fixture_to_temp("example.cpp", ".cpp");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -233,7 +235,7 @@ fn transform_replace_and_apply_support_cpp_function_definition() {
 
     let replacement = "int process_data(int value) {\n    return value - 1;\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

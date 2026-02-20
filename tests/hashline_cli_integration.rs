@@ -1,23 +1,34 @@
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, ExitStatus, Output, Stdio};
 
+use clap::Parser;
 use serde_json::{Value, json};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+#[cfg(windows)]
+use std::os::windows::process::ExitStatusExt;
 use tempfile::Builder;
 
 fn run_identedit(arguments: &[&str]) -> Output {
+    if matches!(arguments.first(), Some(&"hashline")) {
+        return run_hashline_compat(arguments, None);
+    }
+
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
+    if matches!(arguments.first(), Some(&"hashline")) {
+        return run_hashline_compat(arguments, Some(input));
+    }
+
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -33,6 +44,92 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     child
         .wait_with_output()
         .expect("failed to collect process output")
+}
+
+#[derive(Debug, Parser)]
+struct LegacyHashlineCli {
+    #[command(subcommand)]
+    command: identedit::cli::hashline::HashlineCommands,
+}
+
+fn run_hashline_compat(arguments: &[&str], stdin_input: Option<&str>) -> Output {
+    let mut compat_args = arguments.to_vec();
+    let mut stdin_temp: Option<tempfile::NamedTempFile> = None;
+
+    if let Some(stdin) = stdin_input {
+        if let Some((index, _value)) = compat_args
+            .iter_mut()
+            .enumerate()
+            .find(|(_, value)| **value == "-")
+        {
+            if index > 0 && compat_args[index - 1] == "--edits" {
+                let mut temp = Builder::new()
+                    .suffix(".json")
+                    .tempfile()
+                    .expect("temp stdin bridge file should be created");
+                temp.write_all(stdin.as_bytes())
+                    .expect("temp stdin bridge file should be writable");
+                let replacement = temp
+                    .path()
+                    .to_str()
+                    .expect("temp stdin bridge path should be utf-8")
+                    .to_string();
+                compat_args[index] = Box::leak(replacement.into_boxed_str());
+                stdin_temp = Some(temp);
+            }
+        }
+    }
+
+    let parsed = LegacyHashlineCli::try_parse_from(
+        std::iter::once("identedit")
+            .chain(compat_args.iter().skip(1).copied())
+            .collect::<Vec<_>>(),
+    );
+
+    let output = match parsed {
+        Ok(parsed) => {
+            let args = identedit::cli::hashline::HashlineArgs {
+                command: parsed.command,
+            };
+            match identedit::cli::hashline::run_hashline(args) {
+                Ok(identedit::cli::hashline::HashlineCommandOutput::Text(text)) => {
+                    output_with_status(0, format!("{text}\n").into_bytes(), Vec::new())
+                }
+                Ok(identedit::cli::hashline::HashlineCommandOutput::Json(response)) => {
+                    let body = serde_json::to_string_pretty(&response)
+                        .expect("legacy hashline response should serialize");
+                    output_with_status(0, format!("{body}\n").into_bytes(), Vec::new())
+                }
+                Err(error) => {
+                    let body = serde_json::to_string_pretty(&error.to_error_response())
+                        .expect("legacy hashline error should serialize");
+                    output_with_status(1, format!("{body}\n").into_bytes(), Vec::new())
+                }
+            }
+        }
+        Err(error) => output_with_status(1, Vec::new(), error.to_string().into_bytes()),
+    };
+
+    drop(stdin_temp);
+    output
+}
+
+fn output_with_status(code: i32, stdout: Vec<u8>, stderr: Vec<u8>) -> Output {
+    Output {
+        status: exit_status(code),
+        stdout,
+        stderr,
+    }
+}
+
+#[cfg(unix)]
+fn exit_status(code: i32) -> ExitStatus {
+    ExitStatus::from_raw(code << 8)
+}
+
+#[cfg(windows)]
+fn exit_status(code: i32) -> ExitStatus {
+    ExitStatus::from_raw(code as u32)
 }
 
 fn write_temp_source(suffix: &str, content: &str) -> PathBuf {

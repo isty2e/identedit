@@ -12,8 +12,7 @@ fn fixture_path(name: &str) -> PathBuf {
 
 fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);

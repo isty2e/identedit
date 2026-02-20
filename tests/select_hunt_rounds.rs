@@ -15,8 +15,7 @@ fn fixture_path(name: &str) -> PathBuf {
 
 fn run_select_with_files(arguments: &[&str], files: &[&Path]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -35,8 +34,12 @@ fn run_select_json_mode(request_json: &str) -> Output {
 
 fn run_select_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select").arg("--json");
+    command
+        .arg("read")
+        .arg("--mode")
+        .arg("ast")
+        .arg("--json")
+        .arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -106,7 +109,7 @@ fn round1_exploit_json_rejects_symlink_alias_duplicate_without_partial_handles()
     symlink(&canonical_path, &symlink_path).expect("symlink should be created");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             canonical_path.to_string_lossy().to_string(),
             symlink_path.to_string_lossy().to_string()
@@ -143,7 +146,7 @@ fn round1_exploit_json_rejects_symlink_alias_duplicate_without_partial_handles()
 fn round1_exploit_json_rejects_exact_duplicate_path_entries() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             fixture.to_string_lossy().to_string(),
             fixture.to_string_lossy().to_string()
@@ -257,7 +260,7 @@ fn round1_explore_cli_summary_matches_handle_length_for_mixed_inputs() {
 fn round1_explore_json_single_file_field_reports_one_file_scanned() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -332,7 +335,7 @@ fn round2_exploit_json_unreadable_file_returns_io_error_without_partial_handles(
     fs::set_permissions(&unreadable, permissions).expect("permissions update should succeed");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": unreadable.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -463,7 +466,7 @@ fn round2_explore_json_name_filter_applies_across_multiple_files() {
 
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             fixture.to_string_lossy().to_string(),
             generated.to_string_lossy().to_string()
@@ -533,7 +536,7 @@ fn round3_exploit_name_flag_takes_precedence_over_empty_stdin_payload() {
 fn round3_exploit_positional_file_rejection_precedes_exclude_kind_flag_message() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -564,7 +567,7 @@ fn round3_exploit_positional_file_rejection_precedes_exclude_kind_flag_message()
 fn round3_exploit_positional_file_rejection_precedes_kind_flag_message() {
     let fixture = fixture_path("example.py");
     let request = json!({
-        "command": "select",
+        "command": "read",
         "file": fixture.to_string_lossy().to_string(),
         "selector": {
             "kind": "function_definition",
@@ -644,7 +647,7 @@ fn round3_explore_json_multi_file_handles_case_insensitive_extensions() {
     let json_upper_path = json_upper.keep().expect("temp file should persist").1;
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             python_upper_path.to_string_lossy().to_string(),
             json_upper_path.to_string_lossy().to_string()
@@ -706,7 +709,7 @@ fn round4_exploit_json_second_file_parse_failure_does_not_leak_first_file_handle
     fs::write(&invalid_file, "def broken(\n").expect("invalid fixture write should succeed");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             valid_fixture.to_string_lossy().to_string(),
             invalid_file.to_string_lossy().to_string()
@@ -782,7 +785,7 @@ fn round4_exploit_json_second_file_duplicate_does_not_leak_first_file_handles() 
     symlink(&canonical_path, &symlink_path).expect("symlink should be created");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             canonical_path.to_string_lossy().to_string(),
             symlink_path.to_string_lossy().to_string()
@@ -848,7 +851,7 @@ fn round4_explore_json_accepts_relative_dot_segment_paths_in_files_array() {
         .expect("fixture write should succeed");
 
     let request = json!({
-        "command": "select",
+        "command": "read",
         "files": [
             "./tests/fixtures/example.py",
             generated.to_string_lossy().to_string()

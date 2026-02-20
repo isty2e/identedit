@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -140,7 +139,8 @@ fn select_reports_parse_failure_for_syntax_invalid_scss() {
         "$primary: #0a84ff;\n@mixin broken($value) {\n  color: $value;\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -165,7 +165,8 @@ fn select_reports_parse_failure_for_syntax_invalid_scss() {
 fn transform_replace_and_apply_support_scss_mixin_statement() {
     let file_path = copy_fixture_to_temp("example.scss", ".scss");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -187,7 +188,7 @@ fn transform_replace_and_apply_support_scss_mixin_statement() {
 
     let replacement = "@mixin card($padding) {\n  padding: $padding;\n  border-radius: 12px;\n  background-color: darken($primary, 10%);\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -219,7 +220,8 @@ fn transform_reports_ambiguous_target_for_duplicate_scss_mixin_identity() {
     let source = "@mixin configure($value) {\n  color: $value;\n}\n\n@mixin configure($value) {\n  color: $value;\n}\n";
     let file_path = write_temp_source(".scss", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -253,7 +255,7 @@ fn transform_reports_ambiguous_target_for_duplicate_scss_mixin_identity() {
         .expect("fixture should include duplicate mixin identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -275,7 +277,8 @@ fn transform_json_span_hint_disambiguates_duplicate_scss_mixin_identity() {
     let source = "@mixin configure($value) {\n  color: $value;\n}\n\n@mixin configure($value) {\n  color: $value;\n}\n";
     let file_path = write_temp_source(".scss", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -303,7 +306,7 @@ fn transform_json_span_hint_disambiguates_duplicate_scss_mixin_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -321,7 +324,7 @@ fn transform_json_span_hint_disambiguates_duplicate_scss_mixin_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate SCSS mixin identity: {}",
@@ -347,7 +350,8 @@ fn transform_json_duplicate_scss_identity_with_missed_span_hint_returns_ambiguou
     let source = "@mixin configure($value) {\n  color: $value;\n}\n\n@mixin configure($value) {\n  color: $value;\n}\n";
     let file_path = write_temp_source(".scss", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -369,7 +373,7 @@ fn transform_json_duplicate_scss_identity_with_missed_span_hint_returns_ambiguou
         .expect("configure handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -387,7 +391,7 @@ fn transform_json_duplicate_scss_identity_with_missed_span_hint_returns_ambiguou
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate SCSS mixins"
@@ -402,7 +406,8 @@ fn transform_json_duplicate_scss_identity_with_missed_span_hint_returns_ambiguou
 fn apply_reports_precondition_failed_after_scss_source_mutation() {
     let file_path = copy_fixture_to_temp("example.scss", ".scss");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -423,7 +428,7 @@ fn apply_reports_precondition_failed_after_scss_source_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -459,7 +464,8 @@ fn select_ignores_scss_construct_tokens_inside_block_comments() {
         "/*\n@mixin fake($x) {\n  color: $x;\n}\n*/\n\n@mixin real($x) {\n  color: $x;\n}\n";
     let file_path = write_temp_source(".scss", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -489,7 +495,8 @@ fn select_ignores_scss_construct_tokens_inside_block_comments() {
 fn select_reports_parse_failure_for_unterminated_block_comment_in_scss() {
     let file_path = write_temp_source(".scss", "/* broken comment\n$primary: #0a84ff;\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "stylesheet",
@@ -510,7 +517,8 @@ fn transform_replace_and_apply_preserve_crlf_scss_source_segments() {
     let source = "@mixin card($padding) {\r\n  padding: $padding;\r\n  border-radius: 8px;\r\n}\r\n\r\n.dashboard {\r\n  @include card(12px);\r\n}\r\n";
     let file_path = write_temp_source(".scss", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -531,7 +539,7 @@ fn transform_replace_and_apply_preserve_crlf_scss_source_segments() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -568,7 +576,8 @@ fn transform_replace_and_apply_preserve_crlf_scss_source_segments() {
 fn select_reports_parse_failure_for_nul_in_scss_source() {
     let file_path = write_temp_bytes(".scss", b"$primary: #0a84ff;\n\0@mixin card($x){color:$x;}");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "mixin_statement",
@@ -589,7 +598,8 @@ fn transform_reports_ambiguous_target_for_duplicate_scss_function_identity() {
     let source = "@function tone($value) {\n  @return $value * 2;\n}\n\n@function tone($value) {\n  @return $value * 2;\n}\n";
     let file_path = write_temp_source(".scss", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_statement",
@@ -623,7 +633,7 @@ fn transform_reports_ambiguous_target_for_duplicate_scss_function_identity() {
         .expect("fixture should include duplicate function identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -647,7 +657,8 @@ fn select_finds_nested_rule_sets_inside_media_queries() {
         "@media screen and (min-width: 768px) {\n  .dashboard {\n    .card {\n      color: red;\n    }\n  }\n}\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",

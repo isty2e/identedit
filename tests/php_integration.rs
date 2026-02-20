@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -124,7 +123,8 @@ fn select_supports_case_insensitive_php_extension() {
 fn transform_replace_and_apply_support_php_function_definition() {
     let file_path = copy_fixture_to_temp("example.php", ".php");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         "--name",
@@ -145,7 +145,7 @@ fn transform_replace_and_apply_support_php_function_definition() {
 
     let replacement = "function process_data(int $value): int\n{\n    return $value + 2;\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -178,7 +178,8 @@ fn select_reports_parse_failure_for_syntax_invalid_php() {
         "<?php\nfunction broken(int $value): int\n{\n    return $value + 1;\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         file_path.to_str().expect("path should be utf-8"),
@@ -203,7 +204,8 @@ fn transform_reports_ambiguous_target_for_duplicate_php_function_identity() {
     let source = "<?php\nfunction configure(int $value): int\n{\n    return $value + 1;\n}\n\nfunction configure(int $value): int\n{\n    return $value + 1;\n}\n";
     let file_path = write_temp_source(".php", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         file_path.to_str().expect("path should be utf-8"),
@@ -237,7 +239,7 @@ fn transform_reports_ambiguous_target_for_duplicate_php_function_identity() {
         .expect("fixture should include duplicate configure function identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -259,7 +261,8 @@ fn transform_json_span_hint_disambiguates_duplicate_php_function_identity() {
     let source = "<?php\nfunction configure(int $value): int\n{\n    return $value + 1;\n}\n\nfunction configure(int $value): int\n{\n    return $value + 1;\n}\n";
     let file_path = write_temp_source(".php", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         file_path.to_str().expect("path should be utf-8"),
@@ -286,7 +289,7 @@ fn transform_json_span_hint_disambiguates_duplicate_php_function_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -304,7 +307,7 @@ fn transform_json_span_hint_disambiguates_duplicate_php_function_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate PHP function identity: {}",
@@ -329,7 +332,8 @@ fn transform_json_span_hint_disambiguates_duplicate_php_function_identity() {
 fn select_reports_parse_failure_for_nul_in_php_source() {
     let file_path = write_temp_source(".php", "<?php\nfunction run(): int {\n    return 1;\n}\0");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         file_path.to_str().expect("path should be utf-8"),
@@ -404,7 +408,8 @@ fn select_ignores_function_like_text_inside_php_heredoc() {
     let source = "<?php\n$template = <<<HTML\nfunction fake(int $x): int { return $x; }\nHTML;\n\nfunction real_function(int $value): int\n{\n    return $value + 1;\n}\n";
     let file_path = write_temp_source(".php", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         file_path.to_str().expect("path should be utf-8"),

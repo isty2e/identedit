@@ -20,7 +20,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
     );
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -53,7 +53,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file_start insert colliding with insert_before"
@@ -91,7 +91,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary() 
     );
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -124,7 +124,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary() 
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file_end insert colliding with insert_after"
@@ -161,7 +161,7 @@ fn transform_json_mode_rejects_file_start_insert_and_replace_same_boundary() {
     );
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -194,7 +194,7 @@ fn transform_json_mode_rejects_file_start_insert_and_replace_same_boundary() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file_start insert colliding with boundary replace"
@@ -225,7 +225,7 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_bom_only_file(
     let expected_file_hash = identedit::changeset::hash_text(&source);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -251,7 +251,7 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_bom_only_file(
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file_start/file_end insert overlap on BOM-only file"
@@ -288,7 +288,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
     );
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -321,7 +321,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject BOM file_start insert colliding with insert_before"
@@ -359,7 +359,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary_on
     );
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -392,7 +392,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary_on
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject BOM file_end insert colliding with insert_after"
@@ -461,12 +461,12 @@ fn transform_json_mode_boundary_conflict_message_is_order_independent() {
 
     for operations in permutations {
         let request = json!({
-            "command": "transform",
+            "command": "edit",
             "file": file_path.to_string_lossy().to_string(),
             "operations": operations
         });
 
-        let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+        let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
         assert!(
             !output.status.success(),
             "transform should fail for same-boundary file/node insert conflicts"
@@ -495,7 +495,7 @@ fn transform_json_mode_boundary_conflict_message_is_order_independent() {
 fn transform_json_mode_rejects_unknown_file_level_target_type() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -511,7 +511,7 @@ fn transform_json_mode_rejects_unknown_file_level_target_type() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject unknown file-level target variant"
@@ -542,7 +542,7 @@ fn transform_json_mode_builds_file_start_insert_preview_on_bom_only_file() {
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -558,7 +558,7 @@ fn transform_json_mode_builds_file_start_insert_preview_on_bom_only_file() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should build file_start preview on BOM-only file: {}",
@@ -594,7 +594,7 @@ fn transform_json_mode_builds_file_end_insert_preview_on_bom_only_file() {
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -610,7 +610,7 @@ fn transform_json_mode_builds_file_end_insert_preview_on_bom_only_file() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should build file_end preview on BOM-only file: {}",
@@ -640,7 +640,7 @@ fn transform_json_mode_allows_insert_before_and_after_on_same_anchor() {
     let span_end = handle["span"]["end"].as_u64().expect("span end");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -676,7 +676,7 @@ fn transform_json_mode_allows_insert_before_and_after_on_same_anchor() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should allow insert_before + insert_after on same anchor: {}",

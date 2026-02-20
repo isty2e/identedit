@@ -769,7 +769,7 @@ fn hashline_precondition_failed_error(check: HashlineCheckResult) -> IdenteditEr
         .unwrap_or_else(|_| "{\"ok\":false}".to_string());
     IdenteditError::InvalidRequest {
         message: format!(
-            "Hashline preconditions failed; run 'identedit hashline check' to inspect mismatches.\n{serialized_check}"
+            "Hashline preconditions failed; refresh anchors with 'identedit read --mode line --json <file>' and retry.\n{serialized_check}"
         ),
     }
 }

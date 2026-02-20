@@ -8,7 +8,6 @@ use tempfile::Builder;
 
 fn run_identedit_with_raw_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -42,7 +41,7 @@ fn assert_structured_error(output: &Output, expected_type: &str) {
 }
 
 fn assert_json_mode_error_contract(input: &[u8], expected_type: &str) {
-    for command in ["select", "transform", "apply"] {
+    for command in ["read", "edit", "apply"] {
         let output = run_identedit_with_raw_stdin(&[command, "--json"], input);
         assert_structured_error(&output, expected_type);
     }
@@ -85,8 +84,8 @@ fn valid_json_mode_payloads(file_path: &Path) -> [(&'static str, String); 3] {
     );
 
     [
-        ("select", select_payload),
-        ("transform", transform_payload),
+        ("read", select_payload),
+        ("edit", transform_payload),
         ("apply", apply_payload),
     ]
 }
@@ -151,13 +150,10 @@ fn json_mode_non_object_top_level_payloads_return_invalid_request() {
 fn json_mode_empty_file_path_returns_io_error_for_all_commands() {
     let payloads = [
         (
-            "select",
-            r#"{"command":"select","file":"","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
+            "read",
+            r#"{"command": "read","file":"","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
         ),
-        (
-            "transform",
-            r#"{"command":"transform","file":"","operations":[]}"#,
-        ),
+        ("edit", r#"{"command":"edit","file":"","operations":[]}"#),
         (
             "apply",
             r#"{"command":"apply","changeset":{"files":[{"file":"","operations":[]}],"transaction":{"mode":"all_or_nothing"}}}"#,
@@ -174,12 +170,12 @@ fn json_mode_empty_file_path_returns_io_error_for_all_commands() {
 fn json_mode_escaped_nul_file_path_returns_io_error_for_all_commands() {
     let payloads = [
         (
-            "select",
-            r#"{"command":"select","file":"\u0000","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
+            "read",
+            r#"{"command": "read","file":"\u0000","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
         ),
         (
-            "transform",
-            r#"{"command":"transform","file":"\u0000","operations":[]}"#,
+            "edit",
+            r#"{"command":"edit","file":"\u0000","operations":[]}"#,
         ),
         (
             "apply",
@@ -246,8 +242,8 @@ fn json_mode_command_type_mismatch_returns_invalid_request() {
         );
 
         for (command, payload) in [
-            ("select", select_payload),
-            ("transform", transform_payload),
+            ("read", select_payload),
+            ("edit", transform_payload),
             ("apply", apply_payload),
         ] {
             let output = run_identedit_with_raw_stdin(&[command, "--json"], payload.as_bytes());
@@ -274,8 +270,8 @@ fn json_mode_missing_command_field_returns_invalid_request() {
     );
 
     for (command, payload) in [
-        ("select", select_payload),
-        ("transform", transform_payload),
+        ("read", select_payload),
+        ("edit", transform_payload),
         ("apply", apply_payload),
     ] {
         let output = run_identedit_with_raw_stdin(&[command, "--json"], payload.as_bytes());
@@ -293,8 +289,8 @@ fn json_mode_whitespace_framed_valid_payloads_still_succeed() {
         let response = assert_structured_success(&output);
 
         match command {
-            "select" => assert_eq!(response["summary"]["files_scanned"], 1),
-            "transform" => assert_eq!(
+            "read" => assert_eq!(response["summary"]["files_scanned"], 1),
+            "edit" => assert_eq!(
                 response["files"][0]["operations"].as_array().map(Vec::len),
                 Some(0)
             ),
@@ -324,8 +320,8 @@ fn duplicate_command_keys_produce_deterministic_parse_errors() {
     );
 
     let cases = [
-        ("select", select_payload),
-        ("transform", transform_payload),
+        ("read", select_payload),
+        ("edit", transform_payload),
         ("apply", apply_payload),
     ];
 
@@ -410,7 +406,10 @@ fn select_json_duplicate_nested_keys_produce_parse_errors() {
     ];
 
     for payload in payloads {
-        let output = run_identedit_with_raw_stdin(&["select", "--json"], payload.as_bytes());
+        let output = run_identedit_with_raw_stdin(
+            &["read", "--json"],
+            payload.as_bytes(),
+        );
         assert!(
             !output.status.success(),
             "select should reject nested duplicate-key payload"
@@ -450,7 +449,7 @@ fn transform_json_duplicate_nested_keys_produce_parse_errors() {
     ];
 
     for payload in payloads {
-        let output = run_identedit_with_raw_stdin(&["transform", "--json"], payload.as_bytes());
+        let output = run_identedit_with_raw_stdin(&["edit", "--json"], payload.as_bytes());
         assert!(
             !output.status.success(),
             "transform should reject nested duplicate-key payload"

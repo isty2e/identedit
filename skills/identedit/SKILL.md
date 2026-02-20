@@ -17,7 +17,7 @@ Canonical command surface:
 - `identedit merge`
 - `identedit grammar`
 
-Legacy names (`select`, `transform`, `hashline`, `changeset`) are compatibility aliases and should not be used in new workflows.
+Supported CLI surface: `identedit read`, `identedit edit`, `identedit apply`, `identedit patch`, `identedit merge`, `identedit grammar`.
 
 ## 10-Second Trigger (Recall First)
 

@@ -7,9 +7,9 @@ use tempfile::Builder;
 
 fn run_select(kind: &str, file: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_identedit"))
-        .env("IDENTEDIT_ALLOW_LEGACY", "1")
         .args([
-            "select",
+            "read",
+            "--json",
             "--kind",
             kind,
             file.to_str().expect("path should be utf-8"),

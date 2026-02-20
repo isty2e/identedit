@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -153,7 +152,8 @@ fn select_reports_parse_failure_for_syntax_invalid_hcl() {
         "resource \"aws_s3_bucket\" \"logs\" {\n  bucket = \"identedit-logs\"\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block",
@@ -178,7 +178,8 @@ fn select_reports_parse_failure_for_syntax_invalid_hcl() {
 fn transform_replace_and_apply_support_hcl_attribute() {
     let file_path = copy_fixture_to_temp("example.hcl", ".hcl");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "attribute",
@@ -202,7 +203,7 @@ fn transform_replace_and_apply_support_hcl_attribute() {
 
     let replacement = "project = \"identedit-next\"";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -234,7 +235,8 @@ fn transform_reports_ambiguous_target_for_duplicate_hcl_attribute_identity() {
         "locals {\n  project = \"identedit\"\n}\n\nlocals {\n  project = \"identedit\"\n}\n";
     let file_path = write_temp_source(".hcl", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "attribute",
@@ -268,7 +270,7 @@ fn transform_reports_ambiguous_target_for_duplicate_hcl_attribute_identity() {
         .expect("fixture should include duplicate attribute identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -291,7 +293,8 @@ fn transform_json_span_hint_disambiguates_duplicate_hcl_attribute_identity() {
         "locals {\n  project = \"identedit\"\n}\n\nlocals {\n  project = \"identedit\"\n}\n";
     let file_path = write_temp_source(".hcl", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "attribute",
@@ -324,7 +327,7 @@ fn transform_json_span_hint_disambiguates_duplicate_hcl_attribute_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -342,7 +345,7 @@ fn transform_json_span_hint_disambiguates_duplicate_hcl_attribute_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate HCL attribute identity: {}",
@@ -369,7 +372,8 @@ fn transform_json_duplicate_hcl_identity_with_missed_span_hint_returns_ambiguous
         "locals {\n  project = \"identedit\"\n}\n\nlocals {\n  project = \"identedit\"\n}\n";
     let file_path = write_temp_source(".hcl", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "attribute",
@@ -389,7 +393,7 @@ fn transform_json_duplicate_hcl_identity_with_missed_span_hint_returns_ambiguous
     let target = find_attribute_handle_with_text(handles, "project = \"identedit\"");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -407,7 +411,7 @@ fn transform_json_duplicate_hcl_identity_with_missed_span_hint_returns_ambiguous
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate HCL attributes"
@@ -422,7 +426,8 @@ fn transform_json_duplicate_hcl_identity_with_missed_span_hint_returns_ambiguous
 fn apply_reports_precondition_failed_after_hcl_source_mutation() {
     let file_path = copy_fixture_to_temp("example.hcl", ".hcl");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "attribute",
@@ -445,7 +450,7 @@ fn apply_reports_precondition_failed_after_hcl_source_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

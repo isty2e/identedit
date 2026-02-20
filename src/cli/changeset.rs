@@ -1,39 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-use clap::{Args, Subcommand};
-
 use crate::changeset::{ChangeOp, FileChange, MultiFileChangeset, OpKind};
 use crate::error::IdenteditError;
-
-#[derive(Debug, Args)]
-pub struct ChangesetArgs {
-    #[command(subcommand)]
-    command: ChangesetCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum ChangesetCommands {
-    #[command(about = "Merge multiple changeset files with strict conflict checks")]
-    Merge(ChangesetMergeArgs),
-}
-
-#[derive(Debug, Args)]
-struct ChangesetMergeArgs {
-    #[arg(
-        value_name = "CHANGESET",
-        required = true,
-        num_args = 1..,
-        help = "Input changeset JSON files (at least one)"
-    )]
-    inputs: Vec<PathBuf>,
-}
-
-pub fn run_changeset(args: ChangesetArgs) -> Result<MultiFileChangeset, IdenteditError> {
-    match args.command {
-        ChangesetCommands::Merge(merge_args) => run_changeset_merge_inputs(merge_args.inputs),
-    }
-}
 
 pub fn run_changeset_merge_inputs(
     inputs: Vec<PathBuf>,
