@@ -43,14 +43,12 @@ pub fn copy_fixture_to_temp_json(name: &str) -> PathBuf {
 
 pub fn run_identedit(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(args);
     command.output().expect("failed to run identedit binary")
 }
 
 pub fn run_identedit_with_stdin(args: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(args);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -71,7 +69,6 @@ pub fn run_shell_script(script: &str, root: &Path, identity: Option<&str>) -> Ou
     let mut command = Command::new("sh");
     command.arg("-c").arg(script);
     command.env("IDENTEDIT_BIN", env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.env("IDENTEDIT_ROOT", root);
     if let Some(value) = identity {
         command.env("IDENTEDIT_IDENTITY", value);
@@ -80,7 +77,15 @@ pub fn run_shell_script(script: &str, root: &Path, identity: Option<&str>) -> Ou
 }
 
 pub fn select_first_handle(file: &Path, kind: &str, name: Option<&str>) -> Value {
-    let mut args = vec!["select", "--verbose", "--kind", kind];
+    let mut args = vec![
+        "read",
+        "--json",
+        "--mode",
+        "ast",
+        "--verbose",
+        "--kind",
+        kind,
+    ];
     if let Some(pattern) = name {
         args.push("--name");
         args.push(pattern);
@@ -90,7 +95,7 @@ pub fn select_first_handle(file: &Path, kind: &str, name: Option<&str>) -> Value
     let output = run_identedit(&args);
     assert!(
         output.status.success(),
-        "select failed: {}",
+        "read failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 

@@ -39,14 +39,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -65,7 +63,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind(file: &Path, kind: &str) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -102,7 +101,8 @@ fn select_covers_yaml_kinds_and_extension_alias() {
 fn transform_replace_and_apply_support_yaml_mapping_pair() {
     let file_path = copy_fixture_to_temp("example.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -130,7 +130,7 @@ fn transform_replace_and_apply_support_yaml_mapping_pair() {
 
     let replacement = "environment: prod";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -178,7 +178,8 @@ fn select_handles_multi_document_anchors_and_aliases_stably() {
     let yaml_file = fixture_path("multi_document_anchors.yaml");
 
     let document_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "document",
@@ -198,7 +199,8 @@ fn select_handles_multi_document_anchors_and_aliases_stably() {
     assert_eq!(document_handles.len(), 2);
 
     let anchor_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "anchor",
@@ -218,7 +220,8 @@ fn select_handles_multi_document_anchors_and_aliases_stably() {
     assert!(anchor_handles.len() >= 2);
 
     let alias_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "alias",
@@ -243,7 +246,8 @@ fn select_handles_multi_document_anchors_and_aliases_stably() {
     }));
 
     let second_alias_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "alias",
@@ -287,7 +291,8 @@ fn select_handles_multi_document_anchors_and_aliases_stably() {
 fn transform_reports_ambiguous_target_for_duplicate_yaml_mapping_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_pairs.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -326,7 +331,7 @@ fn transform_reports_ambiguous_target_for_duplicate_yaml_mapping_pair_identity()
         .expect("fixture should include duplicate identity for enabled mapping pairs");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -347,7 +352,8 @@ fn transform_reports_ambiguous_target_for_duplicate_yaml_mapping_pair_identity()
 fn transform_json_span_hint_disambiguates_duplicate_yaml_mapping_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_pairs.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -379,7 +385,7 @@ fn transform_json_span_hint_disambiguates_duplicate_yaml_mapping_pair_identity()
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -400,7 +406,7 @@ fn transform_json_span_hint_disambiguates_duplicate_yaml_mapping_pair_identity()
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate YAML identity: {}",
@@ -425,7 +431,8 @@ fn transform_json_span_hint_disambiguates_duplicate_yaml_mapping_pair_identity()
 fn transform_json_duplicate_yaml_identity_with_missed_span_hint_returns_ambiguous_target() {
     let file_path = copy_fixture_to_temp("duplicate_pairs.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -451,7 +458,7 @@ fn transform_json_duplicate_yaml_identity_with_missed_span_hint_returns_ambiguou
         .expect("expected duplicate enabled mapping handle");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -469,7 +476,7 @@ fn transform_json_duplicate_yaml_identity_with_missed_span_hint_returns_ambiguou
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate YAML targets"
@@ -484,7 +491,8 @@ fn transform_json_duplicate_yaml_identity_with_missed_span_hint_returns_ambiguou
 fn select_reports_parse_failure_for_syntax_invalid_yaml() {
     let file_path = write_temp_source(".yaml", "service:\n  name: identedit\n  retries: [1,2\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "document",
@@ -509,7 +517,8 @@ fn select_reports_parse_failure_for_syntax_invalid_yaml() {
 fn transform_replace_and_apply_support_yaml_second_document_pair_rewrite() {
     let file_path = copy_fixture_to_temp("multi_document_anchors.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -536,7 +545,7 @@ fn transform_replace_and_apply_support_yaml_second_document_pair_rewrite() {
         .expect("second-document timeout mapping identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -567,7 +576,8 @@ fn transform_replace_and_apply_support_yaml_second_document_pair_rewrite() {
 fn transform_reports_ambiguous_target_for_duplicate_yaml_sequence_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_sequence_items.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -602,7 +612,7 @@ fn transform_reports_ambiguous_target_for_duplicate_yaml_sequence_pair_identity(
         .expect("fixture should include duplicate sequence-pair identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -623,7 +633,8 @@ fn transform_reports_ambiguous_target_for_duplicate_yaml_sequence_pair_identity(
 fn transform_json_span_hint_disambiguates_duplicate_yaml_sequence_pair_identity() {
     let file_path = copy_fixture_to_temp("duplicate_sequence_items.yaml", ".yaml");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "block_mapping_pair",
@@ -661,7 +672,7 @@ fn transform_json_span_hint_disambiguates_duplicate_yaml_sequence_pair_identity(
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -679,7 +690,7 @@ fn transform_json_span_hint_disambiguates_duplicate_yaml_sequence_pair_identity(
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate YAML sequence pair: {}",

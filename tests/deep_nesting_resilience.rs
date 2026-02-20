@@ -5,11 +5,11 @@ use std::process::{Command, Output};
 use serde_json::Value;
 use tempfile::Builder;
 
-fn run_select(kind: &str, file: &Path) -> Output {
+fn run_read(kind: &str, file: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_identedit"))
-        .env("IDENTEDIT_ALLOW_LEGACY", "1")
         .args([
-            "select",
+            "read",
+            "--json",
             "--kind",
             kind,
             file.to_str().expect("path should be utf-8"),
@@ -36,7 +36,7 @@ fn deeply_nested_json_select_never_panics() {
             .write_all(source.as_bytes())
             .expect("nested json fixture write should succeed");
 
-        let output = run_select("array", temp_file.path());
+        let output = run_read("array", temp_file.path());
         let response = parse_structured_output(&output);
         if output.status.success() {
             assert_eq!(
@@ -69,7 +69,7 @@ fn deeply_nested_python_select_never_panics() {
             .write_all(source.as_bytes())
             .expect("nested python fixture write should succeed");
 
-        let output = run_select("module", temp_file.path());
+        let output = run_read("module", temp_file.path());
         let response = parse_structured_output(&output);
         if output.status.success() {
             assert_eq!(

@@ -1,6 +1,6 @@
 ---
 name: identedit
-description: Precision code editing with hash-based safety. Replace/patch/move/copy functions or lines with precondition verification. Also handles config path edits (JSON/YAML/TOML). Not for large-scale rewrites or file-system renames — use Edit/Write/shell for those.
+description: Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous Edit landed in wrong place. Supports replace/patch/move/copy of functions/lines, config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames.
 ---
 
 # Identedit — Agent-Oriented Code Editing
@@ -16,8 +16,6 @@ Canonical command surface:
 - `identedit patch`
 - `identedit merge`
 - `identedit grammar`
-
-Legacy names (`select`, `transform`, `hashline`, `changeset`) are compatibility aliases and should not be used in new workflows.
 
 ## 10-Second Trigger (Recall First)
 
@@ -498,10 +496,9 @@ Use `--auto-repair` once if strict matching fails but deterministic remap is pos
 ### Error Recovery Loop
 
 1. Run `read --mode line` to regenerate fresh anchors.
-2. Retry strict `patch` once.
-3. If strict fails due to stale anchors, retry once with `--auto-repair`.
-4. If still failing (or ambiguous), regenerate anchors and rebuild request.
-5. Max 2 retries, then fall back to direct editing.
+2. Retry strict `patch` once. If it succeeds, done.
+3. If strict fails due to stale anchors, retry once with `--auto-repair` (this counts as the second attempt).
+4. If still failing, fall back to direct editing. Do not retry further.
 
 ## Config Path Patching (JSON/YAML/TOML)
 
@@ -509,6 +506,7 @@ Use config-aware path targeting when you need to update nested keys without larg
 
 ```bash
 identedit patch --config-path service.retries --set-value 5 example.yaml
+identedit patch --config-path items --append-value 4 example.json
 identedit patch --config-path database.settings.enabled --delete example.toml
 ```
 
@@ -530,26 +528,52 @@ JSON mode:
 }
 ```
 
-Path syntax is dot/bracket only (for example `a.b[1].c`). Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
+Append JSON variant:
+
+```json
+{
+  "command": "patch",
+  "file": "example.json",
+  "target": {
+    "type": "config_path",
+    "path": "items"
+  },
+  "op": {
+    "type": "append",
+    "new_text": "4"
+  }
+}
+```
+
+Path syntax is dot/bracket only (for example `a.b[1].c`).
+
+Config path rules:
+- `set` updates an existing path; use `create_missing: true` (JSON mode) or `--create-missing` (flag mode) only when creating missing map/table keys.
+- `append` requires the resolved target path to be an existing array/sequence.
+- `delete` and `append` reject `create_missing`.
+- Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 
 ---
 
 ## Multi-File Transactions
 
-JSON mode supports editing multiple files atomically via `identedit apply --json`:
+Use `edit` to compile a multi-file changeset first, then apply it atomically:
 
 ```bash
-echo '{
-  "command": "apply",
-  "changeset": {
-    "files": [
-      { "file": "src/auth.py", "operations": [...] },
-      { "file": "src/routes.py", "operations": [...] }
-    ],
-    "transaction": { "mode": "all_or_nothing" }
-  }
+# request.json contains the edit request (single-file or files[] batch shape)
+identedit edit --json < request.json > changeset.json
+
+# commit from plan file
+identedit apply changeset.json
+
+# equivalent wrapped stdin mode (when you need command envelope)
+jq -n --slurpfile plan changeset.json '{
+  command: "apply",
+  changeset: $plan[0]
 }' | identedit apply --json
 ```
+
+`apply --json` expects a compiled changeset (the output of `identedit edit --json`), not a raw edit request.
 
 If any file fails, all files are rolled back to their original state.
 
@@ -585,7 +609,11 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 
 ## Feedback
 
-This tool is under active development. When you use identedit and encounter friction — confusing errors, unexpected behavior, missing features, awkward workflow steps — append a short note to `docs/reports/identedit-field-notes.md` with:
+This tool is under active development. When you encounter friction (confusing errors, unexpected behavior, missing features, awkward workflow steps), open an issue at:
+
+- https://github.com/isty2e/identedit/issues
+
+Include:
 - What you were trying to do
 - What happened (include the error or unexpected output)
 - What you expected instead

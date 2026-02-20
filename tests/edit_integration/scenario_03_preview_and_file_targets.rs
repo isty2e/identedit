@@ -30,7 +30,8 @@ fn line_ref(source: &str, line: usize) -> String {
 
 fn select_handle_by_name(file_path: &Path, name: &str) -> Value {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -60,7 +61,7 @@ fn transform_json_mode_supports_multiple_operations() {
     let helper_handle = select_first_handle(&file_path, "function_definition", Some("helper"));
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -96,7 +97,7 @@ fn transform_json_mode_supports_multiple_operations() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should succeed for multiple operations: {}",
@@ -124,7 +125,7 @@ fn transform_json_mode_supports_handle_ref_target_with_file_level_handle_table()
     let old_text = handle["text"].as_str().expect("text should be string");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "handle_table": {
             "proc": {
@@ -148,7 +149,7 @@ fn transform_json_mode_supports_handle_ref_target_with_file_level_handle_table()
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support handle_ref targets: {}",
@@ -179,7 +180,7 @@ fn transform_json_mode_supports_batch_handle_ref_with_file_scoped_namespaces() {
     let old_text_b = handle_b["text"].as_str().expect("text should be string");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "files": [
             {
                 "file": file_a.to_string_lossy().to_string(),
@@ -224,7 +225,7 @@ fn transform_json_mode_supports_batch_handle_ref_with_file_scoped_namespaces() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "batch transform should support file-scoped handle_ref namespaces: {}",
@@ -251,7 +252,7 @@ fn transform_json_mode_defaults_to_compact_preview_for_replace() {
     let old_text = handle["text"].as_str().expect("text should be string");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -270,7 +271,7 @@ fn transform_json_mode_defaults_to_compact_preview_for_replace() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should succeed: {}",
@@ -290,7 +291,7 @@ fn transform_json_mode_verbose_includes_full_preview_old_text() {
     let old_text = handle["text"].as_str().expect("text should be string");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -309,8 +310,7 @@ fn transform_json_mode_verbose_includes_full_preview_old_text() {
         ]
     });
 
-    let output =
-        run_identedit_with_stdin(&["transform", "--json", "--verbose"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json", "--verbose"], &request.to_string());
     assert!(
         output.status.success(),
         "transform --verbose should succeed: {}",
@@ -341,7 +341,7 @@ fn transform_json_mode_builds_insert_before_preview_with_zero_width_span() {
     let span_start = handle["span"]["start"].as_u64().expect("span start");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -362,7 +362,7 @@ fn transform_json_mode_builds_insert_before_preview_with_zero_width_span() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support insert_before: {}",
@@ -391,7 +391,7 @@ fn transform_json_mode_builds_delete_preview_with_anchor_span() {
     let span_end = handle["span"]["end"].as_u64().expect("span end");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -409,7 +409,7 @@ fn transform_json_mode_builds_delete_preview_with_anchor_span() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support delete: {}",
@@ -437,7 +437,7 @@ fn transform_json_mode_delete_and_empty_replace_have_equivalent_previews() {
     let expected_old_hash = identedit::changeset::hash_text(old_text);
 
     let delete_request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -456,7 +456,7 @@ fn transform_json_mode_delete_and_empty_replace_have_equivalent_previews() {
     });
 
     let replace_request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -475,10 +475,9 @@ fn transform_json_mode_delete_and_empty_replace_have_equivalent_previews() {
         ]
     });
 
-    let delete_output =
-        run_identedit_with_stdin(&["transform", "--json"], &delete_request.to_string());
+    let delete_output = run_identedit_with_stdin(&["edit", "--json"], &delete_request.to_string());
     let replace_output =
-        run_identedit_with_stdin(&["transform", "--json"], &replace_request.to_string());
+        run_identedit_with_stdin(&["edit", "--json"], &replace_request.to_string());
 
     assert!(
         delete_output.status.success(),
@@ -518,7 +517,7 @@ fn transform_json_mode_builds_insert_after_preview_with_zero_width_span() {
     let span_end = handle["span"]["end"].as_u64().expect("span end");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -539,7 +538,7 @@ fn transform_json_mode_builds_insert_after_preview_with_zero_width_span() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support insert_after: {}",
@@ -567,7 +566,7 @@ fn transform_json_mode_builds_file_end_insert_preview_with_zero_width_span() {
     let insert_text = "\n# appended-at-file-end\n";
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -583,7 +582,7 @@ fn transform_json_mode_builds_file_end_insert_preview_with_zero_width_span() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support file_end insert: {}",
@@ -621,7 +620,7 @@ fn transform_json_mode_builds_file_start_insert_preview_with_zero_width_span() {
     let insert_text = "# prepended-at-file-start\n";
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -637,7 +636,7 @@ fn transform_json_mode_builds_file_start_insert_preview_with_zero_width_span() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support file_start insert: {}",
@@ -672,7 +671,7 @@ fn transform_json_mode_rejects_file_start_insert_with_stale_file_hash() {
     let file_path = copy_fixture_to_temp_python("example.py");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -688,7 +687,7 @@ fn transform_json_mode_rejects_file_start_insert_with_stale_file_hash() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject stale file hash for file_start insert"
@@ -704,7 +703,7 @@ fn transform_json_mode_rejects_file_start_target_missing_expected_file_hash() {
     let file_path = copy_fixture_to_temp_python("example.py");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -719,7 +718,7 @@ fn transform_json_mode_rejects_file_start_target_missing_expected_file_hash() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file_start target missing expected_file_hash"
@@ -743,7 +742,7 @@ fn transform_json_mode_rejects_node_target_with_expected_file_hash_field() {
     let old_text = handle["text"].as_str().expect("text should be string");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -766,7 +765,7 @@ fn transform_json_mode_rejects_node_target_with_expected_file_hash_field() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject expected_file_hash on node target"
@@ -790,7 +789,7 @@ fn transform_json_mode_rejects_mixed_target_and_legacy_fields_in_operation() {
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -809,7 +808,7 @@ fn transform_json_mode_rejects_mixed_target_and_legacy_fields_in_operation() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject mixed target/legacy operation fields"
@@ -841,7 +840,7 @@ fn transform_json_mode_file_start_insert_preview_starts_after_utf8_bom() {
     let insert_text = "# file-start-bom\n";
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -857,7 +856,7 @@ fn transform_json_mode_file_start_insert_preview_starts_after_utf8_bom() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support file_start insert on BOM source: {}",
@@ -886,7 +885,7 @@ fn transform_json_mode_rejects_file_end_replace_combo() {
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -902,7 +901,7 @@ fn transform_json_mode_rejects_file_end_replace_combo() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file target + replace combo"
@@ -924,7 +923,7 @@ fn transform_json_mode_rejects_file_end_insert_with_stale_file_hash() {
     let file_path = copy_fixture_to_temp_python("example.py");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -940,7 +939,7 @@ fn transform_json_mode_rejects_file_end_insert_with_stale_file_hash() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject stale file hash for file_end insert"
@@ -973,7 +972,7 @@ fn transform_json_mode_rejects_file_start_insert_with_hardlink_alias_stale_hash_
     .expect("canonical mutation should succeed");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": alias_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -989,7 +988,7 @@ fn transform_json_mode_rejects_file_start_insert_with_hardlink_alias_stale_hash_
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject stale file_start hash through hardlink alias"
@@ -1019,7 +1018,7 @@ fn transform_json_mode_rejects_file_end_insert_with_hardlink_alias_stale_hash_af
         .expect("alias mutation should succeed");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": canonical_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1035,7 +1034,7 @@ fn transform_json_mode_rejects_file_end_insert_with_hardlink_alias_stale_hash_af
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject stale file_end hash after alias mutation"
@@ -1057,7 +1056,7 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_empty_hardlink
     let expected_file_hash = identedit::changeset::hash_text("");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": alias_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1083,7 +1082,7 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_empty_hardlink
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject file_start/file_end overlap on empty hardlink alias"
@@ -1114,7 +1113,7 @@ fn transform_json_mode_rejects_file_start_insert_with_crlf_normalized_hash_misma
     let normalized_hash = identedit::changeset::hash_text(&source.replace("\r\n", "\n"));
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1130,7 +1129,7 @@ fn transform_json_mode_rejects_file_start_insert_with_crlf_normalized_hash_misma
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject normalized-hash mismatch for CRLF source"
@@ -1156,7 +1155,7 @@ fn transform_json_mode_builds_file_end_preview_with_multibyte_byte_length() {
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1172,7 +1171,7 @@ fn transform_json_mode_builds_file_end_preview_with_multibyte_byte_length() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support file_end preview on multibyte source: {}",
@@ -1210,7 +1209,7 @@ fn transform_json_mode_file_start_preview_starts_after_bom_for_hardlink_alias_pa
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": alias_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1226,7 +1225,7 @@ fn transform_json_mode_file_start_preview_starts_after_bom_for_hardlink_alias_pa
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support BOM file_start via hardlink alias: {}",
@@ -1270,7 +1269,7 @@ fn transform_json_mode_supports_line_target_replace_lines_operation() {
     let file_path = temp_file.keep().expect("temp file should persist").1;
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1287,7 +1286,7 @@ fn transform_json_mode_supports_line_target_replace_lines_operation() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "line-target transform should succeed: {}",
@@ -1320,7 +1319,7 @@ fn transform_json_mode_supports_line_target_insert_after_line_operation() {
     let file_path = temp_file.keep().expect("temp file should persist").1;
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1336,7 +1335,7 @@ fn transform_json_mode_supports_line_target_insert_after_line_operation() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "line-target insert_after_line transform should succeed: {}",
@@ -1400,18 +1399,18 @@ fn transform_json_mode_mixed_node_line_overlap_error_is_order_independent() {
     });
 
     let request_a = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [node_operation, line_operation]
     });
     let request_b = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [line_operation, node_operation]
     });
 
-    let output_a = run_identedit_with_stdin(&["transform", "--json"], &request_a.to_string());
-    let output_b = run_identedit_with_stdin(&["transform", "--json"], &request_b.to_string());
+    let output_a = run_identedit_with_stdin(&["edit", "--json"], &request_a.to_string());
+    let output_b = run_identedit_with_stdin(&["edit", "--json"], &request_b.to_string());
     assert!(
         !output_a.status.success() && !output_b.status.success(),
         "both operation orderings should be rejected"
@@ -1438,7 +1437,7 @@ fn transform_json_mode_supports_same_file_move_before_preview() {
     let destination_handle = select_handle_by_name(&file_path, "process_data");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1467,7 +1466,7 @@ fn transform_json_mode_supports_same_file_move_before_preview() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support same-file move_before: {}",
@@ -1508,7 +1507,7 @@ fn transform_json_mode_rejects_same_file_move_with_overlapping_destination() {
     let source_handle = select_handle_by_name(&file_path, "helper");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1535,7 +1534,7 @@ fn transform_json_mode_rejects_same_file_move_with_overlapping_destination() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject overlapping same-file move destination"
@@ -1558,7 +1557,7 @@ fn transform_json_mode_same_file_move_reports_missing_source_target() {
     let destination_handle = select_handle_by_name(&file_path, "process_data");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1584,7 +1583,7 @@ fn transform_json_mode_same_file_move_reports_missing_source_target() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should report missing source target for same-file move"
@@ -1612,7 +1611,7 @@ fn transform_json_mode_same_file_move_reports_missing_destination_target() {
     let source_handle = select_handle_by_name(&file_path, "helper");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1638,7 +1637,7 @@ fn transform_json_mode_same_file_move_reports_missing_destination_target() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should report missing destination target for same-file move"
@@ -1663,7 +1662,7 @@ fn transform_json_mode_same_file_move_reports_ambiguous_destination_target() {
         .expect("source text should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1685,7 +1684,7 @@ fn transform_json_mode_same_file_move_reports_ambiguous_destination_target() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should report ambiguous destination target for same-file move"
@@ -1733,7 +1732,7 @@ fn transform_json_mode_supports_cross_file_move_to_before_preview() {
         .expect("source text should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": source_file.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1759,7 +1758,7 @@ fn transform_json_mode_supports_cross_file_move_to_before_preview() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "cross-file move_to_before transform should succeed: {}",
@@ -1832,7 +1831,7 @@ fn transform_json_mode_cross_file_move_reports_missing_destination_target() {
         .expect("source text should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": source_file.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1855,7 +1854,7 @@ fn transform_json_mode_cross_file_move_reports_missing_destination_target() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "cross-file move should fail when destination target is missing"
@@ -1889,7 +1888,7 @@ fn transform_json_mode_cross_file_move_reports_ambiguous_source_target() {
     let destination_handle = select_handle_by_name(&destination_file, "destination_anchor");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": source_file.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1914,7 +1913,7 @@ fn transform_json_mode_cross_file_move_reports_ambiguous_source_target() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "cross-file move should fail when source target is ambiguous"
@@ -1934,7 +1933,7 @@ fn transform_json_mode_cross_file_move_rejects_same_file_destination() {
     let destination_handle = select_handle_by_name(&file_path, "process_data");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1960,7 +1959,7 @@ fn transform_json_mode_cross_file_move_rejects_same_file_destination() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "cross-file move should reject same-file destination"

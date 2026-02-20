@@ -10,7 +10,7 @@ fn apply_changeset_file_modifies_target_file() {
 
     let replacement = "def process_data(value):\n    return value * 2";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -63,7 +63,7 @@ fn apply_changeset_argument_supports_shell_variable_expanded_path() {
         .as_str()
         .expect("identity should be present");
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -123,7 +123,8 @@ fn apply_changeset_argument_single_quoted_env_token_path_remains_literal() {
 fn apply_handles_large_batches_of_operations_within_reasonable_time() {
     let file_path = create_large_python_file(150);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -1597,7 +1598,7 @@ fn apply_file_start_insert_from_transform_preserves_utf8_bom_prefix() {
     let expected_file_hash = identedit::changeset::hash_text(&before);
 
     let transform_request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -1614,7 +1615,7 @@ fn apply_file_start_insert_from_transform_preserves_utf8_bom_prefix() {
     });
 
     let transform_output =
-        run_identedit_with_stdin(&["transform", "--json"], &transform_request.to_string());
+        run_identedit_with_stdin(&["edit", "--json"], &transform_request.to_string());
     assert!(
         transform_output.status.success(),
         "transform should succeed for BOM file_start insert: {}",

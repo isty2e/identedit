@@ -28,14 +28,12 @@ fn copy_fixture_to_temp(name: &str, suffix: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -54,7 +52,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -97,7 +96,8 @@ fn select_covers_go_kinds_and_provider() {
 fn transform_replace_and_apply_support_go_function_declaration() {
     let file_path = copy_fixture_to_temp("example.go", ".go");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -118,7 +118,7 @@ fn transform_replace_and_apply_support_go_function_declaration() {
 
     let replacement = "func processData(value int) int {\n\treturn value - 1\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -164,7 +164,8 @@ fn transform_replace_and_apply_support_go_function_declaration() {
 fn select_transform_apply_pipeline_supports_go_type_spec_rewrite() {
     let file_path = copy_fixture_to_temp("example.go", ".go");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "type_spec",
         "--name",
@@ -185,7 +186,7 @@ fn select_transform_apply_pipeline_supports_go_type_spec_rewrite() {
 
     let replacement = "type Processor struct {\n\tvalue int\n\tfactor int\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

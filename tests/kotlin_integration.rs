@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -145,7 +144,8 @@ fn select_reports_parse_failure_for_syntax_invalid_kotlin() {
         "class Broken {\n    fun run(value: Int): Int {\n        return value + 1\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -169,7 +169,8 @@ fn select_reports_parse_failure_for_syntax_invalid_kotlin() {
 fn transform_replace_and_apply_support_kotlin_function_declaration() {
     let file_path = copy_fixture_to_temp("example.kt", ".kt");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -191,7 +192,7 @@ fn transform_replace_and_apply_support_kotlin_function_declaration() {
     let replacement =
         "fun processData(value: Int): Int {\n        return abs(value) + offset + 2\n    }";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -222,7 +223,8 @@ fn transform_reports_ambiguous_target_for_duplicate_kotlin_function_identity() {
     let source = "fun configure(value: Int): Int {\n    return value + 1\n}\n\nfun configure(value: Int): Int {\n    return value + 1\n}\n";
     let file_path = write_temp_source(".kt", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -255,7 +257,7 @@ fn transform_reports_ambiguous_target_for_duplicate_kotlin_function_identity() {
         .expect("fixture should include duplicate function identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -277,7 +279,8 @@ fn transform_json_span_hint_disambiguates_duplicate_kotlin_function_identity() {
     let source = "fun configure(value: Int): Int {\n    return value + 1\n}\n\nfun configure(value: Int): Int {\n    return value + 1\n}\n";
     let file_path = write_temp_source(".kt", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -304,7 +307,7 @@ fn transform_json_span_hint_disambiguates_duplicate_kotlin_function_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -322,7 +325,7 @@ fn transform_json_span_hint_disambiguates_duplicate_kotlin_function_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate Kotlin function identity: {}",
@@ -348,7 +351,8 @@ fn transform_json_duplicate_kotlin_identity_with_missed_span_hint_returns_ambigu
     let source = "fun configure(value: Int): Int {\n    return value + 1\n}\n\nfun configure(value: Int): Int {\n    return value + 1\n}\n";
     let file_path = write_temp_source(".kt", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -369,7 +373,7 @@ fn transform_json_duplicate_kotlin_identity_with_missed_span_hint_returns_ambigu
         .expect("configure handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -387,7 +391,7 @@ fn transform_json_duplicate_kotlin_identity_with_missed_span_hint_returns_ambigu
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate Kotlin functions"
@@ -402,7 +406,8 @@ fn transform_json_duplicate_kotlin_identity_with_missed_span_hint_returns_ambigu
 fn apply_reports_precondition_failed_after_kotlin_source_mutation() {
     let file_path = copy_fixture_to_temp("example.kt", ".kt");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_declaration",
         "--name",
@@ -422,7 +427,7 @@ fn apply_reports_precondition_failed_after_kotlin_source_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

@@ -44,14 +44,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -84,7 +82,15 @@ fn jsts_non_utf8_select_transform_are_parse_failure() {
         let file_path = write_temp_bytes(case.suffix, &bytes);
         let path = file_path.to_str().expect("path should be utf-8");
 
-        let select_output = run_identedit(&["select", "--kind", "function_declaration", path]);
+        let select_output = run_identedit(&[
+            "read",
+            "--json",
+            "--mode",
+            "ast",
+            "--kind",
+            "function_declaration",
+            path,
+        ]);
         let select_response = assert_error_type(select_output, "parse_failure");
         let select_message = select_response["error"]["message"]
             .as_str()
@@ -96,7 +102,7 @@ fn jsts_non_utf8_select_transform_are_parse_failure() {
         );
 
         let transform_output = run_identedit(&[
-            "transform",
+            "edit",
             "--identity",
             "deadbeef",
             "--replace",
@@ -154,7 +160,15 @@ fn jsts_embedded_nul_select_transform_apply_are_parse_failure() {
         let file_path = write_temp_bytes(case.suffix, &bytes);
         let path = file_path.to_str().expect("path should be utf-8");
 
-        let select_output = run_identedit(&["select", "--kind", "function_declaration", path]);
+        let select_output = run_identedit(&[
+            "read",
+            "--json",
+            "--mode",
+            "ast",
+            "--kind",
+            "function_declaration",
+            path,
+        ]);
         let select_response = assert_error_type(select_output, "parse_failure");
         let select_message = select_response["error"]["message"]
             .as_str()
@@ -166,7 +180,7 @@ fn jsts_embedded_nul_select_transform_apply_are_parse_failure() {
         );
 
         let transform_output = run_identedit(&[
-            "transform",
+            "edit",
             "--identity",
             "deadbeef",
             "--replace",

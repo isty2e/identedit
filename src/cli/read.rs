@@ -42,10 +42,15 @@ pub struct ReadArgs {
     )]
     pub exclude_kinds: Vec<String>,
     #[arg(long, help = "Emit structured JSON output")]
-    pub json: bool,
+    #[arg(action = clap::ArgAction::Count)]
+    pub json: u8,
     #[arg(long, help = "Include full matched text in ast mode output")]
     pub verbose: bool,
-    #[arg(value_name = "FILE", required = true, num_args = 1..)]
+    #[arg(
+        value_name = "FILE",
+        num_args = 0..,
+        help = "Input files; omit when using --json stdin mode"
+    )]
     pub files: Vec<PathBuf>,
 }
 
@@ -104,6 +109,55 @@ pub enum ReadCommandOutput {
 }
 
 pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
+    if args.json > 1 && !args.files.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message:
+                "--json stdin mode does not allow positional FILE arguments; provide file paths inside the JSON payload"
+                    .to_string(),
+        });
+    }
+
+    if args.files.is_empty() {
+        if args.json == 0 {
+            return Err(IdenteditError::InvalidRequest {
+                message: "At least one FILE is required".to_string(),
+            });
+        }
+        if args.mode != ReadMode::Ast {
+            return Err(IdenteditError::InvalidRequest {
+                message: "--json stdin mode currently supports only --mode ast".to_string(),
+            });
+        }
+
+        if args.json > 1 {
+            if args.kind.is_some() {
+                return Err(IdenteditError::InvalidRequest {
+                    message:
+                        "--json stdin mode does not allow --kind; encode selector.kind in the JSON payload"
+                            .to_string(),
+                });
+            }
+            if args.name.is_some() {
+                return Err(IdenteditError::InvalidRequest {
+                    message:
+                        "--json stdin mode does not allow --name; encode selector.name_pattern in the JSON payload"
+                            .to_string(),
+                });
+            }
+            if !args.exclude_kinds.is_empty() {
+                return Err(IdenteditError::InvalidRequest {
+                    message:
+                        "--json stdin mode does not allow --exclude-kind; encode selector.exclude_kinds in the JSON payload"
+                            .to_string(),
+                });
+            }
+        }
+        let response = super::read_select::run_read_select_from_stdin(args.verbose)?;
+        return Ok(ReadCommandOutput::Json(ReadResponse::from_read_select_response(
+            response,
+        )));
+    }
+
     let provider_registry = ProviderRegistry::default();
     let mut handles = Vec::new();
     let mut file_preconditions = Vec::new();
@@ -202,7 +256,7 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
         file_preconditions,
     };
 
-    if args.json {
+    if args.json > 0 {
         return Ok(ReadCommandOutput::Json(response));
     }
 
@@ -354,6 +408,57 @@ impl ReadHandle {
             identity,
             expected_old_hash,
             text: if verbose { Some(text) } else { None },
+        }
+    }
+}
+
+impl ReadResponse {
+    fn from_read_select_response(response: super::read_select::ReadSelectResponse) -> Self {
+        let handles = response
+            .handles
+            .into_iter()
+            .map(ReadHandle::from_read_select_handle)
+            .collect();
+        let summary = ReadSummary {
+            files_scanned: response.summary.files_scanned,
+            matches: response.summary.matches,
+        };
+        let file_preconditions = response
+            .file_preconditions
+            .into_iter()
+            .map(|item| FilePrecondition {
+                file: item.file,
+                expected_file_hash: item.expected_file_hash,
+            })
+            .collect();
+        Self {
+            handles,
+            summary,
+            file_preconditions,
+        }
+    }
+}
+
+impl ReadHandle {
+    fn from_read_select_handle(handle: super::read_select::ReadSelectHandle) -> Self {
+        let super::read_select::ReadSelectHandle {
+            file,
+            span,
+            kind,
+            name,
+            identity,
+            expected_old_hash,
+            text,
+        } = handle;
+
+        Self::Node {
+            file,
+            span,
+            kind,
+            name,
+            identity,
+            expected_old_hash,
+            text,
         }
     }
 }

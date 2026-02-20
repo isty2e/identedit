@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind(file: &Path, kind: &str) -> Value {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -160,7 +159,8 @@ fn select_response_includes_hash_preconditions_for_markdown_targets() {
 fn transform_replace_and_apply_support_markdown_heading() {
     let file_path = copy_fixture_to_temp("example.md", ".md");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -188,7 +188,7 @@ fn transform_replace_and_apply_support_markdown_heading() {
 
     let replacement = "# Identedit Engine";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -219,7 +219,8 @@ fn transform_reports_ambiguous_target_for_duplicate_markdown_heading_identity() 
     let source = "## Repeat\n\nalpha\n\n## Repeat\n\nalpha\n";
     let file_path = write_temp_source(".md", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -253,7 +254,7 @@ fn transform_reports_ambiguous_target_for_duplicate_markdown_heading_identity() 
         .expect("fixture should include duplicate heading identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -275,7 +276,8 @@ fn transform_json_span_hint_disambiguates_duplicate_markdown_heading_identity() 
     let source = "## Repeat\n\nalpha\n\n## Repeat\n\nalpha\n";
     let file_path = write_temp_source(".md", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -319,7 +321,7 @@ fn transform_json_span_hint_disambiguates_duplicate_markdown_heading_identity() 
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -337,7 +339,7 @@ fn transform_json_span_hint_disambiguates_duplicate_markdown_heading_identity() 
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate Markdown heading identity: {}",
@@ -363,7 +365,8 @@ fn transform_json_duplicate_markdown_identity_with_missed_span_hint_returns_ambi
     let source = "## Repeat\n\nalpha\n\n## Repeat\n\nalpha\n";
     let file_path = write_temp_source(".md", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -401,7 +404,7 @@ fn transform_json_duplicate_markdown_identity_with_missed_span_hint_returns_ambi
         .expect("duplicate heading handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -419,7 +422,7 @@ fn transform_json_duplicate_markdown_identity_with_missed_span_hint_returns_ambi
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate Markdown headings"
@@ -434,7 +437,8 @@ fn transform_json_duplicate_markdown_identity_with_missed_span_hint_returns_ambi
 fn apply_reports_precondition_failed_after_markdown_source_mutation() {
     let file_path = copy_fixture_to_temp("example.md", ".md");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -463,7 +467,7 @@ fn apply_reports_precondition_failed_after_markdown_source_mutation() {
         .expect("pipeline heading identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -504,7 +508,8 @@ fn select_ignores_heading_like_tokens_inside_fenced_code_blocks() {
     let source = "# Real Heading\n\n```python\n# fake heading\ndef helper():\n    return 1\n```\n";
     let file_path = write_temp_source(".md", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -542,7 +547,8 @@ fn transform_replace_and_apply_preserve_crlf_markdown_source_segments() {
     let source = "# Identedit\r\n\r\n## Pipeline\r\n\r\n- Select targets\r\n- Transform safely\r\n";
     let file_path = write_temp_source(".md", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "atx_heading",
@@ -575,7 +581,7 @@ fn transform_replace_and_apply_preserve_crlf_markdown_source_segments() {
 
     let replacement = "## Build Pipeline";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

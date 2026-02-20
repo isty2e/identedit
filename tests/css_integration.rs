@@ -39,14 +39,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -65,7 +63,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind(file: &Path, kind: &str) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -100,7 +99,8 @@ fn select_covers_css_kinds_and_provider() {
 fn select_supports_case_insensitive_css_extension() {
     let file_path = copy_fixture_to_temp("example.css", ".CSS");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -117,7 +117,8 @@ fn select_supports_case_insensitive_css_extension() {
 fn transform_replace_and_apply_support_css_stylesheet() {
     let file_path = copy_fixture_to_temp("example.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "stylesheet",
@@ -137,7 +138,7 @@ fn transform_replace_and_apply_support_css_stylesheet() {
 
     let replacement = "body {\n  margin: 0;\n  color: blue;\n}\n";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -183,7 +184,8 @@ fn transform_replace_and_apply_support_css_stylesheet() {
 fn select_reports_parse_failure_for_syntax_invalid_css() {
     let file_path = write_temp_source(".css", "body { color: red;\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "stylesheet",
@@ -209,7 +211,8 @@ fn select_reports_parse_failure_for_syntax_invalid_css() {
 fn select_covers_realistic_css_fixture_with_media_rule() {
     let css_file = fixture_path("realistic_normalize.css");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -240,7 +243,8 @@ fn select_covers_realistic_css_fixture_with_media_rule() {
 fn transform_replace_and_apply_support_realistic_css_body_rule_rewrite() {
     let file_path = copy_fixture_to_temp("realistic_normalize.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -268,7 +272,7 @@ fn transform_replace_and_apply_support_realistic_css_body_rule_rewrite() {
 
     let replacement = "body {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n  color: #1f2937;\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -298,7 +302,8 @@ fn transform_replace_and_apply_support_realistic_css_body_rule_rewrite() {
 fn select_covers_complex_css_fixture_nested_features() {
     let css_file = fixture_path("complex_openprops.css");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -337,7 +342,8 @@ fn select_covers_complex_css_fixture_nested_features() {
 fn transform_replace_and_apply_support_complex_css_root_rule_rewrite() {
     let file_path = copy_fixture_to_temp("complex_openprops.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -365,7 +371,7 @@ fn transform_replace_and_apply_support_complex_css_root_rule_rewrite() {
 
     let replacement = ":root {\n  --surface: hsl(220 20% 98%);\n  --text: hsl(220 40% 18%);\n  --brand: hsl(252 84% 59%);\n  --radius: 0.75rem;\n  --space: clamp(0.75rem, 2vw, 1.25rem);\n  --shadow-sm: 0 1px 2px hsl(220 15% 20% / 0.15);\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -395,7 +401,8 @@ fn transform_replace_and_apply_support_complex_css_root_rule_rewrite() {
 fn transform_reports_ambiguous_target_for_duplicate_css_rule_identity() {
     let file_path = copy_fixture_to_temp("complex_openprops.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -422,7 +429,7 @@ fn transform_reports_ambiguous_target_for_duplicate_css_rule_identity() {
         .expect("expected duplicate .chip identity in fixture");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         chip_identity,
         "--replace",
@@ -443,7 +450,8 @@ fn transform_reports_ambiguous_target_for_duplicate_css_rule_identity() {
 fn select_covers_bootstrap_escape_css_fixture_tokens() {
     let css_file = fixture_path("complex_bootstrap_escape.css");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -483,7 +491,8 @@ fn select_covers_bootstrap_escape_css_fixture_tokens() {
 fn transform_replace_and_apply_support_bootstrap_escape_css_form_select_rewrite() {
     let file_path = copy_fixture_to_temp("complex_bootstrap_escape.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -511,7 +520,7 @@ fn transform_replace_and_apply_support_bootstrap_escape_css_form_select_rewrite(
 
     let replacement = ".form-select {\n  display: block;\n  width: 100%;\n  border: 1px solid var(--identedit-border);\n  background-image: none;\n  background-color: var(--identedit-surface);\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -542,7 +551,8 @@ fn transform_replace_and_apply_support_bootstrap_escape_css_form_select_rewrite(
 fn transform_reports_ambiguous_target_for_duplicate_escaped_selector_identity() {
     let file_path = copy_fixture_to_temp("complex_bootstrap_escape.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -569,7 +579,7 @@ fn transform_reports_ambiguous_target_for_duplicate_escaped_selector_identity() 
         .expect("expected duplicate escaped selector identity in fixture");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -590,7 +600,8 @@ fn transform_reports_ambiguous_target_for_duplicate_escaped_selector_identity() 
 fn transform_reports_ambiguous_target_for_duplicate_css_identity_across_media_blocks() {
     let file_path = copy_fixture_to_temp("stress_css_duplicate_media.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -617,7 +628,7 @@ fn transform_reports_ambiguous_target_for_duplicate_css_identity_across_media_bl
         .expect("expected duplicate .alert-pill identity in fixture");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -638,7 +649,8 @@ fn transform_reports_ambiguous_target_for_duplicate_css_identity_across_media_bl
 fn transform_replace_and_apply_support_minified_css_fixture_rule_rewrite() {
     let file_path = copy_fixture_to_temp("minified_bundle.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -666,7 +678,7 @@ fn transform_replace_and_apply_support_minified_css_fixture_rule_rewrite() {
 
     let replacement = ".mini-card {\n  padding: 1rem;\n  border: 1px solid #94a3b8;\n  background: var(--surface);\n  color: var(--ink);\n  box-shadow: 0 1px 2px rgb(15 23 42 / 0.16);\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -697,7 +709,8 @@ fn transform_replace_and_apply_supports_bom_cr_only_css_source() {
     let source = "\u{FEFF}.token{color:red}\r.panel{padding:1rem}\r";
     let file_path = write_temp_source(".css", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -725,7 +738,7 @@ fn transform_replace_and_apply_supports_bom_cr_only_css_source() {
 
     let replacement = ".token{color:#0f172a}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -765,7 +778,8 @@ fn transform_json_file_start_insert_supports_bom_cr_only_css_source() {
     let source = "\u{FEFF}.token{color:red}\r";
     let file_path = write_temp_source(".css", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -783,7 +797,7 @@ fn transform_json_file_start_insert_supports_bom_cr_only_css_source() {
         .as_str()
         .expect("expected_file_hash should be present");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -796,7 +810,7 @@ fn transform_json_file_start_insert_supports_bom_cr_only_css_source() {
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform --json file_start insert should support BOM + CR-only css: {}",
@@ -840,7 +854,8 @@ fn transform_json_file_end_insert_supports_bom_cr_only_css_source() {
     let source = "\u{FEFF}.token{color:red}\r.panel{padding:1rem}\r";
     let file_path = write_temp_source(".css", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -861,7 +876,7 @@ fn transform_json_file_end_insert_supports_bom_cr_only_css_source() {
         .expect("file bytes should be readable")
         .len();
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -874,7 +889,7 @@ fn transform_json_file_end_insert_supports_bom_cr_only_css_source() {
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform --json file_end insert should support BOM + CR-only css: {}",
@@ -920,7 +935,8 @@ fn select_handles_large_minified_single_line_css_without_regression() {
     }
     let file_path = write_temp_source(".css", &source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -947,7 +963,8 @@ fn select_handles_large_minified_single_line_css_without_regression() {
 fn transform_json_span_hint_disambiguates_duplicate_css_identity_across_media() {
     let file_path = copy_fixture_to_temp("stress_css_duplicate_media.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -979,7 +996,7 @@ fn transform_json_span_hint_disambiguates_duplicate_css_identity_across_media() 
     let target = duplicates[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -994,7 +1011,7 @@ fn transform_json_span_hint_disambiguates_duplicate_css_identity_across_media() 
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate css identity: {}",
@@ -1022,7 +1039,8 @@ fn transform_json_span_hint_disambiguates_duplicate_css_identity_across_media() 
 fn select_name_filter_returns_zero_for_nameless_css_rule_sets() {
     let css_file = fixture_path("minified_bundle.css");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -1052,7 +1070,8 @@ fn select_name_filter_returns_zero_for_nameless_css_rule_sets() {
 fn transform_json_stale_hash_on_minified_css_returns_precondition_failed() {
     let file_path = copy_fixture_to_temp("minified_bundle.css", ".css");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",
@@ -1069,7 +1088,7 @@ fn transform_json_stale_hash_on_minified_css_returns_precondition_failed() {
     let handle = select_response["handles"][0].clone();
     let span = &handle["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -1084,7 +1103,7 @@ fn transform_json_stale_hash_on_minified_css_returns_precondition_failed() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform --json should fail for stale expected_old_hash"
@@ -1099,7 +1118,8 @@ fn transform_json_stale_hash_on_minified_css_returns_precondition_failed() {
 fn select_bom_only_css_rule_set_returns_empty_result() {
     let file_path = write_temp_source(".css", "\u{FEFF}");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "rule_set",

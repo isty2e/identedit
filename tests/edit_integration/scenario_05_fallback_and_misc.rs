@@ -27,7 +27,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
     let after_insert = "__after__";
 
     let request_a = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -62,7 +62,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
             }
         ]
     });
-    let output_a = run_identedit_with_stdin(&["transform", "--json"], &request_a.to_string());
+    let output_a = run_identedit_with_stdin(&["edit", "--json"], &request_a.to_string());
     assert!(
         output_a.status.success(),
         "first permutation should succeed: {}",
@@ -75,7 +75,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
         .expect("operations should be an array");
 
     let request_b = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -110,7 +110,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
             }
         ]
     });
-    let output_b = run_identedit_with_stdin(&["transform", "--json"], &request_b.to_string());
+    let output_b = run_identedit_with_stdin(&["edit", "--json"], &request_b.to_string());
     assert!(
         output_b.status.success(),
         "second permutation should succeed: {}",
@@ -160,7 +160,7 @@ fn transform_json_mode_rejects_replace_and_insert_on_same_anchor() {
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -196,7 +196,7 @@ fn transform_json_mode_rejects_replace_and_insert_on_same_anchor() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject replace+insert conflict on the same anchor"
@@ -280,12 +280,12 @@ fn transform_json_mode_reports_deterministic_error_for_three_operation_conflicts
             .map(|index| operations[*index].clone())
             .collect();
         let request = json!({
-            "command": "transform",
+            "command": "edit",
             "file": file_path.to_string_lossy().to_string(),
             "operations": ordered_operations
         });
 
-        let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+        let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
         assert!(
             !output.status.success(),
             "transform should fail for conflicting three-operation permutation {permutation:?}"
@@ -326,7 +326,7 @@ fn transform_json_mode_insert_after_supports_crlf_source_files() {
     let span_end = handle["span"]["end"].as_u64().expect("span end");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -347,7 +347,7 @@ fn transform_json_mode_insert_after_supports_crlf_source_files() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support insert_after on CRLF source: {}",
@@ -375,7 +375,7 @@ fn transform_json_mode_insert_before_supports_utf8_bom_prefixed_source() {
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -396,7 +396,7 @@ fn transform_json_mode_insert_before_supports_utf8_bom_prefixed_source() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should support insert_before on BOM source: {}",
@@ -426,7 +426,7 @@ fn transform_json_mode_insert_returns_parse_failure_for_nul_python_source() {
         .expect("nul python fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -445,7 +445,7 @@ fn transform_json_mode_insert_returns_parse_failure_for_nul_python_source() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail for NUL python source even for insert operations"
@@ -461,7 +461,7 @@ fn transform_json_mode_returns_ambiguous_target_when_span_hint_misses_candidates
     let fixture = fixture_path("ambiguous.py");
     let handle = select_first_handle(&fixture, "function_definition", Some("duplicate"));
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture.to_string_lossy().to_string(),
         "operations": [
             {
@@ -482,7 +482,7 @@ fn transform_json_mode_returns_ambiguous_target_when_span_hint_misses_candidates
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail when span_hint cannot resolve duplicates"
@@ -497,7 +497,8 @@ fn transform_json_mode_returns_ambiguous_target_when_span_hint_misses_candidates
 fn transform_json_mode_uses_span_hint_to_disambiguate_targets() {
     let fixture = fixture_path("ambiguous.py");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -522,7 +523,7 @@ fn transform_json_mode_uses_span_hint_to_disambiguate_targets() {
 
     let first = &handles[0];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": fixture.to_string_lossy().to_string(),
         "operations": [
             {
@@ -543,7 +544,7 @@ fn transform_json_mode_uses_span_hint_to_disambiguate_targets() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should succeed when span_hint resolves ambiguity: {}",
@@ -570,7 +571,7 @@ fn transform_json_mode_detects_stale_file_after_selection() {
     fs::write(&file_path, mutated_source).expect("fixture mutation should succeed");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -591,7 +592,7 @@ fn transform_json_mode_detects_stale_file_after_selection() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail for stale file content"
@@ -612,12 +613,12 @@ fn transform_json_mode_detects_stale_file_after_selection() {
 fn transform_json_mode_accepts_empty_operation_list_as_noop_changeset() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should allow empty operation list: {}",
@@ -644,11 +645,11 @@ fn transform_json_mode_empty_operations_unsupported_extension_is_noop_success() 
     let file_path = temporary_file.path().to_path_buf();
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": []
     });
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should allow empty operation list through fallback: {}",
@@ -677,11 +678,11 @@ fn transform_json_mode_empty_operations_missing_file_returns_io_error() {
     }
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": missing_path.to_string_lossy().to_string(),
         "operations": []
     });
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail for missing files even with empty operations"
@@ -704,7 +705,7 @@ fn transform_json_mode_operation_against_empty_json_returns_target_missing() {
     let file_path = temporary_file.path().to_path_buf();
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -719,7 +720,7 @@ fn transform_json_mode_operation_against_empty_json_returns_target_missing() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should fail against empty JSON when target does not exist"
@@ -741,7 +742,7 @@ fn transform_flags_mode_extensionless_file_uses_fallback_and_reports_target_miss
     let file_path = temporary_file.path().to_path_buf();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -772,7 +773,8 @@ fn transform_fallback_duplicate_identity_reports_ambiguous_target() {
     let file_path = temporary_file.path().to_path_buf();
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -803,7 +805,7 @@ fn transform_fallback_duplicate_identity_reports_ambiguous_target() {
     );
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -831,7 +833,7 @@ fn transform_flags_mode_hidden_dotfile_without_basename_uses_fallback_and_report
     .expect("dotfile write should succeed");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -854,7 +856,7 @@ fn transform_flags_mode_returns_io_error_for_directory_input() {
     let directory_path = directory.path().to_path_buf();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -874,12 +876,12 @@ fn transform_flags_mode_returns_io_error_for_directory_input() {
 #[test]
 fn transform_json_mode_treats_env_token_file_path_as_literal() {
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": format!("${{IDENTEDIT_TRANSFORM_JSON_PATH_{}}}/example.py", std::process::id()),
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "json-mode transform path should not expand env tokens"
@@ -900,12 +902,12 @@ fn transform_json_mode_empty_operations_hidden_dotfile_without_basename_is_noop_
     )
     .expect("dotfile write should succeed");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": dotfile_path.to_string_lossy().to_string(),
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform JSON mode should allow no-op changeset via fallback: {}",
@@ -927,12 +929,12 @@ fn transform_json_mode_empty_operations_hidden_dotfile_without_basename_is_noop_
 fn transform_json_mode_returns_io_error_for_directory_input() {
     let directory = tempdir().expect("tempdir should be created");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": directory.path().to_string_lossy().to_string(),
         "operations": []
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform JSON mode should fail when file path is a directory"
@@ -947,8 +949,7 @@ fn transform_json_mode_returns_io_error_for_directory_input() {
 #[test]
 fn transform_non_utf8_path_argument_returns_io_error_without_panicking() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("transform");
+    command.arg("edit");
     command.arg("--identity");
     command.arg("irrelevant");
     command.arg("--replace");

@@ -19,14 +19,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -56,7 +54,8 @@ fn transform_reports_ambiguous_target_for_duplicate_js_identity_without_span_hin
     let path = file_path.to_str().expect("path should be utf-8");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_declaration",
@@ -81,7 +80,7 @@ fn transform_reports_ambiguous_target_for_duplicate_js_identity_without_span_hin
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -106,7 +105,8 @@ fn transform_with_span_hint_disambiguates_duplicate_ts_identity_and_applies_sing
     let path = file_path.to_str().expect("path should be utf-8");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_declaration",
@@ -140,7 +140,7 @@ fn transform_with_span_hint_disambiguates_duplicate_ts_identity_and_applies_sing
 
     let replacement = "function duplicate(value: number): number {\n  return value - 1;\n}";
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": path,
         "operations": [{
             "identity": target_identity,
@@ -154,7 +154,7 @@ fn transform_with_span_hint_disambiguates_duplicate_ts_identity_and_applies_sing
         }]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform should succeed with span_hint: {}",

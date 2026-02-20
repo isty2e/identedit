@@ -10,7 +10,7 @@ pub struct EditArgs {
     #[arg(
         long,
         value_name = "IDENTITY",
-        help = "Target identity from read/select output (flag mode only)"
+        help = "Target identity from read output (flag mode only)"
     )]
     pub identity: Option<String>,
     #[arg(
@@ -36,7 +36,7 @@ pub struct EditArgs {
 }
 
 pub fn run_edit(args: EditArgs) -> Result<MultiFileChangeset, IdenteditError> {
-    crate::cli::transform::run_transform(crate::cli::transform::TransformArgs {
+    crate::cli::edit_build::run_edit_build(crate::cli::edit_build::EditBuildArgs {
         identity: args.identity,
         replace: args.replace,
         delete: args.delete,

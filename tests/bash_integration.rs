@@ -39,14 +39,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -65,7 +63,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -124,7 +123,8 @@ fn select_supports_bashrc_basename_alias() {
 fn transform_replace_and_apply_support_bash_function_definition() {
     let file_path = copy_fixture_to_temp("example.sh", ".sh");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         "--name",
@@ -145,7 +145,7 @@ fn transform_replace_and_apply_support_bash_function_definition() {
 
     let replacement = "process_data() {\n  local value=\"$1\"\n  echo \"$((value + 2))\"\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -175,7 +175,8 @@ fn transform_replace_and_apply_support_bash_function_definition() {
 fn select_reports_parse_failure_for_syntax_invalid_bash() {
     let file_path = write_temp_source(".sh", "broken() {\n  echo \"oops\"\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "function_definition",
         file_path.to_str().expect("path should be utf-8"),

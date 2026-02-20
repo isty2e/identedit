@@ -28,7 +28,7 @@ fn transform_flags_mode_builds_changeset_preview() {
 
     let replacement = "def process_data(x, y):\n    return x + y";
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -87,7 +87,7 @@ fn transform_flags_mode_supports_crlf_source_files() {
     let replacement = "def process_data(value):\r\n    return value + 2\r\n";
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -130,7 +130,7 @@ fn transform_flags_mode_supports_cr_only_source_files() {
     let replacement = "def process_data(value):\r    return value + 2\r";
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -171,7 +171,7 @@ fn transform_flags_mode_supports_utf8_bom_prefixed_python_files() {
         .expect("identity should be present");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -215,7 +215,7 @@ fn transform_flags_mode_preserves_mixed_line_endings_in_preview() {
     let replacement = "def process_data(value):\n    return value + 2\n";
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -249,7 +249,7 @@ fn transform_json_mode_preserves_nul_in_replacement_preview() {
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let replacement_with_nul = "def process_data(value):\n    return \"A\u{0000}B\"";
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
             {
@@ -270,7 +270,7 @@ fn transform_json_mode_preserves_nul_in_replacement_preview() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "transform should accept NUL-containing replacement text: {}",
@@ -298,7 +298,7 @@ fn transform_handles_large_python_files_within_reasonable_time() {
     let start = Instant::now();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -329,7 +329,7 @@ fn transform_handles_large_python_files_within_reasonable_time() {
 fn transform_flags_mode_requires_identity_argument() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--replace",
         "def process_data(value):\n    return value",
         file_path.to_str().expect("path should be utf-8"),
@@ -360,7 +360,7 @@ fn transform_flags_mode_requires_operation_argument() {
         .expect("identity should be present");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         file_path.to_str().expect("path should be utf-8"),
@@ -392,7 +392,7 @@ fn transform_flags_mode_supports_delete_argument() {
         .expect("identity should be present");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--delete",
@@ -435,7 +435,7 @@ fn transform_flags_mode_rejects_replace_and_delete_together() {
         .expect("identity should be present");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -474,7 +474,7 @@ fn transform_flags_mode_supports_shell_variable_expanded_path() {
         .expect("identity should be present");
 
     let output = run_shell_script(
-        "\"$IDENTEDIT_BIN\" transform --identity \"$IDENTEDIT_IDENTITY\" --replace \"def process_data(value): return value + 9\" \"${IDENTEDIT_ROOT}/example.py\"",
+        "\"$IDENTEDIT_BIN\" edit --identity \"$IDENTEDIT_IDENTITY\" --replace \"def process_data(value): return value + 9\" \"${IDENTEDIT_ROOT}/example.py\"",
         workspace.path(),
         Some(identity),
     );
@@ -502,7 +502,7 @@ fn transform_flags_mode_single_quoted_env_token_path_remains_literal() {
     fs::write(&file_path, source).expect("fixture write should succeed");
 
     let output = run_shell_script(
-        "\"$IDENTEDIT_BIN\" transform --identity placeholder --replace \"def process_data(value): return value\" '${IDENTEDIT_ROOT}/example.py'",
+        "\"$IDENTEDIT_BIN\" edit --identity placeholder --replace \"def process_data(value): return value\" '${IDENTEDIT_ROOT}/example.py'",
         workspace.path(),
         None,
     );
@@ -528,7 +528,7 @@ fn transform_returns_parse_failure_for_syntax_invalid_python_file() {
     let temp_path = temporary_file.path().to_path_buf();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -558,7 +558,7 @@ fn transform_parse_failure_does_not_modify_invalid_source_file() {
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -593,7 +593,7 @@ fn transform_returns_parse_failure_for_partially_binary_python_file() {
     let temp_path = temporary_file.path().to_path_buf();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -622,7 +622,7 @@ fn transform_returns_parse_failure_for_nul_in_python_source() {
     let temp_path = temporary_file.path().to_path_buf();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -651,7 +651,7 @@ fn transform_returns_parse_failure_for_bom_plus_nul_python_source() {
     let temp_path = temporary_file.path().to_path_buf();
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "irrelevant",
         "--replace",
@@ -672,7 +672,7 @@ fn transform_returns_parse_failure_for_bom_plus_nul_python_source() {
 fn transform_returns_target_missing_for_unknown_identity() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "does-not-exist",
         "--replace",
@@ -699,7 +699,7 @@ fn transform_returns_ambiguous_target_when_identity_matches_multiple_nodes() {
         .expect("identity should be present");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

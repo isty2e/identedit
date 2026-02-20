@@ -63,14 +63,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -89,7 +87,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind(file: &Path, kind: &str) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -167,7 +166,8 @@ fn select_reports_parse_failure_for_syntax_invalid_dockerfile() {
         "FROM alpine:3.20\nRUN [\"echo\", \"hello\"\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "run_instruction",
@@ -192,7 +192,8 @@ fn select_reports_parse_failure_for_syntax_invalid_dockerfile() {
 fn transform_replace_and_apply_support_dockerfile_env_instruction() {
     let file_path = copy_fixture_to_temp("example.dockerfile", ".dockerfile");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "env_instruction",
@@ -215,7 +216,7 @@ fn transform_replace_and_apply_support_dockerfile_env_instruction() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -246,7 +247,8 @@ fn transform_reports_ambiguous_target_for_duplicate_dockerfile_run_identity() {
     let source = "FROM alpine:3.20\nRUN echo hello\nRUN echo hello\n";
     let file_path = write_temp_source(".dockerfile", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "run_instruction",
@@ -280,7 +282,7 @@ fn transform_reports_ambiguous_target_for_duplicate_dockerfile_run_identity() {
         .expect("fixture should include duplicate run instruction identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -302,7 +304,8 @@ fn transform_json_span_hint_disambiguates_duplicate_dockerfile_run_identity() {
     let source = "FROM alpine:3.20\nRUN echo hello\nRUN echo hello\n";
     let file_path = write_temp_source(".dockerfile", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "run_instruction",
@@ -337,7 +340,7 @@ fn transform_json_span_hint_disambiguates_duplicate_dockerfile_run_identity() {
         .expect("span.end should be u64");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [
             {
@@ -359,7 +362,7 @@ fn transform_json_span_hint_disambiguates_duplicate_dockerfile_run_identity() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "span_hint should disambiguate duplicate identity: {}",
@@ -382,7 +385,8 @@ fn transform_json_duplicate_dockerfile_identity_with_missed_span_hint_returns_am
     let source = "FROM alpine:3.20\nRUN echo hello\nRUN echo hello\n";
     let file_path = write_temp_source(".dockerfile", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "run_instruction",
@@ -411,7 +415,7 @@ fn transform_json_duplicate_dockerfile_identity_with_missed_span_hint_returns_am
         .expect("expected_old_hash should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [
             {
@@ -433,7 +437,7 @@ fn transform_json_duplicate_dockerfile_identity_with_missed_span_hint_returns_am
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "missed span_hint should fall back to ambiguous target"
@@ -449,7 +453,8 @@ fn apply_reports_precondition_failed_after_dockerfile_source_mutation() {
     let file_path = copy_fixture_to_temp("example.dockerfile", ".dockerfile");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "env_instruction",
@@ -472,7 +477,7 @@ fn apply_reports_precondition_failed_after_dockerfile_source_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

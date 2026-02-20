@@ -39,14 +39,12 @@ fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -65,7 +63,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -107,7 +106,8 @@ fn select_covers_html_kinds_and_provider() {
 fn select_supports_htm_extension_alias() {
     let file_path = copy_fixture_to_temp("example.html", ".htm");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -124,7 +124,8 @@ fn select_supports_htm_extension_alias() {
 fn transform_replace_and_apply_support_html_start_tag() {
     let file_path = copy_fixture_to_temp("example.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -152,7 +153,7 @@ fn transform_replace_and_apply_support_html_start_tag() {
 
     let replacement = "<section id=\"main\" class=\"updated\">";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -198,7 +199,8 @@ fn transform_replace_and_apply_support_html_start_tag() {
 fn select_transform_apply_pipeline_supports_html_title_rewrite() {
     let file_path = copy_fixture_to_temp("example.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -226,7 +228,7 @@ fn select_transform_apply_pipeline_supports_html_title_rewrite() {
 
     let replacement = "<title data-suite=\"identedit\">";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -261,7 +263,8 @@ fn select_transform_apply_pipeline_supports_html_title_rewrite() {
 fn select_reports_parse_failure_for_syntax_invalid_html() {
     let file_path = write_temp_source(".html", "<html><body><");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -287,7 +290,8 @@ fn select_reports_parse_failure_for_syntax_invalid_html() {
 fn select_covers_realistic_html_fixture_landmarks() {
     let html_file = fixture_path("realistic_pico.html");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -323,7 +327,8 @@ fn select_covers_realistic_html_fixture_landmarks() {
 fn transform_replace_and_apply_support_realistic_html_main_tag_rewrite() {
     let file_path = copy_fixture_to_temp("realistic_pico.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -351,7 +356,7 @@ fn transform_replace_and_apply_support_realistic_html_main_tag_rewrite() {
 
     let replacement = "<main class=\"container layout-grid\">";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -381,7 +386,8 @@ fn transform_replace_and_apply_support_realistic_html_main_tag_rewrite() {
 fn select_covers_complex_html_fixture_special_tags() {
     let html_file = fixture_path("complex_bootstrap_dashboard.html");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -425,7 +431,8 @@ fn select_covers_complex_html_fixture_special_tags() {
 fn transform_replace_and_apply_support_complex_html_main_rewrite() {
     let file_path = copy_fixture_to_temp("complex_bootstrap_dashboard.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -453,7 +460,7 @@ fn transform_replace_and_apply_support_complex_html_main_rewrite() {
 
     let replacement = "<main id=\"dashboard-main\" class=\"container-fluid py-3 has-grid\">";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -483,7 +490,8 @@ fn transform_replace_and_apply_support_complex_html_main_rewrite() {
 fn transform_reports_ambiguous_target_for_duplicate_html_element_identity() {
     let file_path = copy_fixture_to_temp("complex_bootstrap_dashboard.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -510,7 +518,7 @@ fn transform_reports_ambiguous_target_for_duplicate_html_element_identity() {
         .expect("expected duplicate li identity in fixture");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         li_identity,
         "--replace",
@@ -531,7 +539,8 @@ fn transform_reports_ambiguous_target_for_duplicate_html_element_identity() {
 fn select_covers_webapp_html_fixture_script_style_template_nodes() {
     let html_file = fixture_path("complex_vite_like_webapp.html");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -573,7 +582,8 @@ fn select_covers_webapp_html_fixture_script_style_template_nodes() {
 fn transform_replace_and_apply_support_webapp_html_app_main_rewrite() {
     let file_path = copy_fixture_to_temp("complex_vite_like_webapp.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -601,7 +611,7 @@ fn transform_replace_and_apply_support_webapp_html_app_main_rewrite() {
 
     let replacement = "<main id=\"app-main\" data-e2e=\"edge-hunt\" class=\"app-shell\">";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -631,7 +641,8 @@ fn transform_replace_and_apply_support_webapp_html_app_main_rewrite() {
 fn transform_reports_ambiguous_target_for_duplicate_webapp_html_list_item_identity() {
     let file_path = copy_fixture_to_temp("complex_vite_like_webapp.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -658,7 +669,7 @@ fn transform_reports_ambiguous_target_for_duplicate_webapp_html_list_item_identi
         .expect("expected duplicate list item identity in fixture");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -679,7 +690,8 @@ fn transform_reports_ambiguous_target_for_duplicate_webapp_html_list_item_identi
 fn transform_reports_ambiguous_target_for_stress_html_duplicate_identity_set() {
     let file_path = copy_fixture_to_temp("stress_html_duplicate_sections.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -706,7 +718,7 @@ fn transform_reports_ambiguous_target_for_stress_html_duplicate_identity_set() {
         .expect("expected duplicate stress identity in fixture");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -727,7 +739,8 @@ fn transform_reports_ambiguous_target_for_stress_html_duplicate_identity_set() {
 fn transform_replace_and_apply_support_minified_html_fixture_main_rewrite() {
     let file_path = copy_fixture_to_temp("minified_dashboard.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -755,7 +768,7 @@ fn transform_replace_and_apply_support_minified_html_fixture_main_rewrite() {
 
     let replacement = "<main id=\"mini-main\" class=\"grid compact\" data-round=\"r1\">";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -785,7 +798,8 @@ fn transform_replace_and_apply_support_minified_html_fixture_main_rewrite() {
 fn transform_json_span_hint_disambiguates_stress_html_duplicate_identity() {
     let file_path = copy_fixture_to_temp("stress_html_duplicate_sections.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -828,7 +842,7 @@ fn transform_json_span_hint_disambiguates_stress_html_duplicate_identity() {
     let replacement = "<li class=\"dup-item\"><a href=\"#retry\">Retry now</a></li>";
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -843,7 +857,7 @@ fn transform_json_span_hint_disambiguates_stress_html_duplicate_identity() {
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate identity with span_hint: {}",
@@ -901,7 +915,8 @@ fn select_handles_large_minified_single_line_html_without_regression() {
 
     let file_path = write_temp_source(".html", &source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -928,7 +943,8 @@ fn select_handles_large_minified_single_line_html_without_regression() {
 fn transform_json_duplicate_html_identity_with_missed_span_hint_returns_ambiguous_target() {
     let file_path = copy_fixture_to_temp("stress_html_duplicate_sections.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -960,7 +976,7 @@ fn transform_json_duplicate_html_identity_with_missed_span_hint_returns_ambiguou
         .as_str()
         .expect("expected_old_hash should be present");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -975,7 +991,7 @@ fn transform_json_duplicate_html_identity_with_missed_span_hint_returns_ambiguou
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !transform_output.status.success(),
         "transform --json should fail with ambiguous_target on stale span_hint for duplicate identity"
@@ -990,7 +1006,8 @@ fn transform_json_duplicate_html_identity_with_missed_span_hint_returns_ambiguou
 fn select_response_contains_expected_old_hash_for_vite_like_html_fixture() {
     let html_file = fixture_path("complex_vite_like_webapp.html");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -1025,7 +1042,8 @@ fn select_response_contains_expected_old_hash_for_vite_like_html_fixture() {
 fn transform_json_span_hint_can_target_second_duplicate_html_node() {
     let file_path = copy_fixture_to_temp("stress_html_duplicate_sections.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "element",
@@ -1059,7 +1077,7 @@ fn transform_json_span_hint_can_target_second_duplicate_html_node() {
     let start = span["start"].as_u64().expect("span start");
     let end = span["end"].as_u64().expect("span end");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -1074,7 +1092,7 @@ fn transform_json_span_hint_can_target_second_duplicate_html_node() {
         ]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate second duplicate with span_hint: {}",
@@ -1102,16 +1120,16 @@ fn transform_json_span_hint_can_target_second_duplicate_html_node() {
 fn select_json_mode_multi_file_html_scan_returns_flat_handles() {
     let file_a = copy_fixture_to_temp("complex_vite_like_webapp.html", ".html");
     let file_b = copy_fixture_to_temp("minified_dashboard.html", ".html");
-    let request = json!({
-        "command": "select",
-        "selector": {"kind": "start_tag"},
-        "files": [
-            file_a.to_str().expect("path should be utf-8"),
-            file_b.to_str().expect("path should be utf-8")
-        ]
-    });
-
-    let output = run_identedit_with_stdin(&["select", "--verbose", "--json"], &request.to_string());
+    let output = run_identedit(&[
+        "read",
+        "--mode",
+        "ast",
+        "--json",
+        "--kind",
+        "start_tag",
+        file_a.to_str().expect("path should be utf-8"),
+        file_b.to_str().expect("path should be utf-8"),
+    ]);
     assert!(
         output.status.success(),
         "select --json should succeed for multi-file html scan: {}",
@@ -1142,7 +1160,8 @@ fn select_json_mode_multi_file_html_scan_returns_flat_handles() {
 fn transform_json_stale_hash_on_minified_html_returns_precondition_failed() {
     let file_path = copy_fixture_to_temp("minified_dashboard.html", ".html");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "start_tag",
@@ -1168,7 +1187,7 @@ fn transform_json_stale_hash_on_minified_html_returns_precondition_failed() {
         .expect("minified main start_tag handle should exist");
     let span = &handle["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_str().expect("path should be utf-8"),
         "operations": [
             {
@@ -1183,7 +1202,7 @@ fn transform_json_stale_hash_on_minified_html_returns_precondition_failed() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform --json should fail for stale expected_old_hash"
@@ -1197,16 +1216,16 @@ fn transform_json_stale_hash_on_minified_html_returns_precondition_failed() {
 #[test]
 fn select_json_mode_rejects_duplicate_html_file_entries() {
     let file_path = copy_fixture_to_temp("complex_vite_like_webapp.html", ".html");
-    let request = json!({
-        "command": "select",
-        "selector": {"kind": "start_tag"},
-        "files": [
-            file_path.to_str().expect("path should be utf-8"),
-            file_path.to_str().expect("path should be utf-8")
-        ]
-    });
-
-    let output = run_identedit_with_stdin(&["select", "--verbose", "--json"], &request.to_string());
+    let output = run_identedit(&[
+        "read",
+        "--mode",
+        "ast",
+        "--json",
+        "--kind",
+        "start_tag",
+        file_path.to_str().expect("path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
     assert!(
         !output.status.success(),
         "select --json should reject duplicate file entries"

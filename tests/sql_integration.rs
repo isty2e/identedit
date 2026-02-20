@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -150,7 +149,8 @@ fn select_reports_parse_failure_for_syntax_invalid_sql() {
         "CREATE TABLE users (\n  id INTEGER PRIMARY KEY,\n  name TEXT\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -175,7 +175,8 @@ fn select_reports_parse_failure_for_syntax_invalid_sql() {
 fn transform_replace_and_apply_support_sql_statement() {
     let file_path = copy_fixture_to_temp("example.sql", ".sql");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -199,7 +200,7 @@ fn transform_replace_and_apply_support_sql_statement() {
 
     let replacement = "INSERT INTO users (id, name) VALUES (1, 'pilot');";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -230,7 +231,8 @@ fn transform_reports_ambiguous_target_for_duplicate_sql_statement_identity() {
     let source = "SELECT id FROM users WHERE id = 1;\nSELECT id FROM users WHERE id = 1;\n";
     let file_path = write_temp_source(".sql", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -264,7 +266,7 @@ fn transform_reports_ambiguous_target_for_duplicate_sql_statement_identity() {
         .expect("fixture should include duplicate statement identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -286,7 +288,8 @@ fn transform_json_span_hint_disambiguates_duplicate_sql_statement_identity() {
     let source = "SELECT id FROM users WHERE id = 1;\nSELECT id FROM users WHERE id = 1;\n";
     let file_path = write_temp_source(".sql", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -321,7 +324,7 @@ fn transform_json_span_hint_disambiguates_duplicate_sql_statement_identity() {
         .expect("span.end should be u64");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [
             {
@@ -343,7 +346,7 @@ fn transform_json_span_hint_disambiguates_duplicate_sql_statement_identity() {
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         output.status.success(),
         "span_hint should disambiguate duplicate identity: {}",
@@ -366,7 +369,8 @@ fn transform_json_duplicate_sql_identity_with_missed_span_hint_returns_ambiguous
     let source = "SELECT id FROM users WHERE id = 1;\nSELECT id FROM users WHERE id = 1;\n";
     let file_path = write_temp_source(".sql", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -395,7 +399,7 @@ fn transform_json_duplicate_sql_identity_with_missed_span_hint_returns_ambiguous
         .expect("expected_old_hash should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [
             {
@@ -417,7 +421,7 @@ fn transform_json_duplicate_sql_identity_with_missed_span_hint_returns_ambiguous
         ]
     });
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "missed span_hint should fall back to ambiguous target"
@@ -433,7 +437,8 @@ fn apply_reports_precondition_failed_after_sql_source_mutation() {
     let file_path = copy_fixture_to_temp("example.sql", ".sql");
 
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -456,7 +461,7 @@ fn apply_reports_precondition_failed_after_sql_source_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -491,7 +496,8 @@ fn apply_reports_precondition_failed_after_sql_source_mutation() {
 fn select_reports_parse_failure_for_nul_in_sql_source() {
     let file_path = write_temp_bytes(".sql", b"SELECT 1;\0\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -515,7 +521,7 @@ fn select_reports_parse_failure_for_nul_in_sql_source() {
 fn transform_reports_parse_failure_for_nul_in_sql_source() {
     let file_path = write_temp_bytes(".sql", b"SELECT 1;\0\n");
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "deadbeefdeadbeef",
         "--replace",
@@ -568,7 +574,8 @@ fn apply_reports_parse_failure_for_nul_in_sql_source() {
 fn select_reports_parse_failure_for_unterminated_block_comment_in_sql() {
     let file_path = write_temp_source(".sql", "/* broken comment\nSELECT 1;\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -589,7 +596,8 @@ fn transform_replace_and_apply_preserve_crlf_sql_source_segments() {
     let source = "CREATE TABLE users (\r\n    id INTEGER PRIMARY KEY,\r\n    name TEXT NOT NULL\r\n);\r\n\r\nINSERT INTO users (id, name) VALUES (1, 'identedit');\r\nSELECT id, name FROM users WHERE id = 1;\r\n";
     let file_path = write_temp_source(".sql", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -612,7 +620,7 @@ fn transform_replace_and_apply_preserve_crlf_sql_source_segments() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -646,7 +654,8 @@ fn select_keeps_semicolons_inside_sql_string_literals_within_single_statement() 
     let source = "INSERT INTO logs(message) VALUES ('alpha;beta');\nSELECT count(*) FROM logs;\n";
     let file_path = write_temp_source(".sql", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -678,7 +687,8 @@ fn select_supports_cr_only_sql_files() {
     let source = "CREATE TABLE users (\rid INTEGER PRIMARY KEY,\rname TEXT NOT NULL\r);\rSELECT id FROM users;\r";
     let file_path = write_temp_source(".sql", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -705,7 +715,8 @@ fn select_supports_cr_only_sql_files() {
 fn select_reports_parse_failure_for_bom_plus_nul_sql_source() {
     let file_path = write_temp_bytes(".sql", b"\xEF\xBB\xBFSELECT 1;\0\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -725,7 +736,7 @@ fn select_reports_parse_failure_for_bom_plus_nul_sql_source() {
 fn transform_reports_parse_failure_for_syntax_invalid_sql_source() {
     let file_path = write_temp_source(".sql", "CREATE TABLE users (\n  id INTEGER,\n");
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "deadbeefdeadbeef",
         "--replace",
@@ -779,7 +790,8 @@ fn select_exposes_both_outer_and_inner_statements_for_cte_window_sql() {
     let source = "WITH ranked AS (\n  SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM users\n)\nSELECT id FROM ranked WHERE rn = 1;\n";
     let file_path = write_temp_source(".sql", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -824,7 +836,8 @@ fn select_parses_quoted_identifiers_and_unicode_sql_literals() {
     let source = "SELECT \"Display Name\", '한글😀' AS label FROM \"User Events\";\n";
     let file_path = write_temp_source(".sql", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -854,7 +867,8 @@ fn select_parses_quoted_identifiers_and_unicode_sql_literals() {
 fn transform_json_file_end_insert_and_apply_support_sql() {
     let file_path = copy_fixture_to_temp("example.sql", ".sql");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -873,7 +887,7 @@ fn transform_json_file_end_insert_and_apply_support_sql() {
         .expect("expected_file_hash should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [{
             "target": {
@@ -887,7 +901,7 @@ fn transform_json_file_end_insert_and_apply_support_sql() {
         }]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform file_end insert failed: {}",
@@ -911,7 +925,8 @@ fn transform_json_file_end_insert_and_apply_support_sql() {
 fn transform_json_file_start_insert_and_apply_support_sql() {
     let file_path = copy_fixture_to_temp("example.sql", ".sql");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -930,7 +945,7 @@ fn transform_json_file_start_insert_and_apply_support_sql() {
         .expect("expected_file_hash should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [{
             "target": {
@@ -944,7 +959,7 @@ fn transform_json_file_start_insert_and_apply_support_sql() {
         }]
     });
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         transform_output.status.success(),
         "transform file_start insert failed: {}",
@@ -971,7 +986,7 @@ fn transform_json_file_start_insert_and_apply_support_sql() {
 fn transform_json_rejects_file_end_insert_with_stale_hash_sql() {
     let file_path = copy_fixture_to_temp("example.sql", ".sql");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [{
             "target": {
@@ -984,7 +999,7 @@ fn transform_json_rejects_file_end_insert_with_stale_hash_sql() {
             }
         }]
     });
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject stale file_end hash for SQL"
@@ -999,7 +1014,7 @@ fn transform_json_rejects_file_end_insert_with_stale_hash_sql() {
 fn transform_json_rejects_file_start_insert_with_stale_hash_sql() {
     let file_path = copy_fixture_to_temp("example.sql", ".sql");
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path,
         "operations": [{
             "target": {
@@ -1012,7 +1027,7 @@ fn transform_json_rejects_file_start_insert_with_stale_hash_sql() {
             }
         }]
     });
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request.to_string());
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
         "transform should reject stale file_start hash for SQL"
@@ -1028,7 +1043,8 @@ fn select_ignores_semicolons_inside_sql_line_comments_for_statement_count() {
     let source = "SELECT 1; -- ; ; ;\nSELECT 2;\n";
     let file_path = write_temp_source(".sql", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",
@@ -1053,7 +1069,8 @@ fn select_statement_handles_are_sorted_by_start_span_for_nested_sql() {
     let source = "WITH ranked AS (\n  SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM users\n)\nSELECT id FROM ranked WHERE rn = 1;\n";
     let file_path = write_temp_source(".sql", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "statement",

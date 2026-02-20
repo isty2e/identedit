@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -124,7 +123,8 @@ fn select_supports_case_insensitive_csharp_extension() {
 fn transform_replace_and_apply_support_csharp_method_declaration() {
     let file_path = copy_fixture_to_temp("example.cs", ".cs");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         "--name",
@@ -146,7 +146,7 @@ fn transform_replace_and_apply_support_csharp_method_declaration() {
     let replacement =
         "public int ProcessData(int value)\n        {\n            return value + 2;\n        }";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -179,7 +179,8 @@ fn select_reports_parse_failure_for_syntax_invalid_csharp() {
         "public class Broken {\n    public int Run() {\n        return 1\n}\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -204,7 +205,8 @@ fn transform_reports_ambiguous_target_for_duplicate_csharp_method_identity() {
     let source = "public class First {\n    private void Configure() {\n        Console.WriteLine(\"ready\");\n    }\n}\n\npublic class Second {\n    private void Configure() {\n        Console.WriteLine(\"ready\");\n    }\n}\n";
     let file_path = write_temp_source(".cs", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -238,7 +240,7 @@ fn transform_reports_ambiguous_target_for_duplicate_csharp_method_identity() {
         .expect("fixture should include duplicate Configure method identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -260,7 +262,8 @@ fn transform_json_span_hint_disambiguates_duplicate_csharp_method_identity() {
     let source = "public class First {\n    private void Configure() {\n        Console.WriteLine(\"ready\");\n    }\n}\n\npublic class Second {\n    private void Configure() {\n        Console.WriteLine(\"ready\");\n    }\n}\n";
     let file_path = write_temp_source(".cs", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -287,7 +290,7 @@ fn transform_json_span_hint_disambiguates_duplicate_csharp_method_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -305,7 +308,7 @@ fn transform_json_span_hint_disambiguates_duplicate_csharp_method_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate C# method identity: {}",
@@ -334,7 +337,8 @@ fn transform_json_duplicate_csharp_identity_with_missed_span_hint_returns_ambigu
     let source = "public class First {\n    private void Configure() {\n        Console.WriteLine(\"ready\");\n    }\n}\n\npublic class Second {\n    private void Configure() {\n        Console.WriteLine(\"ready\");\n    }\n}\n";
     let file_path = write_temp_source(".cs", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -355,7 +359,7 @@ fn transform_json_duplicate_csharp_identity_with_missed_span_hint_returns_ambigu
         .expect("Configure handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -373,7 +377,7 @@ fn transform_json_duplicate_csharp_identity_with_missed_span_hint_returns_ambigu
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate C# methods"
@@ -388,7 +392,8 @@ fn transform_json_duplicate_csharp_identity_with_missed_span_hint_returns_ambigu
 fn transform_json_rejects_zero_length_span_hint_for_csharp() {
     let file_path = copy_fixture_to_temp("example.cs", ".cs");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -412,7 +417,7 @@ fn transform_json_rejects_zero_length_span_hint_for_csharp() {
         .expect("span.start should be a number");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -430,7 +435,7 @@ fn transform_json_rejects_zero_length_span_hint_for_csharp() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should reject zero-length C# span_hint"
@@ -449,7 +454,8 @@ fn transform_json_rejects_zero_length_span_hint_for_csharp() {
 fn transform_json_accepts_non_matching_span_hint_for_unique_csharp_target() {
     let file_path = copy_fixture_to_temp("example.cs", ".cs");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -476,7 +482,7 @@ fn transform_json_accepts_non_matching_span_hint_for_unique_csharp_target() {
         .expect("span.end should be a number");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -494,7 +500,7 @@ fn transform_json_accepts_non_matching_span_hint_for_unique_csharp_target() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should accept non-matching span_hint when target remains uniquely resolvable: {}",
@@ -519,7 +525,8 @@ fn transform_json_accepts_non_matching_span_hint_for_unique_csharp_target() {
 fn apply_reports_precondition_failed_after_csharp_source_mutation() {
     let file_path = copy_fixture_to_temp("example.cs", ".cs");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -541,7 +548,7 @@ fn apply_reports_precondition_failed_after_csharp_source_mutation() {
         .expect("ProcessData identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -580,7 +587,8 @@ fn transform_replace_and_apply_support_crlf_csharp_source() {
     let source = "public class CrlfClass {\r\n    public int Run(int value) {\r\n        return value + 1;\r\n    }\r\n}\r\n";
     let file_path = write_temp_source(".cs", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -603,7 +611,7 @@ fn transform_replace_and_apply_support_crlf_csharp_source() {
 
     let replacement = "public int Run(int value) {\r\n        return value + 2;\r\n    }";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -633,7 +641,8 @@ fn transform_replace_and_apply_support_crlf_csharp_source() {
 fn select_reports_parse_failure_for_nul_in_csharp_source() {
     let file_path = write_temp_bytes(".cs", b"class Broken {\0}\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),
@@ -656,7 +665,7 @@ fn select_reports_parse_failure_for_nul_in_csharp_source() {
 fn transform_reports_parse_failure_for_nul_in_csharp_source() {
     let file_path = write_temp_bytes(".cs", b"class Broken {\0}\n");
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         "deadbeef",
         "--replace",
@@ -724,7 +733,8 @@ fn select_supports_utf8_bom_prefixed_csharp_files() {
     let source = b"\xEF\xBB\xBFpublic class BomClass {\n    public void Run() {}\n}\n";
     let file_path = write_temp_bytes(".cs", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class_declaration",
         file_path.to_str().expect("path should be utf-8"),

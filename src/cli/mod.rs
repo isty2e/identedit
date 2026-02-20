@@ -1,15 +1,15 @@
 use clap::{Parser, Subcommand};
 
 pub mod apply;
-pub mod changeset;
+mod merge_plan;
+mod line_patch;
 pub mod edit;
 pub mod grammar;
-pub mod hashline;
 pub mod merge;
 pub mod patch;
 pub mod read;
-pub mod select;
-pub mod transform;
+mod read_select;
+mod edit_build;
 
 #[derive(Debug, Parser)]
 #[command(name = "identedit")]
@@ -36,12 +36,4 @@ pub enum Commands {
     Grammar(grammar::GrammarArgs),
     #[command(about = "One-shot single-target patch (build + apply)")]
     Patch(Box<patch::PatchArgs>),
-    #[command(name = "select", hide = true)]
-    LegacySelect(select::SelectArgs),
-    #[command(name = "transform", hide = true)]
-    LegacyTransform(transform::TransformArgs),
-    #[command(name = "changeset", hide = true)]
-    LegacyChangeset(changeset::ChangesetArgs),
-    #[command(name = "hashline", hide = true)]
-    LegacyHashline(Box<hashline::HashlineArgs>),
 }

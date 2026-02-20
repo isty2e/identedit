@@ -38,7 +38,6 @@ fn run_identedit(arguments: &[&str]) -> Output {
 
 fn run_identedit_in_dir(directory: &Path, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.current_dir(directory);
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
@@ -51,7 +50,6 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn run_identedit_with_raw_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -75,7 +73,6 @@ fn run_identedit_with_raw_stdin_and_env(
     envs: &[(&str, &str)],
 ) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     for (key, value) in envs {
         command.env(key, value);
@@ -104,7 +101,6 @@ fn run_shell_script(script: &str, root: &Path) -> Output {
 fn run_identedit_with_stdin_in_dir(directory: &Path, arguments: &[&str], input: &str) -> Output {
     let normalized_input = normalize_apply_input_payload(arguments, input);
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.current_dir(directory);
     command.args(arguments);
     command.stdin(Stdio::piped());
@@ -125,7 +121,8 @@ fn run_identedit_with_stdin_in_dir(directory: &Path, arguments: &[&str], input: 
 
 fn select_named_handle(file_path: &Path, name_pattern: &str) -> Value {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -150,7 +147,8 @@ fn select_first_handle(file_path: &Path, kind: &str, name_pattern: Option<&str>)
 
 fn select_root_json_object_handle(file_path: &Path) -> Value {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "object",

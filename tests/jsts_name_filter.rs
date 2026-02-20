@@ -10,10 +10,9 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
+fn run_read(arguments: &[&str], file: &PathBuf) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
-    command.arg("select");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
     command.args(arguments);
     command.arg(file);
     command.output().expect("failed to run identedit binary")
@@ -23,7 +22,7 @@ fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
 fn js_arrow_function_handles_are_nameless_and_excluded_by_name_filter() {
     let fixture = fixture_path("example.js");
 
-    let output = run_select(&["--kind", "arrow_function"], &fixture);
+    let output = run_read(&["--kind", "arrow_function"], &fixture);
     assert!(
         output.status.success(),
         "select failed: {}",
@@ -45,7 +44,7 @@ fn js_arrow_function_handles_are_nameless_and_excluded_by_name_filter() {
         "arrow_function handles should be nameless"
     );
 
-    let filtered_output = run_select(&["--kind", "arrow_function", "--name", "*"], &fixture);
+    let filtered_output = run_read(&["--kind", "arrow_function", "--name", "*"], &fixture);
     assert!(
         filtered_output.status.success(),
         "filtered select failed: {}",
@@ -66,7 +65,7 @@ fn js_arrow_function_handles_are_nameless_and_excluded_by_name_filter() {
 fn tsx_arrow_function_name_filter_never_false_positives_from_binding_identifier() {
     let fixture = fixture_path("example.tsx");
 
-    let output = run_select(&["--kind", "arrow_function"], &fixture);
+    let output = run_read(&["--kind", "arrow_function"], &fixture);
     assert!(
         output.status.success(),
         "select failed: {}",
@@ -82,7 +81,7 @@ fn tsx_arrow_function_name_filter_never_false_positives_from_binding_identifier(
         "expected arrow_function handles in fixture"
     );
 
-    let filtered_output = run_select(&["--kind", "arrow_function", "--name", "Row"], &fixture);
+    let filtered_output = run_read(&["--kind", "arrow_function", "--name", "Row"], &fixture);
     assert!(
         filtered_output.status.success(),
         "filtered select failed: {}",

@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         kind,
@@ -125,7 +124,8 @@ fn select_supports_case_insensitive_c_extension() {
 fn select_reports_parse_failure_for_syntax_invalid_c() {
     let file_path = write_temp_source(".c", "int broken( {\n    return 1;\n}\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -150,7 +150,8 @@ fn select_reports_parse_failure_for_syntax_invalid_c() {
 fn transform_replace_and_apply_support_c_function_definition() {
     let file_path = copy_fixture_to_temp("example.c", ".c");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -178,7 +179,7 @@ fn transform_replace_and_apply_support_c_function_definition() {
 
     let replacement = "int process_data(int value) {\n    return value - 1;\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -224,7 +225,8 @@ fn transform_replace_and_apply_support_c_function_definition() {
 fn transform_reports_ambiguous_target_for_duplicate_c_function_identity() {
     let file_path = copy_fixture_to_temp("duplicate_functions.c", ".c");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -258,7 +260,7 @@ fn transform_reports_ambiguous_target_for_duplicate_c_function_identity() {
         .expect("fixture should include duplicate function identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -279,7 +281,8 @@ fn transform_reports_ambiguous_target_for_duplicate_c_function_identity() {
 fn transform_json_span_hint_disambiguates_duplicate_c_function_identity() {
     let file_path = copy_fixture_to_temp("duplicate_functions.c", ".c");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -311,7 +314,7 @@ fn transform_json_span_hint_disambiguates_duplicate_c_function_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -329,7 +332,7 @@ fn transform_json_span_hint_disambiguates_duplicate_c_function_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate C identity: {}",
@@ -354,7 +357,8 @@ fn transform_json_span_hint_disambiguates_duplicate_c_function_identity() {
 fn transform_json_duplicate_c_identity_with_missed_span_hint_returns_ambiguous_target() {
     let file_path = copy_fixture_to_temp("duplicate_functions.c", ".c");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -380,7 +384,7 @@ fn transform_json_duplicate_c_identity_with_missed_span_hint_returns_ambiguous_t
         .expect("configure handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -398,7 +402,7 @@ fn transform_json_duplicate_c_identity_with_missed_span_hint_returns_ambiguous_t
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate C functions"
@@ -413,7 +417,8 @@ fn transform_json_duplicate_c_identity_with_missed_span_hint_returns_ambiguous_t
 fn apply_reports_precondition_failed_after_c_source_mutation() {
     let file_path = copy_fixture_to_temp("example.c", ".c");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -440,7 +445,7 @@ fn apply_reports_precondition_failed_after_c_source_mutation() {
         .expect("process_data identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -479,7 +484,8 @@ fn select_supports_utf8_bom_prefixed_c_files() {
     let source = b"\xEF\xBB\xBFint bom_run(void) {\n    return 1;\n}\n";
     let file_path = write_temp_bytes(".c", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -506,7 +512,8 @@ fn transform_replace_and_apply_support_crlf_c_source() {
     let source = "int run(int value) {\r\n    return value + 1;\r\n}\r\n";
     let file_path = write_temp_source(".c", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--verbose",
         "--kind",
         "function_definition",
@@ -526,7 +533,7 @@ fn transform_replace_and_apply_support_crlf_c_source() {
 
     let replacement = "int run(int value) {\r\n    return value + 2;\r\n}";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",

@@ -8,7 +8,6 @@ use tempfile::Builder;
 
 fn run_identedit_with_raw_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -42,7 +41,7 @@ fn assert_structured_error(output: &Output, expected_type: &str) {
 }
 
 fn assert_json_mode_error_contract(input: &[u8], expected_type: &str) {
-    for command in ["select", "transform", "apply"] {
+    for command in ["read", "edit", "apply"] {
         let output = run_identedit_with_raw_stdin(&[command, "--json"], input);
         assert_structured_error(&output, expected_type);
     }
@@ -75,18 +74,18 @@ fn valid_json_mode_payloads(file_path: &Path) -> [(&'static str, String); 3] {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
 
-    let select_payload = format!(
-        "{{\"command\":\"select\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[]}}}}"
+    let read_payload = format!(
+        "{{\"command\":\"read\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[]}}}}"
     );
-    let transform_payload =
-        format!("{{\"command\":\"transform\",\"file\":\"{file_literal}\",\"operations\":[]}}");
+    let edit_payload =
+        format!("{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[]}}");
     let apply_payload = format!(
         "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
     );
 
     [
-        ("select", select_payload),
-        ("transform", transform_payload),
+        ("read", read_payload),
+        ("edit", edit_payload),
         ("apply", apply_payload),
     ]
 }
@@ -151,13 +150,10 @@ fn json_mode_non_object_top_level_payloads_return_invalid_request() {
 fn json_mode_empty_file_path_returns_io_error_for_all_commands() {
     let payloads = [
         (
-            "select",
-            r#"{"command":"select","file":"","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
+            "read",
+            r#"{"command": "read","file":"","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
         ),
-        (
-            "transform",
-            r#"{"command":"transform","file":"","operations":[]}"#,
-        ),
+        ("edit", r#"{"command":"edit","file":"","operations":[]}"#),
         (
             "apply",
             r#"{"command":"apply","changeset":{"files":[{"file":"","operations":[]}],"transaction":{"mode":"all_or_nothing"}}}"#,
@@ -174,12 +170,12 @@ fn json_mode_empty_file_path_returns_io_error_for_all_commands() {
 fn json_mode_escaped_nul_file_path_returns_io_error_for_all_commands() {
     let payloads = [
         (
-            "select",
-            r#"{"command":"select","file":"\u0000","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
+            "read",
+            r#"{"command": "read","file":"\u0000","selector":{"kind":"function_definition","exclude_kinds":[]}}"#,
         ),
         (
-            "transform",
-            r#"{"command":"transform","file":"\u0000","operations":[]}"#,
+            "edit",
+            r#"{"command":"edit","file":"\u0000","operations":[]}"#,
         ),
         (
             "apply",
@@ -235,10 +231,10 @@ fn json_mode_command_type_mismatch_returns_invalid_request() {
     let command_tokens = ["1", "null", "{}", "[]"];
 
     for command_token in command_tokens {
-        let select_payload = format!(
+        let read_payload = format!(
             "{{\"command\":{command_token},\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[]}}}}"
         );
-        let transform_payload = format!(
+        let edit_payload = format!(
             "{{\"command\":{command_token},\"file\":\"{file_literal}\",\"operations\":[]}}"
         );
         let apply_payload = format!(
@@ -246,8 +242,8 @@ fn json_mode_command_type_mismatch_returns_invalid_request() {
         );
 
         for (command, payload) in [
-            ("select", select_payload),
-            ("transform", transform_payload),
+            ("read", read_payload),
+            ("edit", edit_payload),
             ("apply", apply_payload),
         ] {
             let output = run_identedit_with_raw_stdin(&[command, "--json"], payload.as_bytes());
@@ -265,17 +261,17 @@ fn json_mode_missing_command_field_returns_invalid_request() {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
 
-    let select_payload = format!(
+    let read_payload = format!(
         "{{\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[]}}}}"
     );
-    let transform_payload = format!("{{\"file\":\"{file_literal}\",\"operations\":[]}}");
+    let edit_payload = format!("{{\"file\":\"{file_literal}\",\"operations\":[]}}");
     let apply_payload = format!(
         "{{\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
     );
 
     for (command, payload) in [
-        ("select", select_payload),
-        ("transform", transform_payload),
+        ("read", read_payload),
+        ("edit", edit_payload),
         ("apply", apply_payload),
     ] {
         let output = run_identedit_with_raw_stdin(&[command, "--json"], payload.as_bytes());
@@ -293,8 +289,8 @@ fn json_mode_whitespace_framed_valid_payloads_still_succeed() {
         let response = assert_structured_success(&output);
 
         match command {
-            "select" => assert_eq!(response["summary"]["files_scanned"], 1),
-            "transform" => assert_eq!(
+            "read" => assert_eq!(response["summary"]["files_scanned"], 1),
+            "edit" => assert_eq!(
                 response["files"][0]["operations"].as_array().map(Vec::len),
                 Some(0)
             ),
@@ -313,19 +309,19 @@ fn duplicate_command_keys_produce_deterministic_parse_errors() {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
 
-    let select_payload = format!(
-        "{{\"command\":\"select\",\"command\":\"apply\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[]}}}}"
+    let read_payload = format!(
+        "{{\"command\":\"read\",\"command\":\"apply\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[]}}}}"
     );
-    let transform_payload = format!(
-        "{{\"command\":\"transform\",\"command\":\"select\",\"file\":\"{file_literal}\",\"operations\":[]}}"
+    let edit_payload = format!(
+        "{{\"command\":\"edit\",\"command\":\"read\",\"file\":\"{file_literal}\",\"operations\":[]}}"
     );
     let apply_payload = format!(
-        "{{\"command\":\"apply\",\"command\":\"transform\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
+        "{{\"command\":\"apply\",\"command\":\"edit\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
     );
 
     let cases = [
-        ("select", select_payload),
-        ("transform", transform_payload),
+        ("read", read_payload),
+        ("edit", edit_payload),
         ("apply", apply_payload),
     ];
 
@@ -389,7 +385,7 @@ fn apply_json_duplicate_nested_keys_produce_parse_errors() {
 }
 
 #[test]
-fn select_json_duplicate_nested_keys_produce_parse_errors() {
+fn read_json_duplicate_nested_keys_produce_parse_errors() {
     let file_path = create_temp_python_file();
     let file_literal = file_path
         .to_str()
@@ -399,21 +395,24 @@ fn select_json_duplicate_nested_keys_produce_parse_errors() {
 
     let payloads = [
         format!(
-            "{{\"command\":\"select\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"kind\":\"class_definition\",\"exclude_kinds\":[]}}}}"
+            "{{\"command\":\"read\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"kind\":\"class_definition\",\"exclude_kinds\":[]}}}}"
         ),
         format!(
-            "{{\"command\":\"select\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"name_pattern\":\"process_*\",\"name_pattern\":\"helper*\",\"exclude_kinds\":[]}}}}"
+            "{{\"command\":\"read\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"name_pattern\":\"process_*\",\"name_pattern\":\"helper*\",\"exclude_kinds\":[]}}}}"
         ),
         format!(
-            "{{\"command\":\"select\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[],\"exclude_kinds\":[\"comment\"]}}}}"
+            "{{\"command\":\"read\",\"file\":\"{file_literal}\",\"selector\":{{\"kind\":\"function_definition\",\"exclude_kinds\":[],\"exclude_kinds\":[\"comment\"]}}}}"
         ),
     ];
 
     for payload in payloads {
-        let output = run_identedit_with_raw_stdin(&["select", "--json"], payload.as_bytes());
+        let output = run_identedit_with_raw_stdin(
+            &["read", "--json"],
+            payload.as_bytes(),
+        );
         assert!(
             !output.status.success(),
-            "select should reject nested duplicate-key payload"
+            "read should reject nested duplicate-key payload"
         );
 
         let response: Value =
@@ -429,7 +428,7 @@ fn select_json_duplicate_nested_keys_produce_parse_errors() {
 }
 
 #[test]
-fn transform_json_duplicate_nested_keys_produce_parse_errors() {
+fn edit_json_duplicate_nested_keys_produce_parse_errors() {
     let file_path = create_temp_python_file();
     let file_literal = file_path
         .to_str()
@@ -439,21 +438,21 @@ fn transform_json_duplicate_nested_keys_produce_parse_errors() {
 
     let payloads = [
         format!(
-            "{{\"command\":\"transform\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"identity\":\"id2\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
+            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"identity\":\"id2\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
         ),
         format!(
-            "{{\"command\":\"transform\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}}}}]}}"
+            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}}}}]}}"
         ),
         format!(
-            "{{\"command\":\"transform\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"span_hint\":{{\"start\":0,\"start\":1,\"end\":2}},\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
+            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"span_hint\":{{\"start\":0,\"start\":1,\"end\":2}},\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
         ),
     ];
 
     for payload in payloads {
-        let output = run_identedit_with_raw_stdin(&["transform", "--json"], payload.as_bytes());
+        let output = run_identedit_with_raw_stdin(&["edit", "--json"], payload.as_bytes());
         assert!(
             !output.status.success(),
-            "transform should reject nested duplicate-key payload"
+            "edit should reject nested duplicate-key payload"
         );
 
         let response: Value =

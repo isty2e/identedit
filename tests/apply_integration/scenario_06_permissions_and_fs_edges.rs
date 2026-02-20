@@ -426,7 +426,6 @@ fn apply_returns_resource_busy_when_lock_is_already_held() {
 #[test]
 fn apply_non_utf8_changeset_path_argument_returns_io_error_without_panicking() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.arg("apply");
     command.arg(OsString::from_vec(vec![0xFF, 0x2E, 0x6A, 0x73, 0x6F, 0x6E]));
 

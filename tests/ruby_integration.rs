@@ -50,14 +50,12 @@ fn write_temp_bytes(suffix: &str, bytes: &[u8]) -> PathBuf {
 
 fn run_identedit(arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.output().expect("failed to run identedit binary")
 }
 
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.env("IDENTEDIT_ALLOW_LEGACY", "1");
     command.args(arguments);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -76,7 +74,8 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 
 fn assert_select_kind_and_optional_name(file: &Path, kind: &str, expected_name: Option<&str>) {
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         kind,
         file.to_str().expect("path should be utf-8"),
@@ -134,7 +133,8 @@ fn select_supports_utf8_bom_prefixed_ruby_files() {
 fn select_reports_parse_failure_for_syntax_invalid_ruby() {
     let file_path = write_temp_source(".rb", "class Broken\n  def run(value)\n    value + 1\n");
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class",
         file_path.to_str().expect("path should be utf-8"),
@@ -158,7 +158,8 @@ fn select_reports_parse_failure_for_syntax_invalid_ruby() {
 fn transform_replace_and_apply_support_ruby_method() {
     let file_path = copy_fixture_to_temp("example.rb", ".rb");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         "--name",
@@ -179,7 +180,7 @@ fn transform_replace_and_apply_support_ruby_method() {
 
     let replacement = "def process_data(value)\n      value + VALUE + 2\n    end";
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -210,7 +211,8 @@ fn transform_reports_ambiguous_target_for_duplicate_ruby_method_identity() {
     let source = "class First\n  def configure(value)\n    value + 1\n  end\nend\n\nclass Second\n  def configure(value)\n    value + 1\n  end\nend\n";
     let file_path = write_temp_source(".rb", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         file_path.to_str().expect("path should be utf-8"),
@@ -243,7 +245,7 @@ fn transform_reports_ambiguous_target_for_duplicate_ruby_method_identity() {
         .expect("fixture should include duplicate method identity");
 
     let output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         duplicate_identity,
         "--replace",
@@ -265,7 +267,8 @@ fn transform_json_span_hint_disambiguates_duplicate_ruby_method_identity() {
     let source = "class First\n  def configure(value)\n    value + 1\n  end\nend\n\nclass Second\n  def configure(value)\n    value + 1\n  end\nend\n";
     let file_path = write_temp_source(".rb", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         file_path.to_str().expect("path should be utf-8"),
@@ -292,7 +295,7 @@ fn transform_json_span_hint_disambiguates_duplicate_ruby_method_identity() {
     let target = duplicate_handles[1];
     let span = &target["span"];
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -310,7 +313,7 @@ fn transform_json_span_hint_disambiguates_duplicate_ruby_method_identity() {
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let transform_output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let transform_output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         transform_output.status.success(),
         "transform --json should disambiguate duplicate Ruby method identity: {}",
@@ -336,7 +339,8 @@ fn transform_json_duplicate_ruby_identity_with_missed_span_hint_returns_ambiguou
     let source = "class First\n  def configure(value)\n    value + 1\n  end\nend\n\nclass Second\n  def configure(value)\n    value + 1\n  end\nend\n";
     let file_path = write_temp_source(".rb", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         file_path.to_str().expect("path should be utf-8"),
@@ -357,7 +361,7 @@ fn transform_json_duplicate_ruby_identity_with_missed_span_hint_returns_ambiguou
         .expect("configure handle should be present");
 
     let request = json!({
-        "command": "transform",
+        "command": "edit",
         "file": file_path.to_string_lossy(),
         "operations": [{
             "target": {
@@ -375,7 +379,7 @@ fn transform_json_duplicate_ruby_identity_with_missed_span_hint_returns_ambiguou
     });
     let request_body = serde_json::to_string(&request).expect("request should serialize");
 
-    let output = run_identedit_with_stdin(&["transform", "--json"], &request_body);
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request_body);
     assert!(
         !output.status.success(),
         "transform --json should fail when span_hint misses duplicate Ruby methods"
@@ -390,7 +394,8 @@ fn transform_json_duplicate_ruby_identity_with_missed_span_hint_returns_ambiguou
 fn apply_reports_precondition_failed_after_ruby_source_mutation() {
     let file_path = copy_fixture_to_temp("example.rb", ".rb");
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         "--name",
@@ -410,7 +415,7 @@ fn apply_reports_precondition_failed_after_ruby_source_mutation() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -445,7 +450,8 @@ fn select_ignores_method_like_tokens_inside_heredoc() {
     let source = "class Example\n  def real(value)\n    value + 1\n  end\n\n  DOC = <<~RUBY\n    def fake(value)\n      value + 2\n    end\n  RUBY\nend\n";
     let file_path = write_temp_source(".rb", source);
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         file_path.to_str().expect("path should be utf-8"),
@@ -483,7 +489,8 @@ fn select_reports_parse_failure_for_unterminated_heredoc() {
         "class Broken\n  DOC = <<~RUBY\n    this heredoc never terminates\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class",
         file_path.to_str().expect("path should be utf-8"),
@@ -508,7 +515,8 @@ fn transform_replace_and_apply_preserve_crlf_ruby_source_segments() {
     let source = "class Example\r\n  def process_data(value)\r\n    value + 1\r\n  end\r\nend\r\n";
     let file_path = write_temp_source(".rb", source);
     let select_output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         "--name",
@@ -528,7 +536,7 @@ fn transform_replace_and_apply_preserve_crlf_ruby_source_segments() {
         .expect("identity should be present");
 
     let transform_output = run_identedit(&[
-        "transform",
+        "edit",
         "--identity",
         identity,
         "--replace",
@@ -568,7 +576,8 @@ fn select_reports_parse_failure_for_nul_in_ruby_source() {
         b"class Example\n\0def process_data(value)\n  value + 1\nend\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "method",
         file_path.to_str().expect("path should be utf-8"),
@@ -590,7 +599,8 @@ fn select_supports_singleton_method_kind() {
         "class Builder\n  def self.build(value)\n    value + 1\n  end\nend\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "singleton_method",
         file_path.to_str().expect("path should be utf-8"),
@@ -619,7 +629,8 @@ fn select_preserves_multiple_reopened_class_nodes() {
         "class Service\n  def first\n    1\n  end\nend\n\nclass Service\n  def second\n    2\n  end\nend\n",
     );
     let output = run_identedit(&[
-        "select",
+        "read",
+        "--json",
         "--kind",
         "class",
         file_path.to_str().expect("path should be utf-8"),
