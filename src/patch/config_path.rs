@@ -12,7 +12,13 @@ use crate::transform::parse_handles_for_source;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigPathOperation {
-    Set { new_text: String },
+    Set {
+        new_text: String,
+        create_missing: bool,
+    },
+    Append {
+        new_text: String,
+    },
     Delete,
 }
 
@@ -48,7 +54,18 @@ struct TomlCandidate {
     container_span: Span,
     container_kind: String,
     set_span: Span,
+    set_kind: String,
     delete_entry_span: Span,
+}
+
+struct CreateMissingSetRequest<'a> {
+    format: &'a ConfigFormat,
+    tree: &'a Tree,
+    source: &'a [u8],
+    source_text: &'a str,
+    path_tokens: &'a [PathToken],
+    raw_path: &'a str,
+    new_text: &'a str,
 }
 
 pub fn resolve_config_path_operation(
@@ -78,7 +95,67 @@ pub fn resolve_config_path_operation(
     let format = detect_config_format(file)?;
     let path_tokens = parse_config_path(raw_path)?;
 
+    if let ConfigPathOperation::Set {
+        new_text,
+        create_missing: true,
+    } = &operation
+        && matches!(format, ConfigFormat::Json)
+        && source.is_empty()
+    {
+        let updated = render_json_with_create_missing("", &path_tokens, raw_path, new_text)?;
+        return Ok(ResolvedConfigPatch {
+            target: TransformTarget::FileStart {
+                expected_file_hash: hash_bytes(&source),
+            },
+            op: OpKind::Insert { new_text: updated },
+        });
+    }
+
     let tree = parse_tree_for_format(&format, &source)?;
+    if let ConfigPathOperation::Set {
+        new_text,
+        create_missing: true,
+    } = &operation
+    {
+        let strict_probe = ConfigPathOperation::Set {
+            new_text: String::new(),
+            create_missing: false,
+        };
+        let strict_resolved = match format {
+            ConfigFormat::Json => {
+                resolve_json_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
+            }
+            ConfigFormat::Yaml => {
+                resolve_yaml_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
+            }
+            ConfigFormat::Toml => {
+                resolve_toml_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
+            }
+        };
+        match strict_resolved {
+            Ok(resolved) => {
+                return build_resolved_patch_from_container_edit(
+                    file, &source, source_text, resolved, new_text,
+                );
+            }
+            Err(error) if !is_missing_config_path_error(&error) => return Err(error),
+            Err(_) => {}
+        }
+
+        return resolve_config_path_set_with_create_missing(
+            file,
+            CreateMissingSetRequest {
+                format: &format,
+                tree: &tree,
+                source: &source,
+                source_text,
+                path_tokens: &path_tokens,
+                raw_path,
+                new_text,
+            },
+        );
+    }
+
     let resolved = match format {
         ConfigFormat::Json => {
             resolve_json_path(&tree, &source, &path_tokens, &operation, raw_path)?
@@ -91,23 +168,39 @@ pub fn resolve_config_path_operation(
         }
     };
 
-    let handles = parse_handles_for_source(file, &source)?;
+    let replacement = match &operation {
+        ConfigPathOperation::Set { new_text, .. } => new_text.clone(),
+        ConfigPathOperation::Append { new_text } => render_append_array_replacement(
+            source_text,
+            resolved.container_span,
+            &resolved.container_kind,
+            new_text,
+            raw_path,
+        )?,
+        ConfigPathOperation::Delete => String::new(),
+    };
+    build_resolved_patch_from_container_edit(file, &source, source_text, resolved, &replacement)
+}
+
+fn build_resolved_patch_from_container_edit(
+    file: &Path,
+    source: &[u8],
+    source_text: &str,
+    resolved: ResolvedContainerEdit,
+    replacement: &str,
+) -> Result<ResolvedConfigPatch, IdenteditError> {
+    let handles = parse_handles_for_source(file, source)?;
     let container_handle = find_handle_for_span(
         file,
         &handles,
         resolved.container_span,
         &resolved.container_kind,
     )?;
-    let replacement = match operation {
-        ConfigPathOperation::Set { new_text } => new_text,
-        ConfigPathOperation::Delete => String::new(),
-    };
-
     let updated_container_text = rewrite_container_text(
         source_text,
         resolved.container_span,
         resolved.replace_span,
-        &replacement,
+        replacement,
     )?;
 
     let target = TransformTarget::node(
@@ -123,6 +216,771 @@ pub fn resolve_config_path_operation(
             new_text: updated_container_text,
         },
     })
+}
+
+fn resolve_config_path_set_with_create_missing(
+    file: &Path,
+    request: CreateMissingSetRequest<'_>,
+) -> Result<ResolvedConfigPatch, IdenteditError> {
+    if matches!(request.format, ConfigFormat::Yaml) {
+        validate_yaml_create_missing_safety(request.tree, request.source_text)?;
+    }
+    if matches!(request.format, ConfigFormat::Toml)
+        && has_toml_comments(request.tree.root_node())
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing does not support TOML comments yet".to_string(),
+        });
+    }
+
+    let updated_root_text = match request.format {
+        ConfigFormat::Json => render_json_with_create_missing(
+            request.source_text,
+            request.path_tokens,
+            request.raw_path,
+            request.new_text,
+        )?,
+        ConfigFormat::Yaml => render_yaml_with_create_missing(
+            request.source_text,
+            request.path_tokens,
+            request.raw_path,
+            request.new_text,
+        )?,
+        ConfigFormat::Toml => render_toml_with_create_missing(
+            request.source_text,
+            request.path_tokens,
+            request.raw_path,
+            request.new_text,
+        )?,
+    };
+
+    if matches!(request.format, ConfigFormat::Json) && request.source.is_empty() {
+        return Ok(ResolvedConfigPatch {
+            target: TransformTarget::FileStart {
+                expected_file_hash: hash_bytes(request.source),
+            },
+            op: OpKind::Insert {
+                new_text: updated_root_text,
+            },
+        });
+    }
+
+    let root_node = match request.format {
+        ConfigFormat::Json => json_root_value(request.tree.root_node()).ok_or_else(|| {
+            IdenteditError::InvalidRequest {
+                message: "JSON document has no root value".to_string(),
+            }
+        })?,
+        ConfigFormat::Yaml => yaml_root_value(request.tree.root_node()).ok_or_else(|| {
+            IdenteditError::InvalidRequest {
+                message: "YAML document has no root value".to_string(),
+            }
+        })?,
+        ConfigFormat::Toml => request.tree.root_node(),
+    };
+
+    let root_span = span_from_node(root_node);
+    let root_kind = root_node.kind().to_string();
+    let handles = parse_handles_for_source(file, request.source)?;
+    let container_handle = find_handle_for_span(file, &handles, root_span, &root_kind)?;
+    let target = TransformTarget::node(
+        container_handle.identity,
+        container_handle.kind,
+        Some(container_handle.span),
+        container_handle.expected_old_hash,
+    );
+
+    Ok(ResolvedConfigPatch {
+        target,
+        op: OpKind::Replace {
+            new_text: updated_root_text,
+        },
+    })
+}
+
+fn render_json_with_create_missing(
+    source_text: &str,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_text: &str,
+) -> Result<String, IdenteditError> {
+    let mut root: serde_json::Value = if source_text.trim().is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str(source_text).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path create-missing could not parse JSON document: {error}"),
+        })?
+    };
+    let parsed_new_value: serde_json::Value =
+        serde_json::from_str(new_text).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path set value is not valid JSON: {error}"),
+        })?;
+    apply_json_set_create_missing(&mut root, path_tokens, raw_path, &parsed_new_value)?;
+
+    let rendered =
+        serde_json::to_string_pretty(&root).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing could not serialize JSON document: {error}"
+            ),
+        })?;
+    Ok(apply_source_line_ending_style(&rendered, source_text))
+}
+
+fn render_yaml_with_create_missing(
+    source_text: &str,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_text: &str,
+) -> Result<String, IdenteditError> {
+    let mut root: serde_yaml::Value =
+        serde_yaml::from_str(source_text).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path create-missing could not parse YAML document: {error}"),
+        })?;
+    let parsed_new_value: serde_yaml::Value =
+        serde_yaml::from_str(new_text).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path set value is not valid YAML: {error}"),
+        })?;
+    apply_yaml_set_create_missing(&mut root, path_tokens, raw_path, &parsed_new_value)?;
+
+    let rendered =
+        serde_yaml::to_string(&root).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing could not serialize YAML document: {error}"
+            ),
+        })?;
+    let normalized = rendered
+        .strip_prefix("---\n")
+        .unwrap_or(&rendered)
+        .to_string();
+    Ok(apply_source_line_ending_style(&normalized, source_text))
+}
+
+fn render_toml_with_create_missing(
+    source_text: &str,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_text: &str,
+) -> Result<String, IdenteditError> {
+    let parse_input = if source_text.contains('\r') && !source_text.contains('\n') {
+        source_text.replace('\r', "\n")
+    } else {
+        source_text.to_string()
+    };
+    let mut root: toml::Value =
+        toml::from_str(&parse_input).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path create-missing could not parse TOML document: {error}"),
+        })?;
+    let parsed_new_value = parse_toml_value_fragment(new_text)?;
+    apply_toml_set_create_missing(&mut root, path_tokens, raw_path, &parsed_new_value)?;
+
+    let rendered =
+        toml::to_string_pretty(&root).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing could not serialize TOML document: {error}"
+            ),
+        })?;
+    Ok(apply_source_line_ending_style(&rendered, source_text))
+}
+
+fn parse_toml_value_fragment(fragment: &str) -> Result<toml::Value, IdenteditError> {
+    let wrapped = format!("__identedit_tmp__ = {fragment}");
+    let mut table: toml::Table =
+        toml::from_str(&wrapped).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path set value is not valid TOML value text: {error}"),
+        })?;
+    table
+        .remove("__identedit_tmp__")
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "Config path set value parsing produced no value".to_string(),
+        })
+}
+
+fn apply_json_set_create_missing(
+    current: &mut serde_json::Value,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_value: &serde_json::Value,
+) -> Result<(), IdenteditError> {
+    let Some((head, tail)) = path_tokens.split_first() else {
+        *current = new_value.clone();
+        return Ok(());
+    };
+
+    match head {
+        PathToken::Key(key) => {
+            let object = match current {
+                serde_json::Value::Object(object) => object,
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        head,
+                        json_value_kind_name(current),
+                    ));
+                }
+            };
+            if tail.is_empty() {
+                object.insert(key.clone(), new_value.clone());
+                return Ok(());
+            }
+            if !object.contains_key(key) {
+                object.insert(key.clone(), empty_json_container_for_token(&tail[0]));
+            }
+            let child = object
+                .get_mut(key)
+                .ok_or_else(|| IdenteditError::InvalidRequest {
+                    message: format!("Config path '{raw_path}' segment '{key}' was not found"),
+                })?;
+            apply_json_set_create_missing(child, tail, raw_path, new_value)
+        }
+        PathToken::Index(index) => {
+            let array = match current {
+                serde_json::Value::Array(array) => array,
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        head,
+                        json_value_kind_name(current),
+                    ));
+                }
+            };
+            if *index >= array.len() {
+                return Err(array_index_out_of_bounds_error(
+                    raw_path,
+                    *index,
+                    array.len(),
+                ));
+            }
+            if tail.is_empty() {
+                array[*index] = new_value.clone();
+                return Ok(());
+            }
+            apply_json_set_create_missing(&mut array[*index], tail, raw_path, new_value)
+        }
+    }
+}
+
+fn apply_yaml_set_create_missing(
+    current: &mut serde_yaml::Value,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_value: &serde_yaml::Value,
+) -> Result<(), IdenteditError> {
+    let Some((head, tail)) = path_tokens.split_first() else {
+        *current = new_value.clone();
+        return Ok(());
+    };
+
+    match head {
+        PathToken::Key(key) => {
+            let mapping = match current {
+                serde_yaml::Value::Mapping(mapping) => mapping,
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        head,
+                        yaml_value_kind_name(current),
+                    ));
+                }
+            };
+            let key_value = serde_yaml::Value::String(key.clone());
+            if tail.is_empty() {
+                mapping.insert(key_value, new_value.clone());
+                return Ok(());
+            }
+            if !mapping.contains_key(&key_value) {
+                mapping.insert(key_value.clone(), empty_yaml_container_for_token(&tail[0]));
+            }
+            let child =
+                mapping
+                    .get_mut(&key_value)
+                    .ok_or_else(|| IdenteditError::InvalidRequest {
+                        message: format!("Config path '{raw_path}' segment '{key}' was not found"),
+                    })?;
+            apply_yaml_set_create_missing(child, tail, raw_path, new_value)
+        }
+        PathToken::Index(index) => {
+            let sequence = match current {
+                serde_yaml::Value::Sequence(sequence) => sequence,
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        head,
+                        yaml_value_kind_name(current),
+                    ));
+                }
+            };
+            if *index >= sequence.len() {
+                return Err(array_index_out_of_bounds_error(
+                    raw_path,
+                    *index,
+                    sequence.len(),
+                ));
+            }
+            if tail.is_empty() {
+                sequence[*index] = new_value.clone();
+                return Ok(());
+            }
+            apply_yaml_set_create_missing(&mut sequence[*index], tail, raw_path, new_value)
+        }
+    }
+}
+
+fn apply_toml_set_create_missing(
+    current: &mut toml::Value,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_value: &toml::Value,
+) -> Result<(), IdenteditError> {
+    let Some((head, tail)) = path_tokens.split_first() else {
+        *current = new_value.clone();
+        return Ok(());
+    };
+
+    match head {
+        PathToken::Key(key) => {
+            let table = match current {
+                toml::Value::Table(table) => table,
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        head,
+                        toml_value_kind_name(current),
+                    ));
+                }
+            };
+            if tail.is_empty() {
+                table.insert(key.clone(), new_value.clone());
+                return Ok(());
+            }
+            if !table.contains_key(key) {
+                table.insert(key.clone(), empty_toml_container_for_token(&tail[0]));
+            }
+            let child = table
+                .get_mut(key)
+                .ok_or_else(|| IdenteditError::InvalidRequest {
+                    message: format!("Config path '{raw_path}' segment '{key}' was not found"),
+                })?;
+            apply_toml_set_create_missing(child, tail, raw_path, new_value)
+        }
+        PathToken::Index(index) => {
+            let array = match current {
+                toml::Value::Array(array) => array,
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        head,
+                        toml_value_kind_name(current),
+                    ));
+                }
+            };
+            if *index >= array.len() {
+                return Err(array_index_out_of_bounds_error(
+                    raw_path,
+                    *index,
+                    array.len(),
+                ));
+            }
+            if tail.is_empty() {
+                array[*index] = new_value.clone();
+                return Ok(());
+            }
+            apply_toml_set_create_missing(&mut array[*index], tail, raw_path, new_value)
+        }
+    }
+}
+
+fn empty_json_container_for_token(next: &PathToken) -> serde_json::Value {
+    match next {
+        PathToken::Key(_) => serde_json::Value::Object(serde_json::Map::new()),
+        PathToken::Index(_) => serde_json::Value::Array(Vec::new()),
+    }
+}
+
+fn empty_yaml_container_for_token(next: &PathToken) -> serde_yaml::Value {
+    match next {
+        PathToken::Key(_) => serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        PathToken::Index(_) => serde_yaml::Value::Sequence(Vec::new()),
+    }
+}
+
+fn empty_toml_container_for_token(next: &PathToken) -> toml::Value {
+    match next {
+        PathToken::Key(_) => toml::Value::Table(toml::Table::new()),
+        PathToken::Index(_) => toml::Value::Array(Vec::new()),
+    }
+}
+
+fn json_value_kind_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+fn yaml_value_kind_name(value: &serde_yaml::Value) -> &'static str {
+    match value {
+        serde_yaml::Value::Null => "null",
+        serde_yaml::Value::Bool(_) => "boolean",
+        serde_yaml::Value::Number(_) => "number",
+        serde_yaml::Value::String(_) => "string",
+        serde_yaml::Value::Sequence(_) => "sequence",
+        serde_yaml::Value::Mapping(_) => "mapping",
+        serde_yaml::Value::Tagged(_) => "tagged",
+    }
+}
+
+fn toml_value_kind_name(value: &toml::Value) -> &'static str {
+    match value {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "float",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Datetime(_) => "datetime",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+    }
+}
+
+fn array_index_out_of_bounds_error(
+    raw_path: &str,
+    expected_index: usize,
+    len: usize,
+) -> IdenteditError {
+    IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path '{raw_path}' index [{expected_index}] is out of range (len={len}). Array index out-of-bounds is always an error; use a dedicated append operation if needed."
+        ),
+    }
+}
+
+fn render_append_array_replacement(
+    source_text: &str,
+    container_span: Span,
+    container_kind: &str,
+    new_text: &str,
+    raw_path: &str,
+) -> Result<String, IdenteditError> {
+    let array_text = source_text.get(container_span.start..container_span.end).ok_or_else(|| {
+        IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid append span [{}, {}) while resolving config path '{raw_path}'",
+                container_span.start, container_span.end
+            ),
+        }
+    })?;
+
+    match container_kind {
+        "array" | "flow_sequence" => {
+            append_to_comma_delimited_array_text(array_text, new_text, raw_path)
+        }
+        "block_sequence" => append_to_block_sequence_text(
+            array_text,
+            new_text,
+            raw_path,
+            &indentation_before_offset(source_text, container_span.start),
+        ),
+        _ => Err(append_requires_array_error(raw_path, container_kind)),
+    }
+}
+
+fn append_to_comma_delimited_array_text(
+    array_text: &str,
+    new_text: &str,
+    raw_path: &str,
+) -> Result<String, IdenteditError> {
+    let open = array_text
+        .find('[')
+        .ok_or_else(|| append_requires_array_error(raw_path, "unknown"))?;
+    let close = array_text
+        .rfind(']')
+        .ok_or_else(|| append_requires_array_error(raw_path, "unknown"))?;
+    if open >= close {
+        return Err(append_requires_array_error(raw_path, "unknown"));
+    }
+
+    let inner = &array_text[open + 1..close];
+    let mut result = array_text.to_string();
+
+    if inner.trim().is_empty() {
+        result.replace_range(open + 1..close, new_text);
+        return Ok(result);
+    }
+
+    let mut insert_at = close;
+    while insert_at > open + 1 {
+        let byte = result.as_bytes()[insert_at - 1];
+        if byte == b' ' || byte == b'\t' || byte == b'\n' || byte == b'\r' {
+            insert_at -= 1;
+        } else {
+            break;
+        }
+    }
+
+    let insertion = if inner.contains('\n') || inner.contains('\r') {
+        let line_ending = line_ending_literal(array_text);
+        let indent = indentation_of_last_value_line(array_text, insert_at);
+        format!(",{line_ending}{indent}{new_text}")
+    } else {
+        format!(", {new_text}")
+    };
+    result.insert_str(insert_at, &insertion);
+    Ok(result)
+}
+
+fn append_to_block_sequence_text(
+    sequence_text: &str,
+    new_text: &str,
+    raw_path: &str,
+    base_indent: &str,
+) -> Result<String, IdenteditError> {
+    let indent = first_block_sequence_item_indent(sequence_text)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| base_indent.to_string());
+    if indent.is_empty() {
+        return Err(append_requires_array_error(raw_path, "block_sequence"));
+    }
+    let separator = if sequence_text.ends_with('\n') || sequence_text.ends_with('\r') {
+        ""
+    } else {
+        line_ending_literal(sequence_text)
+    };
+    Ok(format!("{sequence_text}{separator}{indent}- {new_text}"))
+}
+
+fn first_block_sequence_item_indent(sequence_text: &str) -> Option<String> {
+    let bytes = sequence_text.as_bytes();
+    let mut start = 0usize;
+
+    while start < bytes.len() {
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b'\n' && bytes[end] != b'\r' {
+            end += 1;
+        }
+        let line = &sequence_text[start..end];
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        if trimmed.starts_with('-') {
+            let indent_len = line.len() - trimmed.len();
+            return Some(line[..indent_len].to_string());
+        }
+
+        if end >= bytes.len() {
+            break;
+        }
+        if bytes[end] == b'\r' && end + 1 < bytes.len() && bytes[end + 1] == b'\n' {
+            start = end + 2;
+        } else {
+            start = end + 1;
+        }
+    }
+
+    None
+}
+
+fn indentation_of_last_value_line(text: &str, end: usize) -> String {
+    let prefix = &text[..end];
+    let line_start = prefix
+        .rfind('\n')
+        .map(|index| index + 1)
+        .or_else(|| prefix.rfind('\r').map(|index| index + 1))
+        .unwrap_or(0);
+    prefix[line_start..]
+        .chars()
+        .take_while(|character| *character == ' ' || *character == '\t')
+        .collect()
+}
+
+fn indentation_before_offset(source_text: &str, offset: usize) -> String {
+    let prefix = &source_text[..offset];
+    let line_start = prefix
+        .rfind('\n')
+        .map(|index| index + 1)
+        .or_else(|| prefix.rfind('\r').map(|index| index + 1))
+        .unwrap_or(0);
+    source_text[line_start..offset]
+        .chars()
+        .take_while(|character| *character == ' ' || *character == '\t')
+        .collect()
+}
+
+fn line_ending_literal(source_text: &str) -> &'static str {
+    match detect_line_ending_style(source_text) {
+        LineEndingStyle::Lf => "\n",
+        LineEndingStyle::Crlf => "\r\n",
+        LineEndingStyle::Cr => "\r",
+    }
+}
+
+fn append_requires_array_error(raw_path: &str, actual_kind: &str) -> IdenteditError {
+    IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path '{raw_path}' append requires an array/sequence target, found node kind '{actual_kind}'"
+        ),
+    }
+}
+
+fn is_missing_config_path_error(error: &IdenteditError) -> bool {
+    matches!(
+        error,
+        IdenteditError::InvalidRequest { message } if message.contains("was not found")
+    )
+}
+
+fn validate_yaml_create_missing_safety(
+    tree: &Tree,
+    source_text: &str,
+) -> Result<(), IdenteditError> {
+    let document_count = count_nodes_by_kind(tree.root_node(), "document");
+    if document_count > 1 {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing does not support multiple YAML documents in one file".to_string(),
+        });
+    }
+
+    if has_yaml_anchor_or_alias(tree.root_node(), source_text) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing does not support YAML anchor/alias documents".to_string(),
+        });
+    }
+
+    if has_yaml_comments(tree.root_node()) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing does not support YAML comments yet".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn has_yaml_anchor_or_alias(root: Node<'_>, source_text: &str) -> bool {
+    if source_text.contains("<<: *") {
+        return true;
+    }
+
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let kind = node.kind();
+        if kind.contains("anchor") || kind.contains("alias") {
+            return true;
+        }
+        for index in 0..node.child_count() {
+            if let Some(child) = node.child(index as u32) {
+                stack.push(child);
+            }
+        }
+    }
+    false
+}
+
+fn count_nodes_by_kind(root: Node<'_>, expected_kind: &str) -> usize {
+    let mut count = 0usize;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == expected_kind {
+            count += 1;
+        }
+        for index in 0..node.child_count() {
+            if let Some(child) = node.child(index as u32) {
+                stack.push(child);
+            }
+        }
+    }
+    count
+}
+
+fn has_yaml_comments(root: Node<'_>) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind().contains("comment") {
+            return true;
+        }
+        for index in 0..node.child_count() {
+            if let Some(child) = node.child(index as u32) {
+                stack.push(child);
+            }
+        }
+    }
+    false
+}
+
+fn has_toml_comments(root: Node<'_>) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind().contains("comment") {
+            return true;
+        }
+        for index in 0..node.child_count() {
+            if let Some(child) = node.child(index as u32) {
+                stack.push(child);
+            }
+        }
+    }
+    false
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LineEndingStyle {
+    Lf,
+    Crlf,
+    Cr,
+}
+
+fn apply_source_line_ending_style(rendered: &str, source_text: &str) -> String {
+    let style = detect_line_ending_style(source_text);
+    let had_trailing_newline = source_text.ends_with('\n') || source_text.ends_with('\r');
+
+    let mut normalized = rendered.replace("\r\n", "\n").replace('\r', "\n");
+    if !had_trailing_newline {
+        while normalized.ends_with('\n') {
+            normalized.pop();
+        }
+    }
+
+    match style {
+        LineEndingStyle::Lf => normalized,
+        LineEndingStyle::Crlf => normalized.replace('\n', "\r\n"),
+        LineEndingStyle::Cr => normalized.replace('\n', "\r"),
+    }
+}
+
+fn detect_line_ending_style(source_text: &str) -> LineEndingStyle {
+    let bytes = source_text.as_bytes();
+    let mut index = 0usize;
+    let mut has_crlf = false;
+    let mut has_lf = false;
+    let mut has_cr = false;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
+                    has_crlf = true;
+                    index += 2;
+                } else {
+                    has_cr = true;
+                    index += 1;
+                }
+            }
+            b'\n' => {
+                has_lf = true;
+                index += 1;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    if has_crlf && !has_lf && !has_cr {
+        LineEndingStyle::Crlf
+    } else if has_cr && !has_crlf && !has_lf {
+        LineEndingStyle::Cr
+    } else {
+        LineEndingStyle::Lf
+    }
 }
 
 fn detect_config_format(file: &Path) -> Result<ConfigFormat, IdenteditError> {
@@ -163,8 +1021,21 @@ fn parse_tree_for_format(format: &ConfigFormat, source: &[u8]) -> Result<Tree, I
             message: error.to_string(),
         })?;
 
+    let parse_buffer;
+    let parse_source: &[u8] = if matches!(format, ConfigFormat::Toml)
+        && has_cr_only_newlines(source)
+    {
+        parse_buffer = source
+            .iter()
+            .map(|byte| if *byte == b'\r' { b'\n' } else { *byte })
+            .collect::<Vec<_>>();
+        &parse_buffer
+    } else {
+        source
+    };
+
     let tree = parser
-        .parse(source, None)
+        .parse(parse_source, None)
         .ok_or_else(|| IdenteditError::ParseFailure {
             provider: provider_name(format),
             message: "Tree-sitter returned no syntax tree".to_string(),
@@ -178,6 +1049,30 @@ fn parse_tree_for_format(format: &ConfigFormat, source: &[u8]) -> Result<Tree, I
     }
 
     Ok(tree)
+}
+
+fn has_cr_only_newlines(source: &[u8]) -> bool {
+    let mut has_cr = false;
+    let mut has_lf = false;
+    let mut index = 0usize;
+
+    while index < source.len() {
+        match source[index] {
+            b'\r' => {
+                has_cr = true;
+                if index + 1 < source.len() && source[index + 1] == b'\n' {
+                    return false;
+                }
+            }
+            b'\n' => {
+                has_lf = true;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+
+    has_cr && !has_lf
 }
 
 fn provider_name(format: &ConfigFormat) -> &'static str {
@@ -362,6 +1257,16 @@ fn resolve_json_path(
                             container_kind: current.kind().to_string(),
                             replace_span: span_from_node(value_node),
                         },
+                        ConfigPathOperation::Append { .. } => {
+                            if value_node.kind() != "array" {
+                                return Err(append_requires_array_error(raw_path, value_node.kind()));
+                            }
+                            ResolvedContainerEdit {
+                                container_span: span_from_node(value_node),
+                                container_kind: value_node.kind().to_string(),
+                                replace_span: span_from_node(value_node),
+                            }
+                        }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
                             container_span: span_from_node(current),
                             container_kind: current.kind().to_string(),
@@ -388,13 +1293,7 @@ fn resolve_json_path(
 
                 let elements = named_children(current);
                 let entry = elements.get(*expected_index).ok_or_else(|| {
-                    IdenteditError::InvalidRequest {
-                        message: format!(
-                            "Config path '{raw_path}' index [{}] is out of range (len={})",
-                            expected_index,
-                            elements.len()
-                        ),
-                    }
+                    array_index_out_of_bounds_error(raw_path, *expected_index, elements.len())
                 })?;
 
                 if last {
@@ -404,6 +1303,16 @@ fn resolve_json_path(
                             container_kind: current.kind().to_string(),
                             replace_span: span_from_node(*entry),
                         },
+                        ConfigPathOperation::Append { .. } => {
+                            if entry.kind() != "array" {
+                                return Err(append_requires_array_error(raw_path, entry.kind()));
+                            }
+                            ResolvedContainerEdit {
+                                container_span: span_from_node(*entry),
+                                container_kind: entry.kind().to_string(),
+                                replace_span: span_from_node(*entry),
+                            }
+                        }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
                             container_span: span_from_node(current),
                             container_kind: current.kind().to_string(),
@@ -488,6 +1397,18 @@ fn resolve_yaml_path(
                             container_kind: current.kind().to_string(),
                             replace_span: span_from_node(value_node),
                         },
+                        ConfigPathOperation::Append { .. } => {
+                            if value_node.kind() != "block_sequence"
+                                && value_node.kind() != "flow_sequence"
+                            {
+                                return Err(append_requires_array_error(raw_path, value_node.kind()));
+                            }
+                            ResolvedContainerEdit {
+                                container_span: span_from_node(value_node),
+                                container_kind: value_node.kind().to_string(),
+                                replace_span: span_from_node(value_node),
+                            }
+                        }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
                             container_span: span_from_node(current),
                             container_kind: current.kind().to_string(),
@@ -510,13 +1431,7 @@ fn resolve_yaml_path(
                         .filter(|child| child.kind() == "block_sequence_item")
                         .collect::<Vec<_>>();
                     let item = items.get(*expected_index).ok_or_else(|| {
-                        IdenteditError::InvalidRequest {
-                            message: format!(
-                                "Config path '{raw_path}' index [{}] is out of range (len={})",
-                                expected_index,
-                                items.len()
-                            ),
-                        }
+                        array_index_out_of_bounds_error(raw_path, *expected_index, items.len())
                     })?;
                     let value_node = item.child(0).and_then(yaml_unwrap_node).ok_or_else(|| {
                         IdenteditError::InvalidRequest {
@@ -532,6 +1447,21 @@ fn resolve_yaml_path(
                                 container_kind: current.kind().to_string(),
                                 replace_span: span_from_node(value_node),
                             },
+                            ConfigPathOperation::Append { .. } => {
+                                if value_node.kind() != "block_sequence"
+                                    && value_node.kind() != "flow_sequence"
+                                {
+                                    return Err(append_requires_array_error(
+                                        raw_path,
+                                        value_node.kind(),
+                                    ));
+                                }
+                                ResolvedContainerEdit {
+                                    container_span: span_from_node(value_node),
+                                    container_kind: value_node.kind().to_string(),
+                                    replace_span: span_from_node(value_node),
+                                }
+                            }
                             ConfigPathOperation::Delete => ResolvedContainerEdit {
                                 container_span: span_from_node(current),
                                 container_kind: current.kind().to_string(),
@@ -549,13 +1479,7 @@ fn resolve_yaml_path(
                 "flow_sequence" => {
                     let items = named_children(current);
                     let item = items.get(*expected_index).ok_or_else(|| {
-                        IdenteditError::InvalidRequest {
-                            message: format!(
-                                "Config path '{raw_path}' index [{}] is out of range (len={})",
-                                expected_index,
-                                items.len()
-                            ),
-                        }
+                        array_index_out_of_bounds_error(raw_path, *expected_index, items.len())
                     })?;
                     let next = yaml_unwrap_node(*item).unwrap_or(*item);
                     if last {
@@ -565,6 +1489,17 @@ fn resolve_yaml_path(
                                 container_kind: current.kind().to_string(),
                                 replace_span: span_from_node(next),
                             },
+                            ConfigPathOperation::Append { .. } => {
+                                if next.kind() != "block_sequence" && next.kind() != "flow_sequence"
+                                {
+                                    return Err(append_requires_array_error(raw_path, next.kind()));
+                                }
+                                ResolvedContainerEdit {
+                                    container_span: span_from_node(next),
+                                    container_kind: next.kind().to_string(),
+                                    replace_span: span_from_node(next),
+                                }
+                            }
                             ConfigPathOperation::Delete => ResolvedContainerEdit {
                                 container_span: span_from_node(current),
                                 container_kind: current.kind().to_string(),
@@ -628,19 +1563,33 @@ fn resolve_toml_path(
         }
     };
 
-    let replace_span = match operation {
-        ConfigPathOperation::Set { .. } => selected.set_span,
-        ConfigPathOperation::Delete => adjusted_delete_span_for_container(
-            source,
+    let (container_span, container_kind, replace_span) = match operation {
+        ConfigPathOperation::Set { .. } => (
             selected.container_span,
-            &selected.container_kind,
-            selected.delete_entry_span,
+            selected.container_kind.clone(),
+            selected.set_span,
+        ),
+        ConfigPathOperation::Append { .. } => {
+            if selected.set_kind != "array" {
+                return Err(append_requires_array_error(raw_path, &selected.set_kind));
+            }
+            (selected.set_span, selected.set_kind.clone(), selected.set_span)
+        }
+        ConfigPathOperation::Delete => (
+            selected.container_span,
+            selected.container_kind.clone(),
+            adjusted_delete_span_for_container(
+                source,
+                selected.container_span,
+                &selected.container_kind,
+                selected.delete_entry_span,
+            ),
         ),
     };
 
     Ok(ResolvedContainerEdit {
-        container_span: selected.container_span,
-        container_kind: selected.container_kind.clone(),
+        container_span,
+        container_kind,
         replace_span,
     })
 }
@@ -703,6 +1652,7 @@ fn collect_toml_pair_candidates(
         container_span: span_from_node(container),
         container_kind: container.kind().to_string(),
         set_span: span_from_node(value_node),
+        set_kind: value_node.kind().to_string(),
         delete_entry_span: span_from_node(pair),
     });
 
@@ -734,6 +1684,7 @@ fn collect_toml_nested_value_candidates(
                     container_span: span_from_node(value),
                     container_kind: value.kind().to_string(),
                     set_span: span_from_node(element),
+                    set_kind: element.kind().to_string(),
                     delete_entry_span: span_from_node(element),
                 });
 
@@ -763,8 +1714,16 @@ fn toml_pair_key_and_value<'a>(pair: Node<'a>, source: &[u8]) -> Option<(Vec<Str
         return None;
     }
 
-    let key_node = *children.first()?;
-    let value_node = *children.last()?;
+    let key_node = pair
+        .child_by_field_name("key")
+        .or_else(|| children.first().copied())?;
+    let value_node = pair.child_by_field_name("value").or_else(|| {
+        children
+            .iter()
+            .rev()
+            .find(|node| node.kind() != "comment")
+            .copied()
+    })?;
     let key_segments = toml_key_segments(key_node, source);
     if key_segments.is_empty() {
         return None;
@@ -1175,8 +2134,14 @@ mod tests {
     fn config_path_operation_set_and_delete_are_distinct() {
         let set = ConfigPathOperation::Set {
             new_text: "42".to_string(),
+            create_missing: false,
+        };
+        let append = ConfigPathOperation::Append {
+            new_text: "42".to_string(),
         };
         let delete = ConfigPathOperation::Delete;
         assert_ne!(set, delete);
+        assert_ne!(set, append);
+        assert_ne!(append, delete);
     }
 }

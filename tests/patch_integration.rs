@@ -1352,3 +1352,2467 @@ fn patch_flag_config_path_set_value_updates_json() {
     let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
     assert_eq!(parsed["config"]["enabled"], Value::Bool(false));
 }
+
+#[test]
+fn patch_flag_config_path_set_value_create_missing_sets_nested_json_keys() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config.sidecar.host",
+        "--set-value",
+        "\"127.0.0.1\"",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "flag config path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(
+        parsed["config"]["sidecar"]["host"],
+        Value::String("127.0.0.1".to_string())
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_updates_yaml_value() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.yaml", ".yaml");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "yaml config path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(parsed["service"]["sidecar"]["port"].as_i64(), Some(9000));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_updates_toml_value() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.toml", ".toml");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "database.settings.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9100",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "toml config path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["database"]["settings"]["sidecar"]["port"].as_integer(),
+        Some(9100)
+    );
+}
+
+#[test]
+fn patch_flag_config_path_delete_rejects_create_missing() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config.enabled",
+        "--delete",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "config path delete should reject --create-missing"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--create-missing")),
+        "error should mention create-missing restriction"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_array_oob_with_append_hint() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[9]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "10",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "out-of-bounds array index should remain an error"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "array OOB error should include append-operation hint"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_preserves_crlf_yaml_newlines() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"service:\r\n  name: identedit\r\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "yaml create-missing should succeed on CRLF source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.windows(2).any(|pair| pair == b"\r\n"),
+        "updated YAML should retain CRLF line endings"
+    );
+    for (index, byte) in updated.iter().enumerate() {
+        if *byte == b'\n' {
+            assert!(
+                index > 0 && updated[index - 1] == b'\r',
+                "every newline should be CRLF, found lone LF at byte {index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_yaml_multi_document() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nservice:\n  name: identedit\n---\nmetadata:\n  owner: team\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "yaml multi-document create-missing should be rejected"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("multiple YAML documents")),
+        "error should explain multi-document create-missing limitation"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_yaml_anchor_alias() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "yaml anchor/alias create-missing should be rejected"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias")),
+        "error should explain anchor/alias create-missing limitation"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_existing_path_preserves_yaml_comments() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  retries: 2\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "yaml existing-path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains("# keep-this-comment"),
+        "existing-path create-missing should not drop nearby comments"
+    );
+    assert!(
+        updated.contains("retries: 5"),
+        "targeted value should be updated"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bootstraps_empty_json_root() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "empty-json create-missing should bootstrap root object: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["service"]["enabled"], Value::Bool(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_nested_array_oob_has_append_hint() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.targets[0].name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"api\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "nested array slot creation should remain out-of-bounds error"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "nested array OOB error should include append-operation hint"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_existing_toml_path_preserves_comments() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nport = 8080 # trailing-comment\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing TOML path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("# keep-this-comment"),
+        "existing-path create-missing should keep TOML comments"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["server"]["port"].as_integer(),
+        Some(9090),
+        "targeted TOML value should be updated"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_comment_preserving_fallback() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "missing-path TOML create-missing with comments should be rejected for safety"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("TOML comments")),
+        "error should explain comment-preservation limitation"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_with_stale_expected_file_hash_fails_precondition() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.sidecar.port",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale expected_file_hash should fail before create-missing"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+}
+
+#[test]
+fn patch_json_config_path_delete_rejects_create_missing_payload_field() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.enabled"
+        },
+        "op": {
+            "type": "delete",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "delete payload should reject create_missing field"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_root_array_oob_has_append_hint() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"[]")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "[0].name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"api\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "root array out-of-bounds should remain an error"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "root array OOB should include append-operation hint"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_rejects_unrelated_line_flags() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let anchor = line_ref("a\nb\n", 1);
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        "--anchor",
+        &anchor,
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "config-path create-missing should reject unrelated line-target flags"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_yaml_comment_preserving_fallback() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "missing-path YAML create-missing with comments should be rejected for safety"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("YAML comments")),
+        "error should explain YAML comment-preservation limitation"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_existing_yaml_path_preserves_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  retries: 2\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing YAML path create-missing should still succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("# keep-this-comment"));
+    assert!(updated.contains("retries: 5"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_preserves_cr_only_toml_newlines() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[server]\rhost = \"127.0.0.1\"\r")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CR-only TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(&b'\r'),
+        "updated TOML should retain CR-only line endings"
+    );
+    for (index, byte) in updated.iter().enumerate() {
+        if *byte == b'\n' {
+            assert!(
+                index > 0 && updated[index - 1] == b'\r',
+                "every newline should be CRLF or CR-only compatible; found lone LF at byte {index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_still_rejects_invalid_path_characters() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service bad.path"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "invalid path characters should still be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_empty_json_with_stale_hash_fails_precondition() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.enabled",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash should fail even when bootstrapping empty json"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_array_oob_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[99]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "10",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "array OOB should fail"
+    );
+
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "failed create-missing operation must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_yaml_comment_rejection_does_not_mutate_file() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "yaml rejection must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_toml_comment_rejection_does_not_mutate_file() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "toml rejection must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_yaml_multi_document_rejection_does_not_mutate_file() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nservice:\n  name: identedit\n---\nmetadata:\n  owner: team\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "multi-document rejection must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_yaml_anchor_alias_rejection_does_not_mutate_file() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "anchor/alias rejection must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_empty_json_with_exact_hash_succeeds() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.enabled",
+            "expected_file_hash": identedit::hash::hash_text("")
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "exact hash should allow empty-json bootstrap: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn patch_json_config_path_missing_path_without_create_missing_bypasses_yaml_comment_guard() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("was not found")),
+        "missing path without create-missing should keep strict missing-path diagnostic"
+    );
+}
+
+#[test]
+fn patch_json_config_path_missing_path_without_create_missing_bypasses_toml_comment_guard() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("was not found")),
+        "missing path without create-missing should keep strict missing-path diagnostic"
+    );
+}
+
+#[test]
+fn patch_json_config_path_create_missing_existing_anchor_path_rejects_with_no_mutation() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "anchor/alias yaml should be rejected in create-missing mode"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected operation must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_create_missing_existing_multi_document_path_preserves_both_docs() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nservice:\n  retries: 2\n---\nmetadata:\n  owner: team\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing multi-doc path should still use strict edit path: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("---\nservice:"));
+    assert!(updated.contains("---\nmetadata:"));
+    assert!(updated.contains("retries: 5"));
+}
+
+#[test]
+fn patch_json_config_path_create_missing_invalid_json_value_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "{invalid-json",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "invalid value should fail");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "failure must not mutate JSON source");
+}
+
+#[test]
+fn patch_json_config_path_create_missing_invalid_toml_value_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.toml", ".toml");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "database.settings.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "{invalid-toml",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "invalid value should fail");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "failure must not mutate TOML source");
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_rejects_yaml_comment_fallback() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "flag-mode YAML fallback with comments should be rejected"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_rejects_toml_comment_fallback() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "server.port",
+        "--set-value",
+        "9090",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "flag-mode TOML fallback with comments should be rejected"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_rejects_yaml_multi_document() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nservice:\n  name: identedit\n---\nmetadata:\n  owner: team\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "flag-mode YAML multi-document fallback should be rejected"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_rejects_yaml_anchor_alias() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "flag-mode YAML anchor/alias fallback should be rejected"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_array_oob_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items[99]",
+        "--set-value",
+        "10",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "array OOB should fail in flag mode");
+
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "flag-mode failure must not mutate file");
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_existing_yaml_path_preserves_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  retries: 2\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.retries",
+        "--set-value",
+        "5",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "existing YAML path should still use strict rewrite path: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("# keep-this-comment"));
+    assert!(updated.contains("retries: 5"));
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_yaml_comment_error_mentions_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("YAML comments")),
+        "error should mention YAML comments limitation"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_toml_comment_error_mentions_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "server.port",
+        "--set-value",
+        "9090",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("TOML comments")),
+        "error should mention TOML comments limitation"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_array_oob_error_mentions_append() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items[99]",
+        "--set-value",
+        "10",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "array OOB error should include append-operation hint"
+    );
+}
+
+#[test]
+fn patch_json_config_path_create_missing_stale_hash_reports_empty_actual_hash() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.enabled",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+}
+
+#[test]
+fn patch_json_config_path_bootstrap_empty_json_writes_valid_object_document() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(output.status.success(), "operation should succeed");
+    let updated = fs::read_to_string(&file_path).expect("updated file should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated file should be valid JSON");
+    assert_eq!(parsed["service"]["enabled"], Value::Bool(true));
+    assert!(
+        updated.trim_start().starts_with('{'),
+        "bootstrapped document should be object-shaped JSON text"
+    );
+}
+
+#[test]
+fn patch_json_config_path_create_missing_existing_multi_document_path_with_hash_precondition() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nservice:\n  retries: 2\n---\nmetadata:\n  owner: team\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries",
+            "expected_file_hash": identedit::hash::hash_text(&before)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(output.status.success(), "operation should succeed");
+    let updated = fs::read_to_string(&file_path).expect("updated file should be readable");
+    assert!(updated.contains("retries: 5"));
+    assert!(updated.contains("---\nmetadata:"));
+}
+
+#[test]
+fn patch_flag_yaml_comment_rejection_keeps_file_unchanged() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("YAML comments")),
+        "error should mention YAML comments limitation"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected flag-mode operation must not mutate file");
+}
+
+#[test]
+fn patch_flag_toml_comment_rejection_keeps_file_unchanged() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "server.port",
+        "--set-value",
+        "9090",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("TOML comments")),
+        "error should mention TOML comments limitation"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected flag-mode operation must not mutate file");
+}
+
+#[test]
+fn patch_flag_yaml_multidoc_rejection_keeps_file_unchanged() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nservice:\n  name: identedit\n---\nmetadata:\n  owner: team\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected flag-mode operation must not mutate file");
+}
+
+#[test]
+fn patch_flag_yaml_anchor_alias_rejection_keeps_file_unchanged() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.sidecar.port",
+        "--set-value",
+        "9000",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected flag-mode operation must not mutate file");
+}
+
+#[test]
+fn patch_flag_array_oob_rejection_reports_append_and_keeps_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items[99]",
+        "--set-value",
+        "10",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "error should include append-operation hint"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected flag-mode operation must not mutate file");
+}
+
+#[test]
+fn patch_json_create_missing_existing_toml_path_with_hash_precondition_preserves_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nport = 8080\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": identedit::hash::hash_text(&before)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(output.status.success(), "operation should succeed");
+    let updated = fs::read_to_string(&file_path).expect("updated file should be readable");
+    assert!(updated.contains("# keep-this-comment"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_create_missing_existing_yaml_path_with_hash_precondition_preserves_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  retries: 2\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries",
+            "expected_file_hash": identedit::hash::hash_text(&before)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(output.status.success(), "operation should succeed");
+    let updated = fs::read_to_string(&file_path).expect("updated file should be readable");
+    assert!(updated.contains("# keep-this-comment"));
+    assert!(updated.contains("retries: 5"));
+}
+
+#[test]
+fn patch_json_create_missing_existing_yaml_path_stale_hash_fails_precondition_no_mutation() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  retries: 2\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "stale-hash failure must not mutate file");
+}
+
+#[test]
+fn patch_json_create_missing_existing_toml_path_stale_hash_fails_precondition_no_mutation() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nport = 8080\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "stale-hash failure must not mutate file");
+}
+
+#[test]
+fn patch_json_create_missing_yaml_comment_fallback_with_stale_hash_fails_precondition_first() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # keep-this-comment\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+}
+
+#[test]
+fn patch_json_create_missing_toml_comment_fallback_with_stale_hash_fails_precondition_first() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "operation should fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+}
+
+#[test]
+fn patch_json_config_delete_rejects_create_missing_false_field() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.enabled"
+        },
+        "op": {
+            "type": "delete",
+            "create_missing": false
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "delete should reject create_missing field");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_delete_rejects_create_missing_null_field() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.enabled"
+        },
+        "op": {
+            "type": "delete",
+            "create_missing": null
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "delete should reject create_missing field");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_set_rejects_non_boolean_create_missing_type() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": "yes"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "non-boolean create_missing should be rejected");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_set_omitted_create_missing_keeps_strict_missing_path_behavior() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "omitted create_missing should keep strict missing-path behavior"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("was not found")),
+        "strict mode should report missing path"
+    );
+}
+
+#[test]
+fn patch_json_config_set_explicit_false_create_missing_keeps_strict_missing_path_behavior() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": false
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create_missing=false should keep strict missing-path behavior"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("was not found")),
+        "strict mode should report missing path"
+    );
+}
+
+#[test]
+fn patch_json_config_set_with_create_missing_rejects_unknown_payload_field() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true,
+            "unexpected": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "unknown payload field should be rejected");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_json_config_path_append_appends_json_array() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "json config append should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["items"], json!([1, 2, 3, 4]));
+}
+
+#[test]
+fn patch_flag_config_path_append_value_appends_json_array() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items",
+        "--append-value",
+        "4",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "flag config append should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["items"], json!([1, 2, 3, 4]));
+}
+
+#[test]
+fn patch_json_config_path_append_appends_toml_array() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.toml", ".toml");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "pipelines[0].steps"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "\"qa\""
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "toml config append should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["pipelines"][0]["steps"],
+        toml::Value::Array(vec![
+            toml::Value::String("fmt".to_string()),
+            toml::Value::String("clippy".to_string()),
+            toml::Value::String("qa".to_string())
+        ])
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_non_array_target() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.retries"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "append on non-array path must fail");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append") && message.contains("array")),
+        "non-array append should return a clear array-target diagnostic"
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_create_missing_payload_field() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "append payload should reject create_missing field"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_flag_config_path_append_rejects_create_missing() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items",
+        "--append-value",
+        "4",
+        "--create-missing",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "append should reject create-missing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--create-missing")),
+        "error should mention create-missing restriction"
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_with_stale_hash_fails_without_mutation() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items",
+            "expected_file_hash": "deadbeefdeadbeef"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash must fail for append operation"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "stale-hash append failure must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_append_appends_yaml_block_sequence() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"service:\n  tags:\n    - api\n    - worker\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.tags"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "batch"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "yaml block-sequence append should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(
+        parsed["service"]["tags"],
+        serde_yaml::to_value(vec!["api", "worker", "batch"]).expect("yaml list should serialize")
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_appends_yaml_flow_sequence() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"service: { tags: [api, worker] }\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.tags"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "batch"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "yaml flow-sequence append should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(
+        parsed["service"]["tags"],
+        serde_yaml::to_value(vec!["api", "worker", "batch"]).expect("yaml list should serialize")
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_missing_path() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.not_found"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "append should fail for missing path");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("was not found")),
+        "missing path should report deterministic diagnostic"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "missing-path append failure must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_append_supports_index_targeting_nested_array() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(br#"{"matrix":[[1,2],[3]]}"#)
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "matrix[1]"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "append should allow index path that resolves to nested array: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["matrix"], json!([[1, 2], [3, 4]]));
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_index_targeting_scalar() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[0]"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "4"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "append should fail when index resolves to scalar value"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("array/sequence")),
+        "scalar append should report array-target diagnostic"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "failed scalar append must not mutate file");
+}

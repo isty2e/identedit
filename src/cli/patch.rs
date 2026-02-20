@@ -72,6 +72,17 @@ pub struct PatchArgs {
     )]
     pub set_value: Option<String>,
     #[arg(
+        long = "append-value",
+        value_name = "TEXT",
+        help = "Append value text to target array at config path (config path flag mode)"
+    )]
+    pub append_value: Option<String>,
+    #[arg(
+        long = "create-missing",
+        help = "Allow config path set to create missing map/table keys (not array indexes)"
+    )]
+    pub create_missing: bool,
+    #[arg(
         long,
         value_name = "TEXT",
         help = "Insert text for file-start/file-end targets"
@@ -223,7 +234,14 @@ enum FilePatchOp {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ConfigPatchOp {
-    Set { new_text: String },
+    Set {
+        new_text: String,
+        #[serde(default)]
+        create_missing: bool,
+    },
+    Append {
+        new_text: String,
+    },
     Delete,
 }
 
@@ -555,6 +573,18 @@ fn run_patch_json_config(
     op: Value,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
+    if let Some(object) = op.as_object()
+        && object
+            .get("type")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| value == "delete")
+        && object.contains_key("create_missing")
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path delete operation does not accept create_missing".to_string(),
+        });
+    }
+
     let config_op = serde_json::from_value::<ConfigPatchOp>(op).map_err(|error| {
         IdenteditError::InvalidRequest {
             message: format!("Invalid config path operation payload: {error}"),
@@ -562,11 +592,23 @@ fn run_patch_json_config(
     })?;
 
     let canonical = match config_op {
-        ConfigPatchOp::Set { new_text } => resolve_config_path_operation(
+        ConfigPatchOp::Set {
+            new_text,
+            create_missing,
+        } => resolve_config_path_operation(
             file.as_path(),
             &path,
             expected_file_hash.as_deref(),
-            ConfigPathOperation::Set { new_text },
+            ConfigPathOperation::Set {
+                new_text,
+                create_missing,
+            },
+        )?,
+        ConfigPatchOp::Append { new_text } => resolve_config_path_operation(
+            file.as_path(),
+            &path,
+            expected_file_hash.as_deref(),
+            ConfigPathOperation::Append { new_text },
         )?,
         ConfigPatchOp::Delete => resolve_config_path_operation(
             file.as_path(),
@@ -592,13 +634,16 @@ fn run_patch_flag_node_mode(
     if args.anchor.is_some()
         || args.end_anchor.is_some()
         || args.insert.is_some()
+        || args.set_value.is_some()
+        || args.append_value.is_some()
+        || args.create_missing
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
         || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "Node flag mode does not allow line/file-target options (--at line/file-start/file-end, --anchor/--end-anchor/--insert/--set-line/--replace-range/--insert-after-line/--auto-repair)".to_string(),
+            message: "Node flag mode does not allow line/file/config options (--at line/file-start/file-end, --anchor/--end-anchor/--insert/--set-value/--append-value/--set-line/--replace-range/--insert-after-line/--auto-repair/--create-missing)".to_string(),
         });
     }
 
@@ -686,18 +731,21 @@ fn run_patch_flag_file_mode(
     if args.identity.is_some()
         || args.anchor.is_some()
         || args.replace.is_some()
+        || args.set_value.is_some()
+        || args.append_value.is_some()
         || args.scoped_regex.is_some()
         || args.scoped_replacement.is_some()
         || args.delete
         || args.insert_before.is_some()
         || args.insert_after.is_some()
+        || args.create_missing
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
         || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "File target mode accepts only --insert (plus optional --verbose)".to_string(),
+            message: "File target mode accepts only --insert (plus optional --verbose, not --create-missing)".to_string(),
         });
     }
 
@@ -755,15 +803,18 @@ fn run_patch_flag_line_mode(
     if args.identity.is_some()
         || args.replace.is_some()
         || args.insert.is_some()
+        || args.set_value.is_some()
+        || args.append_value.is_some()
         || args.scoped_regex.is_some()
         || args.scoped_replacement.is_some()
         || args.delete
         || args.insert_before.is_some()
         || args.insert_after.is_some()
+        || args.create_missing
         || args.verbose
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "Line flag mode does not allow node/file-target options (--identity/--replace/--insert/--scoped-regex/--scoped-replacement/--delete/--insert-before/--insert-after/--verbose)".to_string(),
+            message: "Line flag mode does not allow node/file-target options (--identity/--replace/--insert/--scoped-regex/--scoped-replacement/--delete/--insert-before/--insert-after/--verbose/--create-missing)".to_string(),
         });
     }
     let line_operation_count = usize::from(args.set_line.is_some())
@@ -835,15 +886,24 @@ fn run_patch_flag_config_mode(
         || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "Config path flag mode supports only --set-value or --delete (plus optional --verbose)".to_string(),
+            message: "Config path flag mode supports only --set-value, --append-value, or --delete (plus optional --create-missing/--verbose)".to_string(),
         });
     }
 
-    let operation_count = usize::from(args.set_value.is_some()) + usize::from(args.delete);
+    if args.create_missing && (args.delete || args.append_value.is_some()) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--create-missing is only valid with --set-value in config path mode"
+                .to_string(),
+        });
+    }
+
+    let operation_count = usize::from(args.set_value.is_some())
+        + usize::from(args.append_value.is_some())
+        + usize::from(args.delete);
     if operation_count != 1 {
         return Err(IdenteditError::InvalidRequest {
             message:
-                "Exactly one config path operation is required: choose one of --set-value or --delete"
+                "Exactly one config path operation is required: choose one of --set-value, --append-value, or --delete"
                     .to_string(),
         });
     }
@@ -853,7 +913,17 @@ fn run_patch_flag_config_mode(
             file.as_path(),
             &path,
             None,
-            ConfigPathOperation::Set { new_text },
+            ConfigPathOperation::Set {
+                new_text,
+                create_missing: args.create_missing,
+            },
+        )?
+    } else if let Some(new_text) = args.append_value {
+        resolve_config_path_operation(
+            file.as_path(),
+            &path,
+            None,
+            ConfigPathOperation::Append { new_text },
         )?
     } else {
         resolve_config_path_operation(file.as_path(), &path, None, ConfigPathOperation::Delete)?
