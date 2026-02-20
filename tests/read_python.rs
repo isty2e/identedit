@@ -10,7 +10,7 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
+fn run_read(arguments: &[&str], file: &PathBuf) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
 
@@ -25,7 +25,7 @@ fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
 #[test]
 fn selects_python_function_definitions() {
     let fixture = fixture_path("example.py");
-    let output = run_select(&["--kind", "function_definition"], &fixture);
+    let output = run_read(&["--kind", "function_definition"], &fixture);
 
     assert!(
         output.status.success(),
@@ -53,7 +53,7 @@ fn selects_python_function_definitions() {
 #[test]
 fn applies_name_pattern_filter_for_python_functions() {
     let fixture = fixture_path("example.py");
-    let output = run_select(
+    let output = run_read(
         &["--kind", "function_definition", "--name", "process_*"],
         &fixture,
     );

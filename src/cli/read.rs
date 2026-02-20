@@ -129,7 +129,7 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
             });
         }
 
-        let (kind, name, exclude_kinds) = if args.json > 1 {
+        if args.json > 1 {
             if args.kind.is_some() {
                 return Err(IdenteditError::InvalidRequest {
                     message:
@@ -151,21 +151,9 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
                             .to_string(),
                 });
             }
-            (None, None, Vec::new())
-        } else {
-            (args.kind, args.name, args.exclude_kinds)
-        };
-
-        let response = super::select::run_select(super::select::SelectArgs {
-            mode: super::select::SelectMode::Ast,
-            kind,
-            name,
-            exclude_kinds,
-            json: true,
-            verbose: args.verbose,
-            files: Vec::new(),
-        })?;
-        return Ok(ReadCommandOutput::Json(ReadResponse::from_select_response(
+        }
+        let response = super::read_select::run_read_select_from_stdin(args.verbose)?;
+        return Ok(ReadCommandOutput::Json(ReadResponse::from_read_select_response(
             response,
         )));
     }
@@ -425,11 +413,11 @@ impl ReadHandle {
 }
 
 impl ReadResponse {
-    fn from_select_response(response: super::select::SelectResponse) -> Self {
+    fn from_read_select_response(response: super::read_select::ReadSelectResponse) -> Self {
         let handles = response
             .handles
             .into_iter()
-            .map(ReadHandle::from_select_handle)
+            .map(ReadHandle::from_read_select_handle)
             .collect();
         let summary = ReadSummary {
             files_scanned: response.summary.files_scanned,
@@ -452,38 +440,25 @@ impl ReadResponse {
 }
 
 impl ReadHandle {
-    fn from_select_handle(handle: super::select::SelectHandle) -> Self {
-        match handle {
-            super::select::SelectHandle::Node {
-                file,
-                span,
-                kind,
-                name,
-                identity,
-                expected_old_hash,
-                text,
-            } => Self::Node {
-                file,
-                span,
-                kind,
-                name,
-                identity,
-                expected_old_hash,
-                text,
-            },
-            super::select::SelectHandle::Line {
-                file,
-                line,
-                anchor,
-                hash,
-                text,
-            } => Self::Line {
-                file,
-                line,
-                anchor,
-                hash,
-                text,
-            },
+    fn from_read_select_handle(handle: super::read_select::ReadSelectHandle) -> Self {
+        let super::read_select::ReadSelectHandle {
+            file,
+            span,
+            kind,
+            name,
+            identity,
+            expected_old_hash,
+            text,
+        } = handle;
+
+        Self::Node {
+            file,
+            span,
+            kind,
+            name,
+            identity,
+            expected_old_hash,
+            text,
         }
     }
 }

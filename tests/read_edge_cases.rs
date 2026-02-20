@@ -13,7 +13,7 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn run_select(arguments: &[&str], file: Option<&PathBuf>) -> Output {
+fn run_read(arguments: &[&str], file: Option<&PathBuf>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
 
@@ -28,7 +28,7 @@ fn run_select(arguments: &[&str], file: Option<&PathBuf>) -> Output {
     command.output().expect("failed to run identedit binary")
 }
 
-fn run_select_with_files(arguments: &[&str], files: &[&Path]) -> Output {
+fn run_read_with_files(arguments: &[&str], files: &[&Path]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
 
@@ -43,11 +43,11 @@ fn run_select_with_files(arguments: &[&str], files: &[&Path]) -> Output {
     command.output().expect("failed to run identedit binary")
 }
 
-fn run_select_json_mode(request_json: &str) -> Output {
-    run_select_json_mode_with_args(request_json, &[])
+fn run_read_json_mode(request_json: &str) -> Output {
+    run_read_json_mode_with_args(request_json, &[])
 }
 
-fn run_select_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
+fn run_read_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command
         .arg("read")
@@ -99,7 +99,7 @@ fn accepts_valid_json_request_for_python_selection() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
 
     assert!(
         output.status.success(),
@@ -130,7 +130,7 @@ fn cli_mode_supports_multiple_files_and_returns_flat_handles() {
         .expect("temp python fixture write should succeed");
     let second_path = second_file.keep().expect("temp file should persist").1;
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[fixture.as_path(), second_path.as_path()],
     );
@@ -168,7 +168,7 @@ fn cli_mode_supports_multiple_files_and_returns_flat_handles() {
 #[test]
 fn cli_mode_response_includes_expected_old_hash_for_each_handle() {
     let fixture = fixture_path("example.py");
-    let output = run_select(
+    let output = run_read(
         &["--verbose", "--kind", "function_definition"],
         Some(&fixture),
     );
@@ -225,7 +225,7 @@ fn json_mode_supports_files_array_and_returns_flat_handles() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "multi-file JSON mode should succeed: {}",
@@ -260,7 +260,7 @@ fn json_mode_response_includes_file_preconditions_for_all_scanned_files() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "select should succeed: {}",
@@ -320,7 +320,7 @@ fn json_mode_rejects_mixed_file_and_files_fields() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(!output.status.success(), "mixed file and files should fail");
 
     let response: Value =
@@ -347,7 +347,7 @@ fn json_mode_rejects_empty_files_array() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(!output.status.success(), "empty files array should fail");
 
     let response: Value =
@@ -376,7 +376,7 @@ fn json_mode_rejects_positional_file_arguments() {
     });
     let fixture_arg = fixture.to_str().expect("path should be valid UTF-8");
 
-    let output = run_select_json_mode_with_args(&request.to_string(), &[fixture_arg]);
+    let output = run_read_json_mode_with_args(&request.to_string(), &[fixture_arg]);
     assert!(
         !output.status.success(),
         "--json mode should reject positional FILE arguments"
@@ -406,7 +406,7 @@ fn json_mode_rejects_kind_flag_argument() {
         }
     });
 
-    let output = run_select_json_mode_with_args(&request.to_string(), &["--kind", "module"]);
+    let output = run_read_json_mode_with_args(&request.to_string(), &["--kind", "module"]);
     assert!(
         !output.status.success(),
         "--json mode should reject --kind flag argument"
@@ -436,7 +436,7 @@ fn json_mode_rejects_name_and_exclude_kind_flag_arguments() {
         }
     });
 
-    let output = run_select_json_mode_with_args(
+    let output = run_read_json_mode_with_args(
         &request.to_string(),
         &["--name", "process_*", "--exclude-kind", "comment"],
     );
@@ -472,7 +472,7 @@ fn cli_mode_rejects_duplicate_file_entries_by_canonical_path() {
         .join(".")
         .join(canonical_path.file_name().expect("file name should exist"));
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[canonical_path.as_path(), alias_path.as_path()],
     );
@@ -521,7 +521,7 @@ fn json_mode_rejects_duplicate_file_entries_by_canonical_path() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "duplicate canonical file entries should fail in JSON mode"
@@ -548,7 +548,7 @@ fn cli_mode_rejects_duplicate_file_entries_for_hardlink_alias() {
     let hardlink_path = workspace.path().join("hardlink.py");
     fs::hard_link(&canonical_path, &hardlink_path).expect("hardlink should be created");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[canonical_path.as_path(), hardlink_path.as_path()],
     );
@@ -591,7 +591,7 @@ fn json_mode_rejects_duplicate_file_entries_for_hardlink_alias() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "hardlink aliases should be rejected as duplicate logical file entries in JSON mode"
@@ -620,7 +620,7 @@ fn cli_mode_rejects_non_adjacent_hardlink_duplicates_with_middle_file() {
     fs::write(&middle_path, fixture).expect("middle fixture write should succeed");
     fs::hard_link(&canonical_path, &hardlink_path).expect("hardlink should be created");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[
             canonical_path.as_path(),
@@ -674,7 +674,7 @@ fn json_mode_rejects_non_adjacent_hardlink_duplicates_with_middle_file() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "json mode should reject non-adjacent hardlink aliases"
@@ -709,7 +709,7 @@ fn cli_mode_rejects_three_hardlink_aliases_with_middle_file() {
     fs::hard_link(&canonical_path, &hardlink_b).expect("hardlink_b should be created");
     fs::hard_link(&canonical_path, &hardlink_z).expect("hardlink_z should be created");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[
             hardlink_z.as_path(),
@@ -767,7 +767,7 @@ fn json_mode_rejects_three_hardlink_aliases_with_middle_file() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "json mode should reject multiple hardlink aliases"
@@ -798,7 +798,7 @@ fn cli_mode_file_preconditions_follow_input_order_for_multi_file_success() {
     fs::write(&file_a, "def a_target():\n    return 1\n").expect("file_a write should succeed");
     fs::write(&file_b, "def b_target():\n    return 2\n").expect("file_b write should succeed");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[file_c.as_path(), file_a.as_path(), file_b.as_path()],
     );
@@ -871,7 +871,7 @@ fn json_mode_file_preconditions_follow_input_order_for_multi_file_success() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "multi-file select in JSON mode should succeed: {}",
@@ -924,7 +924,7 @@ fn cli_mode_multi_file_failure_follows_input_order_without_partial_handles() {
     fs::write(&invalid_python, "def broken(\n").expect("invalid fixture write should succeed");
     let missing_python = workspace.path().join("missing.py");
 
-    let io_first_output = run_select_with_files(
+    let io_first_output = run_read_with_files(
         &["--kind", "function_definition"],
         &[missing_python.as_path(), invalid_python.as_path()],
     );
@@ -940,7 +940,7 @@ fn cli_mode_multi_file_failure_follows_input_order_without_partial_handles() {
         "error responses should not expose partial handles"
     );
 
-    let parse_first_output = run_select_with_files(
+    let parse_first_output = run_read_with_files(
         &["--kind", "function_definition"],
         &[invalid_python.as_path(), missing_python.as_path()],
     );
@@ -976,7 +976,7 @@ fn json_mode_multi_file_failure_follows_input_order_without_partial_handles() {
             "exclude_kinds": []
         }
     });
-    let io_first_output = run_select_json_mode(&io_first_request.to_string());
+    let io_first_output = run_read_json_mode(&io_first_request.to_string());
     assert!(
         !io_first_output.status.success(),
         "mixed failure inputs should fail in JSON mode"
@@ -1001,7 +1001,7 @@ fn json_mode_multi_file_failure_follows_input_order_without_partial_handles() {
             "exclude_kinds": []
         }
     });
-    let parse_first_output = run_select_json_mode(&parse_first_request.to_string());
+    let parse_first_output = run_read_json_mode(&parse_first_request.to_string());
     assert!(
         !parse_first_output.status.success(),
         "mixed failure inputs should fail in JSON mode"
@@ -1028,7 +1028,7 @@ fn accepts_valid_json_request_for_json_selection() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
 
     assert!(
         output.status.success(),
@@ -1061,7 +1061,7 @@ fn json_mode_python_selector_with_no_matches_returns_success_and_empty_handles()
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "no-match selector should still succeed in JSON mode: {}",
@@ -1087,7 +1087,7 @@ fn json_mode_json_selector_with_no_matches_returns_success_and_empty_handles() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "no-match selector should still succeed in JSON mode: {}",
@@ -1103,7 +1103,7 @@ fn json_mode_json_selector_with_no_matches_returns_success_and_empty_handles() {
 #[test]
 fn python_selector_with_no_matches_returns_success_and_empty_handles() {
     let fixture = fixture_path("example.py");
-    let output = run_select(
+    let output = run_read(
         &[
             "--kind",
             "function_definition",
@@ -1127,7 +1127,7 @@ fn python_selector_with_no_matches_returns_success_and_empty_handles() {
 #[test]
 fn json_selector_with_no_matches_returns_success_and_empty_handles() {
     let fixture = fixture_path("example.json");
-    let output = run_select(
+    let output = run_read(
         &["--kind", "key", "--name", "does_not_exist"],
         Some(&fixture),
     );
@@ -1154,7 +1154,7 @@ fn empty_python_file_returns_structured_module_handle() {
         .expect("empty fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
 
-    let output = run_select(&["--kind", "module"], Some(&file_path));
+    let output = run_read(&["--kind", "module"], Some(&file_path));
     assert!(
         output.status.success(),
         "select should succeed for empty python file: {}",
@@ -1180,7 +1180,7 @@ fn empty_json_file_returns_structured_empty_result() {
         .expect("empty fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
 
-    let output = run_select(&["--kind", "object"], Some(&file_path));
+    let output = run_read(&["--kind", "object"], Some(&file_path));
     assert!(
         output.status.success(),
         "select should succeed for empty json file: {}",
@@ -1200,7 +1200,7 @@ fn empty_json_file_returns_structured_empty_result() {
 #[test]
 fn returns_error_when_kind_flag_is_missing() {
     let fixture = fixture_path("example.py");
-    let output = run_select(&[], Some(&fixture));
+    let output = run_read(&[], Some(&fixture));
 
     assert!(
         output.status.success(),
@@ -1220,7 +1220,7 @@ fn returns_error_when_kind_flag_is_missing() {
 #[test]
 fn returns_error_for_invalid_selector_glob_in_flag_mode() {
     let fixture = fixture_path("example.py");
-    let output = run_select(
+    let output = run_read(
         &["--kind", "function_definition", "--name", "["],
         Some(&fixture),
     );
@@ -1244,7 +1244,7 @@ fn returns_error_for_invalid_selector_glob_in_json_mode() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "invalid selector glob should fail in JSON mode"
@@ -1268,7 +1268,7 @@ fn returns_error_for_whitespace_only_kind_in_json_mode() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "whitespace-only selector.kind should fail in JSON mode"
@@ -1287,7 +1287,7 @@ fn returns_error_for_whitespace_only_kind_in_json_mode() {
 
 #[test]
 fn returns_error_for_invalid_json_payload_in_json_mode() {
-    let output = run_select_json_mode("{");
+    let output = run_read_json_mode("{");
 
     assert!(!output.status.success(), "invalid JSON payload should fail");
     let response: Value =
@@ -1297,7 +1297,7 @@ fn returns_error_for_invalid_json_payload_in_json_mode() {
 
 #[test]
 fn returns_error_when_selector_is_missing_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
   "command": "read",
   "file": "tests/fixtures/example.py"
@@ -1315,7 +1315,7 @@ fn returns_error_when_selector_is_missing_in_json_mode() {
 
 #[test]
 fn returns_error_when_file_is_missing_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
   "command": "read",
   "selector": {
@@ -1334,7 +1334,7 @@ fn returns_error_when_file_is_missing_in_json_mode() {
 
 #[test]
 fn returns_error_when_json_request_has_unknown_top_level_field() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
   "command": "read",
   "file": "tests/fixtures/example.py",
@@ -1364,7 +1364,7 @@ fn returns_error_when_json_request_has_unknown_top_level_field() {
 
 #[test]
 fn returns_error_when_selector_has_unknown_field_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
   "command": "read",
   "file": "tests/fixtures/example.py",
@@ -1404,7 +1404,7 @@ fn json_mode_treats_env_token_in_file_path_as_literal_string() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "json-mode file paths should not expand env tokens"
@@ -1417,7 +1417,7 @@ fn json_mode_treats_env_token_in_file_path_as_literal_string() {
 
 #[test]
 fn returns_error_when_selector_exclude_kinds_has_wrong_type_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
   "command": "read",
   "file": "tests/fixtures/example.py",
@@ -1440,7 +1440,7 @@ fn returns_error_when_selector_exclude_kinds_has_wrong_type_in_json_mode() {
 
 #[test]
 fn returns_error_when_selector_kind_has_wrong_type_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
   "command": "read",
   "file": "tests/fixtures/example.py",
@@ -1462,8 +1462,8 @@ fn returns_error_when_selector_kind_has_wrong_type_in_json_mode() {
 }
 
 #[test]
-fn returns_error_for_non_select_command_in_json_mode() {
-    let output = run_select_json_mode(
+fn returns_error_for_non_read_command_in_json_mode() {
+    let output = run_read_json_mode(
         r#"{
   "command": "verify",
   "file": "tests/fixtures/example.py",
@@ -1482,8 +1482,90 @@ fn returns_error_for_non_select_command_in_json_mode() {
     assert!(
         response["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("expected 'select'")),
+            .is_some_and(|message| message.contains("expected 'read'")),
         "expected unsupported command message"
+    );
+}
+
+#[test]
+fn returns_error_for_legacy_select_command_in_json_mode() {
+    let output = run_read_json_mode(
+        r#"{
+  "command": "select",
+  "file": "tests/fixtures/example.py",
+  "selector": {
+    "kind": "function_definition",
+    "name_pattern": null,
+    "exclude_kinds": []
+  }
+}"#,
+    );
+
+    assert!(!output.status.success(), "legacy command should fail");
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expected 'read'")),
+        "expected legacy-command rejection message"
+    );
+}
+
+#[test]
+fn returns_error_when_json_mode_payload_contains_file_and_files() {
+    let output = run_read_json_mode(
+        r#"{
+  "command": "read",
+  "file": "tests/fixtures/example.py",
+  "files": ["tests/fixtures/example.py"],
+  "selector": {
+    "kind": "function_definition",
+    "name_pattern": null,
+    "exclude_kinds": []
+  }
+}"#,
+    );
+
+    assert!(
+        !output.status.success(),
+        "payload mixing file/files should fail"
+    );
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"].as_str().is_some_and(|message| {
+            message.contains("either 'file' or 'files'") && message.contains("not both")
+        }),
+        "expected shape-conflict message"
+    );
+}
+
+#[test]
+fn returns_error_for_homoglyph_command_token_in_json_mode() {
+    let output = run_read_json_mode(
+        r#"{
+  "command": "reаd",
+  "file": "tests/fixtures/example.py",
+  "selector": {
+    "kind": "function_definition",
+    "name_pattern": null,
+    "exclude_kinds": []
+  }
+}"#,
+    );
+
+    assert!(!output.status.success(), "homoglyph command should fail");
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expected 'read'")),
+        "expected command-token rejection message"
     );
 }
 
@@ -1502,7 +1584,7 @@ fn supports_shell_variable_expanded_path_in_flag_mode() {
     );
     assert!(
         output.status.success(),
-        "select via shell-expanded path should succeed: {}",
+        "read via shell-expanded path should succeed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -1535,9 +1617,9 @@ fn single_quoted_env_token_path_remains_literal_in_flag_mode() {
 
 #[test]
 fn returns_error_for_command_token_with_trailing_whitespace_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
-  "command": "select ",
+  "command": "read ",
   "file": "tests/fixtures/example.py",
   "selector": {
     "kind": "function_definition",
@@ -1558,9 +1640,9 @@ fn returns_error_for_command_token_with_trailing_whitespace_in_json_mode() {
 
 #[test]
 fn returns_error_for_uppercase_command_token_in_json_mode() {
-    let output = run_select_json_mode(
+    let output = run_read_json_mode(
         r#"{
-  "command": "SELECT",
+  "command": "READ",
   "file": "tests/fixtures/example.py",
   "selector": {
     "kind": "function_definition",
@@ -1592,7 +1674,7 @@ fn supports_case_insensitive_python_extension() {
         .expect("temp fixture write should succeed");
 
     let temp_path = temporary_file.path().to_path_buf();
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
 
     assert!(
         output.status.success(),
@@ -1617,7 +1699,7 @@ fn supports_case_insensitive_json_extension() {
         .expect("temp fixture write should succeed");
 
     let temp_path = temporary_file.path().to_path_buf();
-    let output = run_select(&["--kind", "object"], Some(&temp_path));
+    let output = run_read(&["--kind", "object"], Some(&temp_path));
 
     assert!(
         output.status.success(),
@@ -1639,7 +1721,7 @@ fn extensionless_file_routes_to_fallback_provider() {
         .expect("fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should use fallback for extensionless files: {}",
@@ -1661,7 +1743,7 @@ fn hidden_dotfile_without_basename_routes_to_fallback_provider() {
     )
     .expect("dotfile write should succeed");
 
-    let output = run_select(&["--kind", "function_definition"], Some(&dotfile_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&dotfile_path));
     assert!(
         output.status.success(),
         "select should use fallback for hidden dotfile without basename: {}",
@@ -1686,7 +1768,7 @@ fn fallback_select_ignores_python_def_inside_triple_quoted_string() {
         .expect("fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should succeed via fallback: {}",
@@ -1716,7 +1798,7 @@ fn fallback_select_name_pattern_matches_backslash_bearing_symbol_name() {
         .expect("fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(
+    let output = run_read(
         &["--kind", "function_definition", "--name", "\\u0066*"],
         Some(&temp_path),
     );
@@ -1761,7 +1843,7 @@ fn select_handles_use_utf8_boundary_spans_across_providers() {
 
     for (file, kind) in cases {
         let source = fs::read_to_string(&file).expect("fixture should be readable");
-        let output = run_select(&["--kind", kind], Some(&file));
+        let output = run_read(&["--kind", kind], Some(&file));
         assert!(
             output.status.success(),
             "select should succeed for {} with kind {}: {}",
@@ -1812,7 +1894,7 @@ fn returns_io_error_when_file_argument_is_directory() {
     let directory = tempdir().expect("tempdir should be created");
     let directory_path = directory.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&directory_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&directory_path));
     assert!(
         !output.status.success(),
         "select should fail when FILE points to a directory"
@@ -1834,7 +1916,7 @@ fn supports_cr_only_python_files() {
         .expect("cr-only fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should succeed for CR-only python input: {}",
@@ -1860,7 +1942,7 @@ fn supports_utf8_bom_prefixed_python_files() {
         .expect("bom python fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should succeed for UTF-8 BOM python input: {}",
@@ -1884,7 +1966,7 @@ fn bom_only_python_file_returns_empty_module_handle_at_eof() {
         .expect("bom-only python fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--verbose", "--kind", "module"], Some(&temp_path));
+    let output = run_read(&["--verbose", "--kind", "module"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should succeed for BOM-only python input: {}",
@@ -1911,7 +1993,7 @@ fn supports_utf8_bom_prefixed_json_files() {
         .expect("bom json fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "object"], Some(&temp_path));
+    let output = run_read(&["--kind", "object"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should succeed for UTF-8 BOM json input: {}",
@@ -1935,7 +2017,7 @@ fn bom_only_json_file_returns_structured_empty_result() {
         .expect("bom-only json fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "object"], Some(&temp_path));
+    let output = run_read(&["--kind", "object"], Some(&temp_path));
     assert!(
         output.status.success(),
         "select should succeed for BOM-only json input: {}",
@@ -1959,7 +2041,7 @@ fn returns_parse_failure_for_syntax_invalid_python_file() {
         .expect("invalid python fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         !output.status.success(),
         "select should fail for syntax-invalid python input"
@@ -1981,7 +2063,7 @@ fn returns_parse_failure_for_partially_binary_python_file() {
         .expect("binary-like python fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         !output.status.success(),
         "select should fail for partially-binary python payload"
@@ -2003,7 +2085,7 @@ fn returns_parse_failure_for_nul_in_python_source() {
         .expect("nul python fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         !output.status.success(),
         "select should fail for python source containing embedded NUL"
@@ -2025,7 +2107,7 @@ fn returns_parse_failure_for_bom_plus_nul_python_source() {
         .expect("bom+nul python fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "function_definition"], Some(&temp_path));
+    let output = run_read(&["--kind", "function_definition"], Some(&temp_path));
     assert!(
         !output.status.success(),
         "select should fail for python source containing BOM and embedded NUL"
@@ -2047,7 +2129,7 @@ fn returns_parse_failure_for_syntax_invalid_json_file() {
         .expect("invalid json fixture write should succeed");
     let temp_path = temporary_file.path().to_path_buf();
 
-    let output = run_select(&["--kind", "object"], Some(&temp_path));
+    let output = run_read(&["--kind", "object"], Some(&temp_path));
     assert!(
         !output.status.success(),
         "select should fail for syntax-invalid json input"

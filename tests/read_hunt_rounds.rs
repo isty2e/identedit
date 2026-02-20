@@ -13,7 +13,7 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn run_select_with_files(arguments: &[&str], files: &[&Path]) -> Output {
+fn run_read_with_files(arguments: &[&str], files: &[&Path]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
 
@@ -28,11 +28,11 @@ fn run_select_with_files(arguments: &[&str], files: &[&Path]) -> Output {
     command.output().expect("failed to run identedit binary")
 }
 
-fn run_select_json_mode(request_json: &str) -> Output {
-    run_select_json_mode_with_args(request_json, &[])
+fn run_read_json_mode(request_json: &str) -> Output {
+    run_read_json_mode_with_args(request_json, &[])
 }
 
-fn run_select_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
+fn run_read_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command
         .arg("read")
@@ -72,7 +72,7 @@ fn round1_exploit_cli_rejects_symlink_alias_duplicate_without_partial_handles() 
     let symlink_path = workspace.path().join("alias.py");
     symlink(&canonical_path, &symlink_path).expect("symlink should be created");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[canonical_path.as_path(), symlink_path.as_path()],
     );
@@ -121,7 +121,7 @@ fn round1_exploit_json_rejects_symlink_alias_duplicate_without_partial_handles()
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "symlink aliases should be rejected as duplicate logical file entries"
@@ -158,7 +158,7 @@ fn round1_exploit_json_rejects_exact_duplicate_path_entries() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "duplicate path entries should be rejected"
@@ -191,7 +191,7 @@ fn round1_exploit_cli_rejects_duplicate_alias_in_reverse_order() {
     let symlink_path = workspace.path().join("alias.py");
     symlink(&canonical_path, &symlink_path).expect("symlink should be created");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[symlink_path.as_path(), canonical_path.as_path()],
     );
@@ -220,7 +220,7 @@ fn round1_explore_cli_summary_matches_handle_length_for_mixed_inputs() {
     let python_fixture = fixture_path("example.py");
     let json_fixture = fixture_path("example.json");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[python_fixture.as_path(), json_fixture.as_path()],
     );
@@ -269,7 +269,7 @@ fn round1_explore_json_single_file_field_reports_one_file_scanned() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "single file request should succeed: {}",
@@ -304,7 +304,7 @@ fn round2_exploit_cli_unreadable_file_returns_io_error_without_partial_handles()
     permissions.set_mode(0o000);
     fs::set_permissions(&unreadable, permissions).expect("permissions update should succeed");
 
-    let output = run_select_with_files(&["--kind", "function_definition"], &[unreadable.as_path()]);
+    let output = run_read_with_files(&["--kind", "function_definition"], &[unreadable.as_path()]);
     assert!(
         !output.status.success(),
         "unreadable file should fail with io_error"
@@ -344,7 +344,7 @@ fn round2_exploit_json_unreadable_file_returns_io_error_without_partial_handles(
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "unreadable file should fail with io_error in json mode"
@@ -368,7 +368,7 @@ fn round2_exploit_cli_symlink_cycle_returns_io_error() {
     let loop_path = workspace.path().join("loop.py");
     symlink("loop.py", &loop_path).expect("self-referential symlink should be created");
 
-    let output = run_select_with_files(&["--kind", "function_definition"], &[loop_path.as_path()]);
+    let output = run_read_with_files(&["--kind", "function_definition"], &[loop_path.as_path()]);
     assert!(
         !output.status.success(),
         "symlink cycle should fail with io_error"
@@ -400,7 +400,7 @@ fn round2_exploit_multi_file_first_failure_order_holds_for_unreadable_and_parse_
     let invalid = workspace.path().join("invalid.py");
     fs::write(&invalid, "def broken(\n").expect("fixture write should succeed");
 
-    let io_first = run_select_with_files(
+    let io_first = run_read_with_files(
         &["--kind", "function_definition"],
         &[unreadable.as_path(), invalid.as_path()],
     );
@@ -409,7 +409,7 @@ fn round2_exploit_multi_file_first_failure_order_holds_for_unreadable_and_parse_
         serde_json::from_slice(&io_first.stdout).expect("stdout should be valid JSON");
     assert_eq!(io_response["error"]["type"], "io_error");
 
-    let parse_first = run_select_with_files(
+    let parse_first = run_read_with_files(
         &["--kind", "function_definition"],
         &[invalid.as_path(), unreadable.as_path()],
     );
@@ -432,7 +432,7 @@ fn round2_explore_cli_three_files_reports_consistent_summary() {
     let text_file = workspace.path().join("plain.txt");
     fs::write(&text_file, "nothing structured here").expect("text fixture write should succeed");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition", "--name", "process_*"],
         &[
             python_file.as_path(),
@@ -478,7 +478,7 @@ fn round2_explore_json_name_filter_applies_across_multiple_files() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "json multi-file select should succeed: {}",
@@ -502,7 +502,7 @@ fn round2_explore_json_name_filter_applies_across_multiple_files() {
 
 #[test]
 fn round3_exploit_kind_flag_takes_precedence_over_invalid_json_payload() {
-    let output = run_select_json_mode_with_args("{", &["--kind", "module"]);
+    let output = run_read_json_mode_with_args("{", &["--kind", "module"]);
     assert!(!output.status.success(), "request should fail");
 
     let response: Value =
@@ -518,7 +518,7 @@ fn round3_exploit_kind_flag_takes_precedence_over_invalid_json_payload() {
 
 #[test]
 fn round3_exploit_name_flag_takes_precedence_over_empty_stdin_payload() {
-    let output = run_select_json_mode_with_args("", &["--name", "process_*"]);
+    let output = run_read_json_mode_with_args("", &["--name", "process_*"]);
     assert!(!output.status.success(), "request should fail");
 
     let response: Value =
@@ -546,7 +546,7 @@ fn round3_exploit_positional_file_rejection_precedes_exclude_kind_flag_message()
     });
     let fixture_arg = fixture.to_str().expect("path should be valid UTF-8");
 
-    let output = run_select_json_mode_with_args(
+    let output = run_read_json_mode_with_args(
         &request.to_string(),
         &["--exclude-kind", "comment", fixture_arg],
     );
@@ -578,7 +578,7 @@ fn round3_exploit_positional_file_rejection_precedes_kind_flag_message() {
     let fixture_arg = fixture.to_str().expect("path should be valid UTF-8");
 
     let output =
-        run_select_json_mode_with_args(&request.to_string(), &["--kind", "module", fixture_arg]);
+        run_read_json_mode_with_args(&request.to_string(), &["--kind", "module", fixture_arg]);
     assert!(!output.status.success(), "request should fail");
 
     let response: Value =
@@ -604,7 +604,7 @@ fn round3_explore_cli_exclude_kind_can_force_zero_matches_across_files() {
         .expect("fixture write should succeed");
     let generated_path = generated_file.keep().expect("temp file should persist").1;
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &[
             "--kind",
             "function_definition",
@@ -659,7 +659,7 @@ fn round3_explore_json_multi_file_handles_case_insensitive_extensions() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "case-insensitive extension handling should succeed: {}",
@@ -683,7 +683,7 @@ fn round4_exploit_cli_second_file_parse_failure_does_not_leak_first_file_handles
     let invalid_file = workspace.path().join("invalid.py");
     fs::write(&invalid_file, "def broken(\n").expect("invalid fixture write should succeed");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[valid_fixture.as_path(), invalid_file.as_path()],
     );
@@ -721,7 +721,7 @@ fn round4_exploit_json_second_file_parse_failure_does_not_leak_first_file_handle
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "second-file parse failure should fail whole request"
@@ -748,7 +748,7 @@ fn round4_exploit_cli_second_file_duplicate_does_not_leak_first_file_handles() {
     let symlink_path = workspace.path().join("alias.py");
     symlink(&canonical_path, &symlink_path).expect("symlink should be created");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition"],
         &[canonical_path.as_path(), symlink_path.as_path()],
     );
@@ -797,7 +797,7 @@ fn round4_exploit_json_second_file_duplicate_does_not_leak_first_file_handles() 
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         !output.status.success(),
         "duplicate detection in later files should fail whole request"
@@ -825,7 +825,7 @@ fn round4_explore_cli_name_filter_with_first_file_no_matches_second_file_matches
     fs::write(&generated, "def process_gamma(value):\n    return value\n")
         .expect("fixture write should succeed");
 
-    let output = run_select_with_files(
+    let output = run_read_with_files(
         &["--kind", "function_definition", "--name", "process_*"],
         &[fixture_path("example.json").as_path(), generated.as_path()],
     );
@@ -863,7 +863,7 @@ fn round4_explore_json_accepts_relative_dot_segment_paths_in_files_array() {
         }
     });
 
-    let output = run_select_json_mode(&request.to_string());
+    let output = run_read_json_mode(&request.to_string());
     assert!(
         output.status.success(),
         "relative dot-segment file paths should work in json mode: {}",

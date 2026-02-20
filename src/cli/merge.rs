@@ -17,5 +17,5 @@ pub struct MergeArgs {
 }
 
 pub fn run_merge(args: MergeArgs) -> Result<MultiFileChangeset, IdenteditError> {
-    crate::cli::changeset::run_changeset_merge_inputs(args.inputs)
+    crate::cli::merge_plan::run_merge_inputs(args.inputs)
 }

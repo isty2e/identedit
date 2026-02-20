@@ -1,17 +1,15 @@
 use clap::{Parser, Subcommand};
 
 pub mod apply;
-mod changeset;
+mod merge_plan;
+mod line_patch;
 pub mod edit;
 pub mod grammar;
-#[allow(dead_code)]
-pub mod hashline;
 pub mod merge;
 pub mod patch;
 pub mod read;
-#[allow(dead_code)]
-mod select;
-mod transform;
+mod read_select;
+mod edit_build;
 
 #[derive(Debug, Parser)]
 #[command(name = "identedit")]

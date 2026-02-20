@@ -47,13 +47,13 @@ fn create_large_python_file(function_count: usize) -> PathBuf {
     common::create_large_python_file(function_count)
 }
 
-#[path = "transform_integration/scenario_01_flags_and_paths.rs"]
+#[path = "edit_integration/scenario_01_flags_and_paths.rs"]
 mod scenario_01_flags_and_paths;
-#[path = "transform_integration/scenario_02_json_validation.rs"]
+#[path = "edit_integration/scenario_02_json_validation.rs"]
 mod scenario_02_json_validation;
-#[path = "transform_integration/scenario_03_preview_and_file_targets.rs"]
+#[path = "edit_integration/scenario_03_preview_and_file_targets.rs"]
 mod scenario_03_preview_and_file_targets;
-#[path = "transform_integration/scenario_04_boundary_conflicts.rs"]
+#[path = "edit_integration/scenario_04_boundary_conflicts.rs"]
 mod scenario_04_boundary_conflicts;
-#[path = "transform_integration/scenario_05_fallback_and_misc.rs"]
+#[path = "edit_integration/scenario_05_fallback_and_misc.rs"]
 mod scenario_05_fallback_and_misc;

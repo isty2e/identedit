@@ -21,7 +21,7 @@ use crate::transform::{
     build_insert_before_changeset, build_replace_changeset, parse_handles_for_file,
 };
 
-use super::hashline::{HashlinePatchResponse, execute_hashline_patch};
+use super::line_patch::{HashlinePatchResponse, execute_hashline_patch};
 
 #[derive(Debug, Args)]
 pub struct PatchArgs {

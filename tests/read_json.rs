@@ -13,7 +13,7 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
+fn run_read(arguments: &[&str], file: &PathBuf) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
 
@@ -25,7 +25,7 @@ fn run_select(arguments: &[&str], file: &PathBuf) -> Output {
     command.output().expect("failed to run identedit binary")
 }
 
-fn run_select_json(arguments: &[&str], payload: &str) -> Output {
+fn run_read_json(arguments: &[&str], payload: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
     for argument in arguments {
@@ -50,7 +50,7 @@ fn run_select_json(arguments: &[&str], payload: &str) -> Output {
 #[test]
 fn selects_json_objects() {
     let fixture = fixture_path("example.json");
-    let output = run_select(&["--kind", "object"], &fixture);
+    let output = run_read(&["--kind", "object"], &fixture);
 
     assert!(
         output.status.success(),
@@ -73,7 +73,7 @@ fn selects_json_objects() {
 #[test]
 fn select_default_omits_handle_text_field() {
     let fixture = fixture_path("example.json");
-    let output = run_select(&["--kind", "object"], &fixture);
+    let output = run_read(&["--kind", "object"], &fixture);
 
     assert!(
         output.status.success(),
@@ -98,7 +98,7 @@ fn select_default_omits_handle_text_field() {
 fn select_verbose_includes_handle_text_field() {
     let fixture = fixture_path("example.json");
     let source_text = fs::read_to_string(&fixture).expect("fixture should be readable");
-    let output = run_select(&["--verbose", "--kind", "object"], &fixture);
+    let output = run_read(&["--verbose", "--kind", "object"], &fixture);
 
     assert!(
         output.status.success(),
@@ -144,7 +144,7 @@ fn select_json_mode_verbose_includes_handle_text_field() {
             "exclude_kinds": []
         }
     });
-    let output = run_select_json(&["--json", "--verbose"], &payload.to_string());
+    let output = run_read_json(&["--json", "--verbose"], &payload.to_string());
 
     assert!(
         output.status.success(),
@@ -169,7 +169,7 @@ fn select_json_mode_verbose_includes_handle_text_field() {
 fn returns_precise_json_spans_for_nested_nodes() {
     let fixture = fixture_path("example.json");
     let source_text = fs::read_to_string(&fixture).expect("fixture should be readable");
-    let output = run_select(&["--verbose", "--kind", "object"], &fixture);
+    let output = run_read(&["--verbose", "--kind", "object"], &fixture);
 
     assert!(
         output.status.success(),
@@ -212,7 +212,7 @@ fn returns_precise_json_spans_for_nested_nodes() {
 fn returns_precise_json_spans_for_keys() {
     let fixture = fixture_path("example.json");
     let source_text = fs::read_to_string(&fixture).expect("fixture should be readable");
-    let output = run_select(&["--verbose", "--kind", "key"], &fixture);
+    let output = run_read(&["--verbose", "--kind", "key"], &fixture);
 
     assert!(
         output.status.success(),
@@ -247,7 +247,7 @@ fn unsupported_extension_routes_to_fallback_provider() {
     let file_path = temporary_directory.path().join("unsupported.txt");
     fs::write(&file_path, "plain text").expect("fixture file should be written");
 
-    let output = run_select(&["--kind", "object"], &file_path);
+    let output = run_read(&["--kind", "object"], &file_path);
 
     assert!(
         output.status.success(),

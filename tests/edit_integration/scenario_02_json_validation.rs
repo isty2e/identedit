@@ -607,7 +607,32 @@ fn transform_json_mode_rejects_non_transform_command() {
     assert!(
         response["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("expected 'transform'")),
+            .is_some_and(|message| message.contains("expected 'edit'")),
+        "expected command mismatch message"
+    );
+}
+
+#[test]
+fn transform_json_mode_rejects_legacy_transform_command() {
+    let request = json!({
+        "command": "transform",
+        "file": fixture_path("example.py").to_string_lossy().to_string(),
+        "operations": []
+    });
+
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "edit should reject legacy transform command token"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expected 'edit'")),
         "expected command mismatch message"
     );
 }
@@ -637,9 +662,59 @@ fn transform_json_mode_rejects_missing_command_field() {
 }
 
 #[test]
+fn transform_json_mode_rejects_homoglyph_command_token() {
+    let request = json!({
+        "command": "edіt",
+        "file": fixture_path("example.py").to_string_lossy().to_string(),
+        "operations": []
+    });
+
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "edit should reject homoglyph command token"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expected 'edit'")),
+        "expected homoglyph-token rejection"
+    );
+}
+
+#[test]
+fn transform_json_mode_rejects_command_with_embedded_nul() {
+    let request = json!({
+        "command": "edit\u{0000}",
+        "file": fixture_path("example.py").to_string_lossy().to_string(),
+        "operations": []
+    });
+
+    let output = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "edit should reject embedded-nul command token"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expected 'edit'")),
+        "expected embedded-nul token rejection"
+    );
+}
+
+#[test]
 fn transform_json_mode_rejects_command_with_trailing_whitespace() {
     let request = json!({
-        "command": "transform ",
+        "command": "edit ",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": []
     });
@@ -658,7 +733,7 @@ fn transform_json_mode_rejects_command_with_trailing_whitespace() {
 #[test]
 fn transform_json_mode_rejects_uppercase_command_token() {
     let request = json!({
-        "command": "TRANSFORM",
+        "command": "EDIT",
         "file": fixture_path("example.py").to_string_lossy().to_string(),
         "operations": []
     });

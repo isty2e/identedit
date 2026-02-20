@@ -16,11 +16,11 @@ use crate::transform::{
 };
 
 #[derive(Debug, Args)]
-pub struct TransformArgs {
+pub struct EditBuildArgs {
     #[arg(
         long,
         value_name = "IDENTITY",
-        help = "Target identity from select output (flag mode only)"
+        help = "Target identity from read output (flag mode only)"
     )]
     pub identity: Option<String>,
     #[arg(
@@ -31,7 +31,7 @@ pub struct TransformArgs {
     pub replace: Option<String>,
     #[arg(long, help = "Delete the target node (--identity mode)")]
     pub delete: bool,
-    #[arg(long, help = "Read transform request JSON from stdin")]
+    #[arg(long, help = "Read edit request JSON from stdin")]
     pub json: bool,
     #[arg(
         long,
@@ -47,37 +47,37 @@ pub struct TransformArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StdinTransformRequestWire {
+struct StdinEditRequestWire {
     command: String,
     #[serde(default)]
     file: Option<PathBuf>,
     #[serde(default)]
-    operations: Option<Vec<StdinTransformOperationWire>>,
+    operations: Option<Vec<StdinEditOperationWire>>,
     #[serde(default)]
     handle_table: Option<StdinHandleTableWire>,
     #[serde(default)]
-    files: Option<Vec<StdinTransformFileWire>>,
+    files: Option<Vec<StdinEditFileWire>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StdinTransformFileWire {
+struct StdinEditFileWire {
     file: PathBuf,
-    operations: Vec<StdinTransformOperationWire>,
+    operations: Vec<StdinEditOperationWire>,
     #[serde(default)]
     handle_table: Option<StdinHandleTableWire>,
 }
 
 #[derive(Debug)]
-struct StdinTransformFileRequest {
+struct StdinEditFileRequest {
     file: PathBuf,
-    operations: Vec<StdinTransformOperationWire>,
+    operations: Vec<StdinEditOperationWire>,
     handle_table: Option<StdinHandleTableWire>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum StdinTransformOp {
+enum StdinEditOp {
     Replace {
         new_text: String,
     },
@@ -120,7 +120,7 @@ enum StdinTransformOp {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StdinTransformOperationWire {
+struct StdinEditOperationWire {
     #[serde(default)]
     target: Option<Value>,
     #[serde(default)]
@@ -131,7 +131,7 @@ struct StdinTransformOperationWire {
     span_hint: Option<Span>,
     #[serde(default)]
     expected_old_hash: Option<String>,
-    op: StdinTransformOp,
+    op: StdinEditOp,
 }
 
 type StdinHandleTableWire = BTreeMap<String, StdinHandleTableEntryWire>;
@@ -168,7 +168,7 @@ enum ParsedOperationKind {
 }
 
 #[derive(Debug)]
-struct ParsedTransformInstruction {
+struct ParsedEditInstruction {
     target: TransformTarget,
     op: ParsedOperationKind,
 }
@@ -286,9 +286,9 @@ impl NormalizeState {
     }
 }
 
-pub fn run_transform(args: TransformArgs) -> Result<MultiFileChangeset, IdenteditError> {
+pub fn run_edit_build(args: EditBuildArgs) -> Result<MultiFileChangeset, IdenteditError> {
     if args.json {
-        return run_transform_json_mode(args.verbose);
+        return run_edit_json_mode(args.verbose);
     }
 
     let file = args.file.ok_or_else(|| IdenteditError::InvalidRequest {
@@ -325,26 +325,26 @@ pub fn run_transform(args: TransformArgs) -> Result<MultiFileChangeset, Identedi
     })
 }
 
-fn run_transform_json_mode(verbose: bool) -> Result<MultiFileChangeset, IdenteditError> {
+fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, IdenteditError> {
     let mut request_body = String::new();
     std::io::stdin()
         .read_to_string(&mut request_body)
         .map_err(|error| IdenteditError::StdinRead { source: error })?;
 
-    let request: StdinTransformRequestWire = serde_json::from_str(&request_body)
+    let request: StdinEditRequestWire = serde_json::from_str(&request_body)
         .map_err(|error| IdenteditError::InvalidJsonRequest { source: error })?;
 
-    if request.command != "edit" && request.command != "transform" {
+    if request.command != "edit" {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
-                "Unsupported command '{}' in stdin JSON mode; expected 'transform' or 'edit'",
+                "Unsupported command '{}' in stdin JSON mode; expected 'edit'",
                 request.command
             ),
         });
     }
 
-    let file_requests = parse_stdin_transform_shape(request)?;
-    let normalized_buckets = normalize_transform_file_requests(file_requests)?;
+    let file_requests = parse_stdin_edit_shape(request)?;
+    let normalized_buckets = normalize_edit_file_requests(file_requests)?;
     let mut files = Vec::with_capacity(normalized_buckets.len());
     for bucket in normalized_buckets {
         if bucket.instructions.is_empty() {
@@ -365,8 +365,8 @@ fn run_transform_json_mode(verbose: bool) -> Result<MultiFileChangeset, Identedi
     Ok(changeset)
 }
 
-fn normalize_transform_file_requests(
-    file_requests: Vec<StdinTransformFileRequest>,
+fn normalize_edit_file_requests(
+    file_requests: Vec<StdinEditFileRequest>,
 ) -> Result<Vec<FileInstructionBucket>, IdenteditError> {
     let mut state = NormalizeState::default();
 
@@ -379,7 +379,7 @@ fn normalize_transform_file_requests(
             continue;
         }
         for operation in file_request.operations {
-            let parsed = parse_transform_operation(operation, handle_table.as_ref())?;
+            let parsed = parse_edit_operation(operation, handle_table.as_ref())?;
             match parsed.op {
                 ParsedOperationKind::Canonical(op) => state.push_instruction_for_file(
                     source_file.clone(),
@@ -435,16 +435,16 @@ fn files_refer_to_same_target(source: &Path, destination: &Path) -> Result<bool,
     Ok(source_canonical == destination_canonical)
 }
 
-fn parse_stdin_transform_shape(
-    request: StdinTransformRequestWire,
-) -> Result<Vec<StdinTransformFileRequest>, IdenteditError> {
+fn parse_stdin_edit_shape(
+    request: StdinEditRequestWire,
+) -> Result<Vec<StdinEditFileRequest>, IdenteditError> {
     let has_single =
         request.file.is_some() || request.operations.is_some() || request.handle_table.is_some();
     let has_batch = request.files.is_some();
 
     if has_single && has_batch {
         return Err(IdenteditError::InvalidRequest {
-            message: "transform JSON request cannot include both 'file' and 'files' shapes; batch field 'files' cannot be combined with single-file fields ('file', 'operations', 'handle_table')".to_string(),
+            message: "edit JSON request cannot include both 'file' and 'files' shapes; batch field 'files' cannot be combined with single-file fields ('file', 'operations', 'handle_table')".to_string(),
         });
     }
 
@@ -453,13 +453,13 @@ fn parse_stdin_transform_shape(
         if files.is_empty() {
             return Err(IdenteditError::InvalidRequest {
                 message:
-                    "transform JSON request field 'files' must contain at least one file entry"
+                    "edit JSON request field 'files' must contain at least one file entry"
                         .to_string(),
             });
         }
         return Ok(files
             .into_iter()
-            .map(|entry| StdinTransformFileRequest {
+            .map(|entry| StdinEditFileRequest {
                 file: entry.file,
                 operations: entry.operations,
                 handle_table: entry.handle_table,
@@ -470,20 +470,20 @@ fn parse_stdin_transform_shape(
     if request.file.is_none() && request.operations.is_none() {
         return Err(IdenteditError::InvalidRequest {
             message:
-                "transform JSON request must include either single-file ('file' + 'operations') or batch ('files') shape"
+                "edit JSON request must include either single-file ('file' + 'operations') or batch ('files') shape"
                     .to_string(),
         });
     }
 
     let file = request.file.ok_or_else(|| IdenteditError::InvalidRequest {
-        message: "transform JSON single-file shape is missing field 'file'".to_string(),
+        message: "edit JSON single-file shape is missing field 'file'".to_string(),
     })?;
     let operations = request
         .operations
         .ok_or_else(|| IdenteditError::InvalidRequest {
-            message: "transform JSON single-file shape is missing field 'operations'".to_string(),
+            message: "edit JSON single-file shape is missing field 'operations'".to_string(),
         })?;
-    Ok(vec![StdinTransformFileRequest {
+    Ok(vec![StdinEditFileRequest {
         file,
         operations,
         handle_table: request.handle_table,
@@ -497,10 +497,10 @@ fn wrap_single_file(file_change: FileChange) -> MultiFileChangeset {
     }
 }
 
-fn parse_transform_operation(
-    operation: StdinTransformOperationWire,
+fn parse_edit_operation(
+    operation: StdinEditOperationWire,
     handle_table: Option<&StdinHandleTableWire>,
-) -> Result<ParsedTransformInstruction, IdenteditError> {
+) -> Result<ParsedEditInstruction, IdenteditError> {
     if let Some(target_wire) = operation.target {
         if operation.identity.is_some()
             || operation.kind.is_some()
@@ -512,8 +512,8 @@ fn parse_transform_operation(
             });
         }
 
-        let target = parse_transform_target_from_wire(target_wire, handle_table)?;
-        return Ok(ParsedTransformInstruction {
+        let target = parse_edit_target_from_wire(target_wire, handle_table)?;
+        return Ok(ParsedEditInstruction {
             target,
             op: parse_stdin_operation_kind(operation.op, handle_table)?,
         });
@@ -536,13 +536,13 @@ fn parse_transform_operation(
                 message: "missing field `expected_old_hash`".to_string(),
             })?;
 
-    Ok(ParsedTransformInstruction {
+    Ok(ParsedEditInstruction {
         target: TransformTarget::node(identity, kind, operation.span_hint, expected_old_hash),
         op: parse_stdin_operation_kind(operation.op, handle_table)?,
     })
 }
 
-fn parse_transform_target_from_wire(
+fn parse_edit_target_from_wire(
     target_wire: Value,
     handle_table: Option<&StdinHandleTableWire>,
 ) -> Result<TransformTarget, IdenteditError> {
@@ -591,55 +591,55 @@ fn parse_transform_target_from_wire(
 }
 
 fn parse_stdin_operation_kind(
-    operation: StdinTransformOp,
+    operation: StdinEditOp,
     handle_table: Option<&StdinHandleTableWire>,
 ) -> Result<ParsedOperationKind, IdenteditError> {
     let parsed = match operation {
-        StdinTransformOp::Replace { new_text } => {
+        StdinEditOp::Replace { new_text } => {
             ParsedOperationKind::Canonical(OpKind::Replace { new_text })
         }
-        StdinTransformOp::Delete => ParsedOperationKind::Canonical(OpKind::Delete),
-        StdinTransformOp::InsertBefore { new_text } => {
+        StdinEditOp::Delete => ParsedOperationKind::Canonical(OpKind::Delete),
+        StdinEditOp::InsertBefore { new_text } => {
             ParsedOperationKind::Canonical(OpKind::InsertBefore { new_text })
         }
-        StdinTransformOp::InsertAfter { new_text } => {
+        StdinEditOp::InsertAfter { new_text } => {
             ParsedOperationKind::Canonical(OpKind::InsertAfter { new_text })
         }
-        StdinTransformOp::Insert { new_text } => {
+        StdinEditOp::Insert { new_text } => {
             ParsedOperationKind::Canonical(OpKind::Insert { new_text })
         }
-        StdinTransformOp::SetLine { new_text } => {
+        StdinEditOp::SetLine { new_text } => {
             ParsedOperationKind::Canonical(OpKind::Replace { new_text })
         }
-        StdinTransformOp::ReplaceLines { new_text } => {
+        StdinEditOp::ReplaceLines { new_text } => {
             ParsedOperationKind::Canonical(OpKind::Replace { new_text })
         }
-        StdinTransformOp::InsertAfterLine { text } => {
+        StdinEditOp::InsertAfterLine { text } => {
             ParsedOperationKind::Canonical(OpKind::InsertAfter { new_text: text })
         }
-        StdinTransformOp::MoveBefore { destination } => {
+        StdinEditOp::MoveBefore { destination } => {
             ParsedOperationKind::Canonical(OpKind::MoveBefore {
-                destination: Box::new(parse_transform_target_from_wire(destination, handle_table)?),
+                destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
             })
         }
-        StdinTransformOp::MoveAfter { destination } => {
+        StdinEditOp::MoveAfter { destination } => {
             ParsedOperationKind::Canonical(OpKind::MoveAfter {
-                destination: Box::new(parse_transform_target_from_wire(destination, handle_table)?),
+                destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
             })
         }
-        StdinTransformOp::MoveToBefore {
+        StdinEditOp::MoveToBefore {
             destination_file,
             destination,
         } => ParsedOperationKind::MoveToBefore {
             destination_file,
-            destination: parse_transform_target_from_wire(destination, handle_table)?,
+            destination: parse_edit_target_from_wire(destination, handle_table)?,
         },
-        StdinTransformOp::MoveToAfter {
+        StdinEditOp::MoveToAfter {
             destination_file,
             destination,
         } => ParsedOperationKind::MoveToAfter {
             destination_file,
-            destination: parse_transform_target_from_wire(destination, handle_table)?,
+            destination: parse_edit_target_from_wire(destination, handle_table)?,
         },
     };
     Ok(parsed)
