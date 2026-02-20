@@ -1,6 +1,6 @@
 ---
 name: identedit
-description: Precision code editing with hash-based safety. Replace/patch/move/copy functions or lines with precondition verification. Also handles config path edits (JSON/YAML/TOML). Not for large-scale rewrites or file-system renames — use Edit/Write/shell for those.
+description: Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous Edit landed in wrong place. Supports replace/patch/move/copy of functions/lines, config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames.
 ---
 
 # Identedit — Agent-Oriented Code Editing
@@ -16,8 +16,6 @@ Canonical command surface:
 - `identedit patch`
 - `identedit merge`
 - `identedit grammar`
-
-Supported CLI surface: `identedit read`, `identedit edit`, `identedit apply`, `identedit patch`, `identedit merge`, `identedit grammar`.
 
 ## 10-Second Trigger (Recall First)
 
@@ -498,10 +496,9 @@ Use `--auto-repair` once if strict matching fails but deterministic remap is pos
 ### Error Recovery Loop
 
 1. Run `read --mode line` to regenerate fresh anchors.
-2. Retry strict `patch` once.
-3. If strict fails due to stale anchors, retry once with `--auto-repair`.
-4. If still failing (or ambiguous), regenerate anchors and rebuild request.
-5. Max 2 retries, then fall back to direct editing.
+2. Retry strict `patch` once. If it succeeds, done.
+3. If strict fails due to stale anchors, retry once with `--auto-repair` (this counts as the second attempt).
+4. If still failing, fall back to direct editing. Do not retry further.
 
 ## Config Path Patching (JSON/YAML/TOML)
 
