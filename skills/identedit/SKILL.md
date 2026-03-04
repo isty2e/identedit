@@ -1,6 +1,6 @@
 ---
 name: identedit
-description: Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous Edit landed in wrong place. Supports replace/patch/move/copy of functions/lines, config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames.
+description: "Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous Edit landed in wrong place. Supports replace/patch/move/copy of functions/lines, config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
 ---
 
 # Identedit — Agent-Oriented Code Editing
