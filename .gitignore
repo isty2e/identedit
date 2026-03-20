@@ -29,3 +29,7 @@ scripts
 AGENTS.md
 CLAUDE.md
 docs
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
