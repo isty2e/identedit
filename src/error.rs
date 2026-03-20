@@ -64,11 +64,23 @@ pub enum IdenteditError {
     #[error("No target matched identity '{identity}' in file '{file}'")]
     TargetMissing { identity: String, file: String },
 
+    #[error("No target matched selector '{selector}' in file '{file}'")]
+    TargetMissingSelector { selector: String, file: String },
+
     #[error(
         "Multiple targets matched identity '{identity}' in file '{file}' ({candidates} candidates)"
     )]
     AmbiguousTarget {
         identity: String,
+        file: String,
+        candidates: usize,
+    },
+
+    #[error(
+        "Multiple targets matched selector '{selector}' in file '{file}' ({candidates} candidates)"
+    )]
+    AmbiguousTargetSelector {
+        selector: String,
         file: String,
         candidates: usize,
     },
@@ -133,7 +145,8 @@ impl IdenteditError {
                     r#type: "path_changed".to_string(),
                     message: self.to_string(),
                     suggestion: Some(
-                        "Re-run 'identedit select' and 'identedit transform', then retry apply".to_string(),
+                        "Re-run 'identedit read' and 'identedit edit', then retry apply"
+                            .to_string(),
                     ),
                 },
             },
@@ -172,27 +185,25 @@ impl IdenteditError {
                     suggestion: None,
                 },
             },
-            Self::TargetMissing { .. } => ErrorResponse {
+            Self::TargetMissing { .. } | Self::TargetMissingSelector { .. } => ErrorResponse {
                 error: ErrorBody {
                     r#type: "target_missing".to_string(),
                     message: self.to_string(),
-                    suggestion: Some("Re-run 'identedit select' to get updated handles".to_string()),
+                    suggestion: Some("Re-run 'identedit read' to inspect current handles".to_string()),
                 },
             },
-            Self::AmbiguousTarget { .. } => ErrorResponse {
+            Self::AmbiguousTarget { .. } | Self::AmbiguousTargetSelector { .. } => ErrorResponse {
                 error: ErrorBody {
                     r#type: "ambiguous_target".to_string(),
                     message: self.to_string(),
-                    suggestion: Some(
-                        "Provide span_hint or refresh handles from 'identedit select'".to_string(),
-                    ),
+                    suggestion: Some("Use a more specific selector or re-run 'identedit read' to disambiguate".to_string()),
                 },
             },
             Self::PreconditionFailed { .. } => ErrorResponse {
                 error: ErrorBody {
                     r#type: "precondition_failed".to_string(),
                     message: self.to_string(),
-                    suggestion: Some("Re-run 'identedit select' to get updated handles".to_string()),
+                    suggestion: Some("Re-run 'identedit read' to get updated handles".to_string()),
                 },
             },
             Self::RollbackFailed { .. } => ErrorResponse {
@@ -200,7 +211,8 @@ impl IdenteditError {
                     r#type: "rollback_failed".to_string(),
                     message: self.to_string(),
                     suggestion: Some(
-                        "Inspect affected files, manually reconcile rollback failures, then re-run identedit select/transform/apply".to_string(),
+                        "Inspect affected files, manually reconcile rollback failures, then re-run identedit read/edit/apply"
+                            .to_string(),
                     ),
                 },
             },
@@ -305,7 +317,7 @@ mod tests {
                 file: "fixture.py".to_string(),
             },
             "target_missing",
-            Some("identedit select"),
+            Some("identedit read"),
         );
         assert_error_type(
             IdenteditError::AmbiguousTarget {
@@ -314,7 +326,7 @@ mod tests {
                 candidates: 2,
             },
             "ambiguous_target",
-            Some("span_hint"),
+            Some("more specific selector"),
         );
         assert_error_type(
             IdenteditError::PreconditionFailed {
@@ -322,7 +334,7 @@ mod tests {
                 actual_hash: "new".to_string(),
             },
             "precondition_failed",
-            Some("identedit select"),
+            Some("identedit read"),
         );
     }
 
@@ -355,7 +367,7 @@ mod tests {
                 path: "fixture.py".to_string(),
             },
             "path_changed",
-            Some("identedit select"),
+            Some("identedit read"),
         );
     }
 

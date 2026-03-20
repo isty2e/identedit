@@ -30,6 +30,7 @@ pub enum HashlineModeResponse {
 pub struct HashlinePatchResponse {
     pub file: PathBuf,
     pub auto_repair: bool,
+    pub dry_run: bool,
     pub strict_check: HashlineCheckPayload,
     pub applied_mode: HashlineModeResponse,
     pub changed: bool,
@@ -41,9 +42,10 @@ pub(crate) fn execute_hashline_patch(
     file: PathBuf,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
 ) -> Result<HashlinePatchResponse, IdenteditError> {
     run_resolve_verify_apply(
-        || resolve_hashline_patch_request(file, edits, auto_repair),
+        || resolve_hashline_patch_request(file, edits, auto_repair, dry_run),
         verify_hashline_patch_request,
         apply_hashline_patch_request,
     )
@@ -55,6 +57,7 @@ struct ResolvedHashlinePatch {
     source: String,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
 }
 
 #[derive(Debug)]
@@ -63,6 +66,7 @@ struct VerifiedHashlinePatch {
     source: String,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
     strict_check_result: HashlineCheckResult,
     applied_mode: HashlineApplyMode,
 }
@@ -71,6 +75,7 @@ fn resolve_hashline_patch_request(
     file: PathBuf,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
 ) -> Result<ResolvedHashlinePatch, IdenteditError> {
     let source = fs::read_to_string(&file).map_err(|error| IdenteditError::io(&file, error))?;
     Ok(ResolvedHashlinePatch {
@@ -78,6 +83,7 @@ fn resolve_hashline_patch_request(
         source,
         edits,
         auto_repair,
+        dry_run,
     })
 }
 
@@ -100,6 +106,7 @@ fn verify_hashline_patch_request(
         source: resolved.source,
         edits: resolved.edits,
         auto_repair: resolved.auto_repair,
+        dry_run: resolved.dry_run,
         strict_check_result,
         applied_mode,
     })
@@ -117,7 +124,7 @@ fn apply_hashline_patch_request(
             .map_err(map_hashline_apply_error)?;
     let changed = verified.source != applied.content;
 
-    if changed {
+    if changed && !verified.dry_run {
         fs::write(&verified.file, applied.content.as_bytes())
             .map_err(|error| IdenteditError::io(&verified.file, error))?;
     }
@@ -125,6 +132,7 @@ fn apply_hashline_patch_request(
     Ok(HashlinePatchResponse {
         file: verified.file,
         auto_repair: verified.auto_repair,
+        dry_run: verified.dry_run,
         strict_check,
         applied_mode: match verified.applied_mode {
             HashlineApplyMode::Strict => HashlineModeResponse::Strict,

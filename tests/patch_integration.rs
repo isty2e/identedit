@@ -20,6 +20,10 @@ fn copy_fixture_to_temp_python(name: &str) -> std::path::PathBuf {
     common::copy_fixture_to_temp_python(name)
 }
 
+fn copy_fixture_to_temp_json(name: &str) -> std::path::PathBuf {
+    common::copy_fixture_to_temp_json(name)
+}
+
 fn copy_fixture_to_temp_with_suffix(name: &str, suffix: &str) -> std::path::PathBuf {
     let source = common::fixture_path(name);
     let content = fs::read_to_string(&source).expect("fixture should be readable");
@@ -48,6 +52,28 @@ fn create_scoped_regex_fixture() -> std::path::PathBuf {
         )
         .expect("fixture write should succeed");
     temp_file.keep().expect("temp file should persist").1
+}
+
+fn create_temp_text_file(content: &str) -> std::path::PathBuf {
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(content.as_bytes())
+        .expect("temp text file write should succeed");
+    temp_file.keep().expect("temp text file should persist").1
+}
+
+fn create_temp_binary_file(bytes: &[u8]) -> std::path::PathBuf {
+    let mut temp_file = Builder::new()
+        .suffix(".bin")
+        .tempfile()
+        .expect("temp binary file should be created");
+    temp_file
+        .write_all(bytes)
+        .expect("temp binary file write should succeed");
+    temp_file.keep().expect("temp binary file should persist").1
 }
 
 fn line_ref(source: &str, line: usize) -> String {
@@ -94,6 +120,1662 @@ fn patch_replace_applies_change_in_single_command() {
         modified.contains("return value * 9"),
         "replacement text should be written"
     );
+}
+
+#[test]
+fn patch_kind_name_replace_applies_change_without_read_step() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let replacement = "def process_data(value):\n    return value * 11";
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--replace",
+        replacement,
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "kind/name patch replace failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["summary"]["files_modified"], 1);
+    assert_eq!(response["summary"]["operations_applied"], 1);
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(
+        modified.contains("return value * 11"),
+        "replacement text should be written through kind/name targeting"
+    );
+}
+
+#[test]
+fn patch_replace_accepts_text_file_payload() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_path = create_temp_text_file("def process_data(value):\n    return value * 21");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--replace",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "patch replace with text file failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(
+        modified.contains("return value * 21"),
+        "replacement text from file should be written"
+    );
+}
+
+#[test]
+fn patch_line_replace_range_accepts_stdin_text_payload() {
+    let file_path = create_temp_text_file("alpha\nbeta\ngamma\ndelta\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let start_anchor = line_ref(&before, 2);
+    let end_anchor = line_ref(&before, 3);
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--anchor",
+            start_anchor.as_str(),
+            "--replace-range",
+            "--end-anchor",
+            end_anchor.as_str(),
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "BETA\nGAMMA",
+    );
+
+    assert!(
+        output.status.success(),
+        "patch replace-range with stdin text failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\nBETA\nGAMMA\ndelta\n");
+}
+
+#[test]
+fn patch_flag_rejects_inline_text_and_text_file_together() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_path = create_temp_text_file("def process_data(value):\n    return value * 21");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--replace",
+        "def process_data(value):\n    return value * 22",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "inline and file payload should conflict"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--replace")
+            && message.contains("--text-file")
+            && message.contains("--stdin-text"),
+        "error should explain text source conflict, got: {message}"
+    );
+}
+
+#[test]
+fn patch_file_start_insert_accepts_text_file_payload() {
+    let file_path = create_temp_text_file("body\n");
+    let payload_path = create_temp_text_file("# generated header\n");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-start",
+        "--insert",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "file-start insert with text file failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "# generated header\nbody\n");
+}
+
+#[test]
+fn patch_flag_config_path_set_value_accepts_stdin_text_payload() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--config-path",
+            "config.retries",
+            "--set-value",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "7",
+    );
+
+    assert!(
+        output.status.success(),
+        "config path set-value with stdin text failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified: Value =
+        serde_json::from_str(&fs::read_to_string(&file_path).expect("modified file should read"))
+            .expect("modified JSON should parse");
+    assert_eq!(modified["config"]["retries"], 7);
+}
+
+#[test]
+fn patch_flag_rejects_text_file_and_stdin_text_together() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_path = create_temp_text_file("def process_data(value):\n    return value * 21");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--identity",
+            identity,
+            "--replace",
+            "--text-file",
+            payload_path.to_str().expect("payload path should be utf-8"),
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "def process_data(value):\n    return value * 22",
+    );
+
+    assert!(
+        !output.status.success(),
+        "multiple external text sources should conflict"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--text-file") && message.contains("--stdin-text"),
+        "error should explain external text source conflict, got: {message}"
+    );
+}
+
+#[test]
+fn patch_json_mode_rejects_flag_text_source_options() {
+    let request = json!({
+        "command": "patch",
+        "file": "/tmp/example.py",
+        "target": {
+            "type": "line",
+            "anchor": "1:aaaaaaaaaaaa"
+        },
+        "op": {
+            "type": "set_line",
+            "new_text": "value"
+        }
+    });
+
+    let output = run_identedit_with_stdin(
+        &["patch", "--json", "--stdin-text"],
+        &request.to_string(),
+    );
+
+    assert!(
+        !output.status.success(),
+        "json mode should reject flag text source options"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--stdin-text") && message.contains("flag mode"),
+        "error should explain json/text-source incompatibility, got: {message}"
+    );
+}
+
+#[test]
+fn patch_scoped_regex_accepts_stdin_text_replacement() {
+    let file_path = create_scoped_regex_fixture();
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--identity",
+            identity,
+            "--scoped-regex",
+            "value",
+            "--scoped-replacement",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "payload",
+    );
+
+    assert!(
+        output.status.success(),
+        "scoped regex with stdin replacement failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("def process_data(payload):"));
+    assert!(modified.contains("return payload + 1"));
+    assert!(modified.contains("def helper(value):"));
+}
+
+#[test]
+fn patch_delete_rejects_external_text_source() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_path = create_temp_text_file("unused");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--delete",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "delete should reject external text source"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--text-file") && message.contains("--stdin-text"),
+        "error should explain that delete cannot consume external text, got: {message}"
+    );
+}
+
+#[test]
+fn patch_line_set_line_text_file_preserves_crlf() {
+    let file_path = create_temp_text_file("alpha\r\nbeta\r\ngamma\r\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 2);
+    let payload_path = create_temp_text_file("BETA");
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        anchor.as_str(),
+        "--set-line",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "set-line with text file failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\r\nBETA\r\ngamma\r\n");
+}
+
+#[test]
+fn patch_config_append_accepts_stdin_text_payload() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--config-path",
+            "items",
+            "--append-value",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "4",
+    );
+
+    assert!(
+        output.status.success(),
+        "config append with stdin text failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified: Value =
+        serde_json::from_str(&fs::read_to_string(&file_path).expect("modified file should read"))
+            .expect("modified JSON should parse");
+    assert_eq!(modified["items"], json!([1, 2, 3, 4]));
+}
+
+#[test]
+fn patch_replace_text_file_non_utf8_returns_io_error_without_mutation() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_path = create_temp_binary_file(&[0x66, 0x6f, 0x80]);
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--replace",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "non-utf8 text file should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "io_error");
+    let after = fs::read_to_string(&file_path).expect("file should still be readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_file_end_insert_stdin_text_preserves_trailing_newline() {
+    let file_path = create_temp_text_file("body\n");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--at",
+            "file-end",
+            "--insert",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "tail\n",
+    );
+
+    assert!(
+        output.status.success(),
+        "file-end insert with stdin text failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "body\ntail\n");
+}
+
+#[test]
+fn patch_replace_stdin_text_dry_run_does_not_modify_file() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--identity",
+            identity,
+            "--replace",
+            "--stdin-text",
+            "--dry-run",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "def process_data(value):\n    return value * 33",
+    );
+
+    assert!(
+        output.status.success(),
+        "replace with stdin dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_line_replace_range_empty_stdin_deletes_range() {
+    let file_path = create_temp_text_file("alpha\nbeta\ngamma\ndelta\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let start_anchor = line_ref(&before, 2);
+    let end_anchor = line_ref(&before, 3);
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--anchor",
+            start_anchor.as_str(),
+            "--replace-range",
+            "--end-anchor",
+            end_anchor.as_str(),
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "",
+    );
+
+    assert!(
+        output.status.success(),
+        "replace-range with empty stdin failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\ndelta\n");
+}
+
+#[test]
+fn patch_config_append_stdin_dry_run_does_not_modify_file() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--config-path",
+            "items",
+            "--append-value",
+            "--stdin-text",
+            "--dry-run",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "4",
+    );
+
+    assert!(
+        output.status.success(),
+        "append with stdin dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_scoped_regex_text_file_dry_run_does_not_modify_file() {
+    let file_path = create_scoped_regex_fixture();
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_path = create_temp_text_file("payload");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--scoped-regex",
+        "value",
+        "--scoped-replacement",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "scoped regex with text-file dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["regex_replacements"], 2);
+
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_file_end_insert_text_file_with_utf8_bom_preserves_payload_bytes() {
+    let file_path = create_temp_text_file("body\n");
+    let payload_path = create_temp_text_file("\u{FEFF}tail\n");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--insert",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "file-end insert with BOM payload failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, format!("body\n{}\n", "\u{FEFF}tail"));
+}
+
+#[test]
+fn patch_line_set_line_empty_stdin_preserves_crlf_line_endings() {
+    let file_path = create_temp_text_file("alpha\r\nbeta\r\ngamma\r\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 2);
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--anchor",
+            anchor.as_str(),
+            "--set-line",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "",
+    );
+
+    assert!(
+        output.status.success(),
+        "set-line with empty stdin failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\r\n\r\ngamma\r\n");
+}
+
+#[test]
+fn patch_missing_operation_with_stdin_text_reports_invalid_request() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--identity",
+            identity,
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "unused",
+    );
+
+    assert!(
+        !output.status.success(),
+        "missing operation should fail even when stdin text is present"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("Choose exactly one node operation"),
+        "error should prioritize missing operation, got: {message}"
+    );
+}
+
+#[test]
+fn patch_scoped_replacement_stdin_without_pattern_reports_pairing_error() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--identity",
+            identity,
+            "--scoped-replacement",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "payload",
+    );
+
+    assert!(
+        !output.status.success(),
+        "scoped replacement without pattern should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--scoped-regex") && message.contains("--scoped-replacement"),
+        "error should preserve scoped pairing guidance, got: {message}"
+    );
+}
+
+#[test]
+fn patch_line_insert_after_line_text_file_multiline_preserves_crlf() {
+    let file_path = create_temp_text_file("alpha\r\nbeta\r\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 1);
+    let payload_path = create_temp_text_file("middle\r\ntail");
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        anchor.as_str(),
+        "--insert-after-line",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "insert-after-line with text file failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\r\nmiddle\r\ntail\r\nbeta\r\n");
+}
+
+#[test]
+fn patch_config_set_value_text_file_invalid_json_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let payload_path = create_temp_text_file("{invalid-json");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config",
+        "--set-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "invalid JSON payload should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_replace_text_file_directory_returns_io_error_without_mutation() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_dir = Builder::new()
+        .prefix("identedit-payload-dir")
+        .tempdir()
+        .expect("temp dir should be created");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--replace",
+        "--text-file",
+        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "directory payload should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "io_error");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_set_line_stdin_text_preserves_literal_dash_payload() {
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 2);
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--anchor",
+            anchor.as_str(),
+            "--set-line",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "--help",
+    );
+
+    assert!(
+        output.status.success(),
+        "set-line with literal dash payload failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\n--help\n");
+}
+
+#[test]
+fn patch_config_set_value_stdin_invalid_json_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--config-path",
+            "config",
+            "--set-value",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "{invalid-json",
+    );
+
+    assert!(
+        !output.status.success(),
+        "invalid JSON stdin payload should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_config_set_value_text_file_invalid_yaml_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.yaml", ".yaml");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let payload_path = create_temp_text_file("name: [unterminated");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service",
+        "--set-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "invalid YAML payload should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_config_set_value_text_file_invalid_toml_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.toml", ".toml");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let payload_path = create_temp_text_file("{ invalid = }");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "server",
+        "--set-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "invalid TOML payload should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_config_append_text_file_invalid_json_does_not_mutate_file() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let payload_path = create_temp_text_file("[invalid");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items",
+        "--append-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "invalid append payload should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_config_set_value_text_file_valid_yaml_with_trailing_newline_applies() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.yaml", ".yaml");
+    let payload_path = create_temp_text_file("5\n");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "service.retries",
+        "--set-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "valid YAML payload with trailing newline should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("retries: 5"));
+}
+
+#[test]
+fn patch_config_set_value_text_file_valid_toml_with_trailing_newline_applies() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.toml", ".toml");
+    let payload_path = create_temp_text_file("9090\n");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "server.port",
+        "--set-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "valid TOML payload with trailing newline should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("port = 9090"));
+}
+
+#[test]
+fn patch_node_replace_stdin_text_with_line_only_flag_reports_node_guidance() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--identity",
+            identity,
+            "--replace",
+            "--stdin-text",
+            "--end-anchor",
+            "1:aaaaaaaaaaaa",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "def process_data(value):\n    return value * 44",
+    );
+
+    assert!(
+        !output.status.success(),
+        "line-only flags should be rejected before node patch runs"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--replace") && message.contains("--insert-before"),
+        "error should keep node guidance, got: {message}"
+    );
+}
+
+#[test]
+fn patch_file_insert_text_file_directory_returns_io_error_without_mutation() {
+    let file_path = create_temp_text_file("body\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let payload_dir = Builder::new()
+        .prefix("identedit-file-insert-dir")
+        .tempdir()
+        .expect("temp dir should be created");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--insert",
+        "--text-file",
+        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "directory payload should fail for file insert"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "io_error");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_line_set_line_text_file_directory_returns_io_error_without_mutation() {
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 2);
+    let payload_dir = Builder::new()
+        .prefix("identedit-line-payload-dir")
+        .tempdir()
+        .expect("temp dir should be created");
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        anchor.as_str(),
+        "--set-line",
+        "--text-file",
+        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "directory payload should fail for line set"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "io_error");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_config_append_text_file_directory_returns_io_error_without_mutation() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let payload_dir = Builder::new()
+        .prefix("identedit-config-payload-dir")
+        .tempdir()
+        .expect("temp dir should be created");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "items",
+        "--append-value",
+        "--text-file",
+        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "directory payload should fail for config append"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "io_error");
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_replace_text_file_path_with_spaces_applies() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_dir = Builder::new()
+        .prefix("identedit payload dir ")
+        .tempdir()
+        .expect("temp dir should be created");
+    let payload_path = payload_dir.path().join("replacement body.txt");
+    fs::write(
+        &payload_path,
+        "def process_data(value):\n    return value * 55",
+    )
+    .expect("payload file should be written");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--replace",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "text-file path with spaces should work: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("return value * 55"));
+}
+
+#[test]
+fn patch_config_set_value_text_file_path_with_spaces_applies() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let payload_dir = Builder::new()
+        .prefix("identedit config payload ")
+        .tempdir()
+        .expect("temp dir should be created");
+    let payload_path = payload_dir.path().join("value payload.txt");
+    fs::write(&payload_path, "11").expect("payload file should be written");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config.retries",
+        "--set-value",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "config text-file path with spaces should work: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified: Value =
+        serde_json::from_str(&fs::read_to_string(&file_path).expect("modified file should read"))
+            .expect("modified JSON should parse");
+    assert_eq!(modified["config"]["retries"], 11);
+}
+
+#[test]
+fn patch_file_insert_stdin_text_with_node_flag_reports_file_guidance() {
+    let file_path = create_temp_text_file("body\n");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--at",
+            "file-end",
+            "--insert",
+            "--stdin-text",
+            "--delete",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "tail\n",
+    );
+
+    assert!(
+        !output.status.success(),
+        "file mode should reject node-only flags before patching"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("File target mode supports only --insert"),
+        "error should keep file guidance, got: {message}"
+    );
+}
+
+#[test]
+fn patch_line_insert_after_line_stdin_dry_run_does_not_modify_file() {
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 1);
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--anchor",
+            anchor.as_str(),
+            "--insert-after-line",
+            "--stdin-text",
+            "--dry-run",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "middle\nline",
+    );
+
+    assert!(
+        output.status.success(),
+        "insert-after-line stdin dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let after = fs::read_to_string(&file_path).expect("file should remain readable");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn patch_config_delete_stdin_text_rejects_unused_source() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--config-path",
+            "config.retries",
+            "--delete",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "unused",
+    );
+
+    assert!(
+        !output.status.success(),
+        "config delete should reject unused stdin source"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--text-file") && message.contains("--stdin-text"),
+        "error should explain unused external source, got: {message}"
+    );
+}
+
+#[test]
+fn patch_scoped_regex_text_file_path_with_spaces_applies() {
+    let file_path = create_scoped_regex_fixture();
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let payload_dir = Builder::new()
+        .prefix("identedit scoped payload ")
+        .tempdir()
+        .expect("temp dir should be created");
+    let payload_path = payload_dir.path().join("replacement text.txt");
+    fs::write(&payload_path, "payload").expect("payload file should be written");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--scoped-regex",
+        "value",
+        "--scoped-replacement",
+        "--text-file",
+        payload_path.to_str().expect("payload path should be utf-8"),
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "scoped regex text-file path with spaces should work: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("def process_data(payload):"));
+    assert!(modified.contains("return payload + 1"));
+}
+
+#[test]
+fn patch_set_line_stdin_utf8_bom_payload_preserves_bytes() {
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 2);
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--anchor",
+            anchor.as_str(),
+            "--set-line",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "\u{FEFF}beta",
+    );
+
+    assert!(
+        output.status.success(),
+        "set-line with BOM stdin payload failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert_eq!(modified, "alpha\n\u{FEFF}beta\n");
+}
+
+#[test]
+fn patch_config_set_value_stdin_json_string_with_leading_dash_applies() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+
+    let output = run_identedit_with_stdin(
+        &[
+            "patch",
+            "--config-path",
+            "name",
+            "--set-value",
+            "--stdin-text",
+            file_path.to_str().expect("path should be utf-8"),
+        ],
+        "\"--help\"",
+    );
+
+    assert!(
+        output.status.success(),
+        "JSON string payload with leading dash should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let modified: Value =
+        serde_json::from_str(&fs::read_to_string(&file_path).expect("modified file should read"))
+            .expect("modified JSON should parse");
+    assert_eq!(modified["name"], "--help");
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_previews_without_writing() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+    let replacement = "def process_data(value):\n    return value * 12";
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--replace",
+        replacement,
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "kind/name patch dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(response["summary"]["operations_applied"], 1);
+
+    let after = fs::read_to_string(&file_path).expect("file should be readable");
+    assert_eq!(before, after, "dry-run must not modify the source file");
+}
+
+#[test]
+fn patch_kind_name_requires_both_flags() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--replace",
+        "def process_data(value):\n    return value * 2",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "patch should reject selector mode when --name is missing"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--kind")
+            && message.contains("--name")
+            && message.contains("Example"),
+        "selector mode error should mention both required flags and show the direct fix"
+    );
+}
+
+#[test]
+fn patch_kind_name_reports_target_missing_for_unmatched_symbol() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "does_not_exist",
+        "--replace",
+        "def does_not_exist():\n    return 0",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "patch should fail when kind/name selector matches no symbol"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "target_missing");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message.contains("function_definition") && message.contains("does_not_exist")
+            }),
+        "target-missing message should describe the selector"
+    );
+}
+
+#[test]
+fn patch_kind_name_reports_ambiguous_target_for_duplicate_symbol() {
+    let file_path = copy_fixture_to_temp_python("ambiguous.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "duplicate",
+        "--replace",
+        "def duplicate():\n    return 2",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "patch should fail when kind/name selector matches multiple symbols"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "ambiguous_target");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message.contains("function_definition") && message.contains("duplicate")
+            }),
+        "ambiguous-target message should describe the selector"
+    );
+}
+
+#[test]
+fn patch_kind_name_rejects_mixed_with_identity_target() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+
+    let output = run_identedit(&[
+        "patch",
+        "--identity",
+        identity,
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--replace",
+        "def process_data(value):\n    return value * 13",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "patch should reject mixing selector targeting with identity targeting"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("Choose exactly one target selector")
+            && message.contains("--identity")
+            && message.contains("--kind"),
+        "mixed target error should explain the valid selector families"
+    );
+}
+
+#[test]
+fn patch_kind_name_rejects_mixed_with_at_target() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--replace",
+        "def process_data(value):\n    return value * 13",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "patch should reject mixing selector targeting with --at"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+}
+
+#[test]
+fn patch_kind_name_scoped_regex_rewrites_only_selected_symbol() {
+    let file_path = create_scoped_regex_fixture();
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--scoped-regex",
+        "value",
+        "--scoped-replacement",
+        "item",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "selector scoped regex failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["summary"]["operations_applied"], 1);
+    assert_eq!(response["regex_replacements"], 2);
+
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("def process_data(item):"));
+    assert!(modified.contains("return item + 1"));
+    assert!(
+        modified.contains("def helper(value):\n    return value + 2"),
+        "selector scoped regex must not rewrite outside selected target span"
+    );
+}
+
+#[test]
+fn patch_kind_name_scoped_regex_dry_run_does_not_modify_file() {
+    let file_path = create_scoped_regex_fixture();
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--scoped-regex",
+        "value",
+        "--scoped-replacement",
+        "item",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "selector scoped regex dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(response["summary"]["operations_applied"], 1);
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "dry-run must not modify source text"
+    );
+}
+
+#[test]
+fn patch_kind_name_invalid_glob_reports_invalid_selector() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "[",
+        "--replace",
+        "def process_data(value):\n    return value * 2",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "patch should reject invalid selector glob"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_selector");
+}
+
+#[test]
+fn patch_kind_name_empty_kind_reports_invalid_request() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "",
+        "--name",
+        "process_*",
+        "--replace",
+        "def process_data(value):\n    return value * 2",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "empty selector kind should be rejected"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
 }
 
 #[test]
@@ -510,6 +2192,94 @@ fn patch_replace_supports_crlf_files() {
 }
 
 #[test]
+fn patch_file_start_dry_run_does_not_modify_file() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-start",
+        "--insert",
+        "# preamble\n",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "file-start dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "file-start dry-run must not modify the file"
+    );
+}
+
+#[test]
+fn patch_file_target_rejects_node_operation_with_actionable_message() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--replace",
+        "x",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        !output.status.success(),
+        "file target should reject node operations"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--insert")
+            && message.contains("file-start")
+            && message.contains("file-end"),
+        "file-mode error should explain that file targets only support insert"
+    );
+}
+
+#[test]
+fn patch_file_end_dry_run_does_not_modify_file() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--insert",
+        "\n# epilogue\n",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "file-end dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "file-end dry-run must not modify the file"
+    );
+}
+
+#[test]
 fn patch_line_flag_set_line_applies_change() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
@@ -542,6 +2312,43 @@ fn patch_line_flag_set_line_applies_change() {
 
     let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
     assert_eq!(modified, "a\nB\n");
+}
+
+#[test]
+fn patch_line_flag_set_line_dry_run_previews_without_writing() {
+    let source = "a\nb\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let anchor = line_ref(source, 2);
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        &anchor,
+        "--set-line",
+        "B",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "patch line flag dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["dry_run"], true);
+    assert_eq!(response["operations_applied"], 1);
+    assert_eq!(response["changed"], true);
+
+    let after = fs::read_to_string(&file_path).expect("file should be readable");
+    assert_eq!(after, source, "line-mode dry-run must not modify the file");
 }
 
 #[test]
@@ -644,6 +2451,45 @@ fn patch_line_flag_supports_auto_repair() {
 }
 
 #[test]
+fn patch_line_flag_auto_repair_dry_run_does_not_modify_file() {
+    let source = "a\nb\na\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let stale_anchor = format!("1:{}", identedit::hashline::compute_line_hash("b"));
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        &stale_anchor,
+        "--set-line",
+        "B",
+        "--auto-repair",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "patch line flag auto-repair dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["applied_mode"], "repair");
+    assert_eq!(response["dry_run"], true);
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "dry-run repair must not modify the file"
+    );
+}
+
+#[test]
 fn patch_flag_rejects_identity_and_anchor_together() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_named_function_handle(&file_path, "process_*");
@@ -668,6 +2514,15 @@ fn patch_flag_rejects_identity_and_anchor_together() {
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("Choose exactly one target selector")
+            && message.contains("--identity")
+            && message.contains("--anchor"),
+        "mixed target error should list the valid selector families"
+    );
 }
 
 #[test]
@@ -697,6 +2552,16 @@ fn patch_flag_rejects_line_target_with_node_operation() {
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--set-line")
+            && message.contains("--replace-range")
+            && message.contains("--insert-after-line")
+            && message.contains("--identity"),
+        "line-mode error should list valid line flags and point back to node targeting"
+    );
 }
 
 #[test]
@@ -721,6 +2586,16 @@ fn patch_flag_rejects_node_target_with_line_operation() {
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--replace")
+            && message.contains("--delete")
+            && message.contains("--insert-before")
+            && message.contains("--anchor"),
+        "node-mode error should list valid node flags and point to line targeting"
+    );
 }
 
 #[test]
@@ -823,6 +2698,83 @@ fn patch_json_node_target_replace_applies_change() {
 
     let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
     assert!(modified.contains("return value * 11"));
+}
+
+#[test]
+fn patch_json_node_target_replace_options_dry_run_does_not_modify_file() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "node",
+            "identity": handle["identity"],
+            "kind": handle["kind"],
+            "span_hint": handle["span"],
+            "expected_old_hash": handle["expected_old_hash"]
+        },
+        "op": {
+            "type": "replace",
+            "new_text": "def process_data(value):\n    return value * 17"
+        },
+        "options": {
+            "dry_run": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "json node dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "json node dry-run must not modify the file"
+    );
+}
+
+#[test]
+fn patch_json_cli_dry_run_overrides_node_request_and_does_not_modify_file() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+    let handle = select_named_function_handle(&file_path, "process_*");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "node",
+            "identity": handle["identity"],
+            "kind": handle["kind"],
+            "span_hint": handle["span"],
+            "expected_old_hash": handle["expected_old_hash"]
+        },
+        "op": {
+            "type": "replace",
+            "new_text": "def process_data(value):\n    return value * 19"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json", "--dry-run"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "json cli dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "cli dry-run in json mode must not modify node target files"
+    );
 }
 
 #[test]
@@ -1032,6 +2984,90 @@ fn patch_json_line_target_set_line_applies_change() {
 }
 
 #[test]
+fn patch_json_line_target_options_dry_run_does_not_modify_file() {
+    let source = "a\nb\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let anchor = line_ref(source, 2);
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "line",
+            "anchor": anchor
+        },
+        "op": {
+            "type": "set_line",
+            "new_text": "B"
+        },
+        "options": {
+            "dry_run": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "json line dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["dry_run"], true);
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "json line dry-run must not modify the file"
+    );
+}
+
+#[test]
+fn patch_json_cli_dry_run_overrides_line_request_and_does_not_modify_file() {
+    let source = "a\nb\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "line",
+            "anchor": line_ref(source, 2)
+        },
+        "op": {
+            "type": "set_line",
+            "new_text": "B"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json", "--dry-run"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "json cli line dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["dry_run"], true);
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "cli dry-run in json mode must not modify line target files"
+    );
+}
+
+#[test]
 fn patch_json_line_target_replace_lines_supports_end_anchor() {
     let source = "a\nb\nc\n";
     let mut temp_file = Builder::new()
@@ -1109,6 +3145,50 @@ fn patch_json_line_target_can_auto_repair() {
 
     let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
     assert_eq!(modified, "a\nB\na\n");
+}
+
+#[test]
+fn patch_json_line_target_auto_repair_dry_run_ambiguous_keeps_file_unchanged() {
+    let source = "a\nb\na\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let stale_anchor = format!("2:{}", identedit::hashline::compute_line_hash("z"));
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "line",
+            "anchor": stale_anchor
+        },
+        "op": {
+            "type": "set_line",
+            "new_text": "B"
+        },
+        "options": {
+            "dry_run": true,
+            "auto_repair": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "mismatched repair dry-run should still fail"
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "failing json line dry-run must not modify the file"
+    );
 }
 
 #[test]
@@ -1208,6 +3288,42 @@ fn patch_json_config_path_set_updates_json_value() {
 
     let updated = fs::read_to_string(&file_path).expect("updated file should be readable");
     assert!(updated.contains("\"retries\": 10"));
+}
+
+#[test]
+fn patch_json_config_path_set_options_dry_run_does_not_modify_json() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("json should be readable");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "false"
+        },
+        "options": {
+            "dry_run": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "json config path dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("json should be readable"),
+        before,
+        "json config-path dry-run must not mutate the file"
+    );
 }
 
 #[test]
@@ -1351,6 +3467,67 @@ fn patch_flag_config_path_set_value_updates_json() {
     let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
     let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
     assert_eq!(parsed["config"]["enabled"], Value::Bool(false));
+}
+
+#[test]
+fn patch_flag_config_path_set_value_dry_run_does_not_modify_json() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("json should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config.enabled",
+        "--set-value",
+        "false",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "flag config path dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("json should be readable"),
+        before,
+        "config dry-run must not mutate the source file"
+    );
+}
+
+#[test]
+fn patch_flag_config_path_create_missing_dry_run_does_not_modify_json() {
+    let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
+    let before = fs::read_to_string(&file_path).expect("json should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--config-path",
+        "config.sidecar.host",
+        "--set-value",
+        "\"127.0.0.1\"",
+        "--create-missing",
+        "--dry-run",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "flag config path create-missing dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("json should be readable"),
+        before,
+        "config create-missing dry-run must not mutate the source file"
+    );
 }
 
 #[test]
@@ -1958,6 +4135,15 @@ fn patch_flag_config_path_create_missing_rejects_unrelated_line_flags() {
 
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--set-value")
+            && message.contains("--append-value")
+            && message.contains("--delete"),
+        "config-mode error should list valid config path operations"
+    );
 }
 
 #[test]

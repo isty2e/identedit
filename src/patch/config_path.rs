@@ -135,6 +135,7 @@ pub fn resolve_config_path_operation(
         match strict_resolved {
             Ok(resolved) => {
                 return build_resolved_patch_from_container_edit(
+                    &format,
                     file,
                     &source,
                     source_text,
@@ -183,10 +184,18 @@ pub fn resolve_config_path_operation(
         )?,
         ConfigPathOperation::Delete => String::new(),
     };
-    build_resolved_patch_from_container_edit(file, &source, source_text, resolved, &replacement)
+    build_resolved_patch_from_container_edit(
+        &format,
+        file,
+        &source,
+        source_text,
+        resolved,
+        &replacement,
+    )
 }
 
 fn build_resolved_patch_from_container_edit(
+    format: &ConfigFormat,
     file: &Path,
     source: &[u8],
     source_text: &str,
@@ -206,6 +215,12 @@ fn build_resolved_patch_from_container_edit(
         resolved.replace_span,
         replacement,
     )?;
+    let updated_source = rewrite_full_source_text(
+        source_text,
+        resolved.container_span,
+        &updated_container_text,
+    )?;
+    validate_rendered_config_document(format, &updated_source)?;
 
     let target = TransformTarget::node(
         container_handle.identity,
@@ -1969,6 +1984,49 @@ fn rewrite_container_text(
     let relative_end = replace_span.end - container_span.start;
     container_text.replace_range(relative_start..relative_end, replacement);
     Ok(container_text)
+}
+
+fn rewrite_full_source_text(
+    source_text: &str,
+    target_span: Span,
+    replacement: &str,
+) -> Result<String, IdenteditError> {
+    if target_span.start > target_span.end || target_span.end > source_text.len() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid full-source replace span [{}, {}) during config path rewrite",
+                target_span.start, target_span.end
+            ),
+        });
+    }
+
+    let mut updated = source_text.to_string();
+    updated.replace_range(target_span.start..target_span.end, replacement);
+    Ok(updated)
+}
+
+fn validate_rendered_config_document(
+    format: &ConfigFormat,
+    updated_source: &str,
+) -> Result<(), IdenteditError> {
+    parse_tree_for_format(format, updated_source.as_bytes()).map_err(|error| match error {
+        IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path edit produced invalid {} syntax",
+                config_format_name(format)
+            ),
+        },
+        other => other,
+    })?;
+    Ok(())
+}
+
+fn config_format_name(format: &ConfigFormat) -> &'static str {
+    match format {
+        ConfigFormat::Json => "JSON",
+        ConfigFormat::Yaml => "YAML",
+        ConfigFormat::Toml => "TOML",
+    }
 }
 
 fn adjusted_delete_span_for_container(

@@ -5,21 +5,19 @@ use clap::Args;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::apply::apply_multi_file_changeset;
-use crate::changeset::{MultiFileChangeset, OpKind, TransformTarget, hash_text};
+use crate::apply::{apply_multi_file_changeset, dry_run_multi_file_changeset};
+use crate::changeset::{MultiFileChangeset, OpKind, TransformTarget};
 use crate::cli::apply::shape_apply_response;
 use crate::error::IdenteditError;
-use crate::handle::Span;
+use crate::handle::{SelectionHandle, Span};
 use crate::hash::{HASH_HEX_LEN, hash_bytes};
 use crate::hashline::{HASHLINE_PUBLIC_HEX_LEN, parse_line_ref};
 use crate::hashline::{HashlineEdit, InsertAfterEdit, ReplaceLinesEdit, SetLineEdit};
 use crate::patch::config_path::{ConfigPathOperation, resolve_config_path_operation};
 use crate::patch::engine::run_resolve_verify_apply;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
-use crate::transform::{
-    TransformInstruction, build_changeset, build_delete_changeset, build_insert_after_changeset,
-    build_insert_before_changeset, build_replace_changeset, parse_handles_for_file,
-};
+use crate::selector::Selector;
+use crate::transform::{TransformInstruction, build_changeset, parse_handles_for_file};
 
 use super::line_patch::{HashlinePatchResponse, execute_hashline_patch};
 
@@ -61,22 +59,48 @@ pub struct PatchArgs {
     pub config_path: Option<String>,
     #[arg(
         long,
+        value_name = "KIND",
+        help = "Node kind for direct symbol-targeted patching (requires --name, node flag mode)"
+    )]
+    pub kind: Option<String>,
+    #[arg(
+        long,
+        value_name = "GLOB",
+        help = "Symbol name glob for direct symbol-targeted patching (requires --kind, node flag mode)"
+    )]
+    pub name: Option<String>,
+    #[arg(
+        long,
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Replace target node with text (node flag mode)"
     )]
-    pub replace: Option<String>,
+    pub replace: Option<Option<String>>,
+    #[arg(
+        long = "text-file",
+        value_name = "PATH",
+        help = "Read text payload from file for the selected text-taking patch operation"
+    )]
+    pub text_file: Option<PathBuf>,
+    #[arg(
+        long = "stdin-text",
+        help = "Read text payload from stdin for the selected text-taking patch operation"
+    )]
+    pub stdin_text: bool,
     #[arg(
         long = "set-value",
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Set config path value text (config path flag mode)"
     )]
-    pub set_value: Option<String>,
+    pub set_value: Option<Option<String>>,
     #[arg(
         long = "append-value",
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Append value text to target array at config path (config path flag mode)"
     )]
-    pub append_value: Option<String>,
+    pub append_value: Option<Option<String>>,
     #[arg(
         long = "create-missing",
         help = "Allow config path set to create missing map/table keys (not array indexes)"
@@ -85,9 +109,10 @@ pub struct PatchArgs {
     #[arg(
         long,
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Insert text for file-start/file-end targets"
     )]
-    pub insert: Option<String>,
+    pub insert: Option<Option<String>>,
     #[arg(
         long = "scoped-regex",
         value_name = "PATTERN",
@@ -97,46 +122,54 @@ pub struct PatchArgs {
     #[arg(
         long = "scoped-replacement",
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Replacement text used with --scoped-regex (node flag mode)"
     )]
-    pub scoped_replacement: Option<String>,
+    pub scoped_replacement: Option<Option<String>>,
     #[arg(long, help = "Delete target node (node flag mode)")]
     pub delete: bool,
     #[arg(
         long,
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Insert text immediately before target node (node flag mode)"
     )]
-    pub insert_before: Option<String>,
+    pub insert_before: Option<Option<String>>,
     #[arg(
         long,
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Insert text immediately after target node (node flag mode)"
     )]
-    pub insert_after: Option<String>,
+    pub insert_after: Option<Option<String>>,
     #[arg(
         long = "set-line",
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Replace the anchored line with text (line flag mode)"
     )]
-    pub set_line: Option<String>,
+    pub set_line: Option<Option<String>>,
     #[arg(
         long = "replace-range",
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Replace anchored line range with text (line flag mode)"
     )]
-    pub replace_range: Option<String>,
+    pub replace_range: Option<Option<String>>,
     #[arg(
         long = "insert-after-line",
         value_name = "TEXT",
+        num_args = 0..=1,
         help = "Insert text after anchored line (line flag mode)"
     )]
-    pub insert_after_line: Option<String>,
+    pub insert_after_line: Option<Option<String>>,
     #[arg(
         long,
         help = "If line-mode strict check fails with deterministic remap candidates, run one repair retry"
     )]
     pub auto_repair: bool,
+    #[arg(long, help = "Validate and preview without writing files")]
+    pub dry_run: bool,
     #[arg(long, help = "Include per-file apply results in output (flag mode)")]
     pub verbose: bool,
     #[arg(value_name = "FILE", help = "Target file path in flag mode")]
@@ -159,6 +192,8 @@ struct StdinPatchRequest {
 struct StdinPatchOptions {
     #[serde(default)]
     auto_repair: bool,
+    #[serde(default)]
+    dry_run: bool,
     #[serde(default)]
     verbose: bool,
 }
@@ -247,7 +282,14 @@ enum ConfigPatchOp {
 
 pub fn run_patch(args: PatchArgs) -> Result<Value, IdenteditError> {
     if args.json {
-        return run_patch_json_mode();
+        if args.text_file.is_some() || args.stdin_text {
+            return Err(IdenteditError::InvalidRequest {
+                message:
+                    "--text-file and --stdin-text are only supported in flag mode; JSON patch mode already reads the request body from stdin."
+                        .to_string(),
+            });
+        }
+        return run_patch_json_mode(args.dry_run);
     }
 
     let file = args
@@ -259,6 +301,9 @@ pub fn run_patch(args: PatchArgs) -> Result<Value, IdenteditError> {
 
     match resolve_patch_flag_target(&args)? {
         PatchFlagTarget::NodeIdentity(identity) => run_patch_flag_node_mode(file, identity, args),
+        PatchFlagTarget::NodeSelector { kind, name_pattern } => {
+            run_patch_flag_node_selector_mode(file, kind, name_pattern, args)
+        }
         PatchFlagTarget::LineAnchor(anchor) => run_patch_flag_line_mode(file, anchor, args),
         PatchFlagTarget::FileStart => run_patch_flag_file_mode(file, true, args),
         PatchFlagTarget::FileEnd => run_patch_flag_file_mode(file, false, args),
@@ -268,38 +313,171 @@ pub fn run_patch(args: PatchArgs) -> Result<Value, IdenteditError> {
 
 enum PatchFlagTarget {
     NodeIdentity(String),
+    NodeSelector { kind: String, name_pattern: String },
     LineAnchor(String),
     FileStart,
     FileEnd,
     ConfigPath(String),
 }
 
-fn resolve_patch_flag_target(args: &PatchArgs) -> Result<PatchFlagTarget, IdenteditError> {
-    if let Some(path) = args.config_path.clone() {
-        if args.at.is_some() || args.identity.is_some() || args.anchor.is_some() {
-            return Err(IdenteditError::InvalidRequest {
-                message: "--config-path cannot be combined with --at/--identity/--anchor"
+#[derive(Debug, Clone)]
+enum PatchTextSource {
+    File(PathBuf),
+    Stdin,
+}
+
+const NODE_MODE_OPERATIONS: &str =
+    "--replace, --delete, --insert-before, --insert-after, or --scoped-regex with --scoped-replacement";
+const LINE_MODE_OPERATIONS: &str = "--set-line, --replace-range, or --insert-after-line";
+const CONFIG_MODE_OPERATIONS: &str = "--set-value, --append-value, or --delete";
+
+fn node_mode_guidance() -> String {
+    format!(
+        "Node target mode supports {NODE_MODE_OPERATIONS}. For line edits use --anchor or --at <line:hash>; for file insertion use --at file-start|file-end --insert; for config edits use --config-path with {CONFIG_MODE_OPERATIONS}."
+    )
+}
+
+fn line_mode_guidance() -> String {
+    format!(
+        "Line target mode supports {LINE_MODE_OPERATIONS}. For node edits use --identity, --kind with --name, or --at <hex16>."
+    )
+}
+
+fn file_mode_guidance() -> String {
+    "File target mode supports only --insert. Use --at file-start or --at file-end with --insert <text>."
+        .to_string()
+}
+
+fn config_mode_guidance() -> String {
+    format!(
+        "Config path mode supports {CONFIG_MODE_OPERATIONS}. Use --create-missing only with --set-value."
+    )
+}
+
+fn resolve_patch_text_source(args: &PatchArgs) -> Result<Option<PatchTextSource>, IdenteditError> {
+    match (args.text_file.clone(), args.stdin_text) {
+        (Some(_), true) => Err(IdenteditError::InvalidRequest {
+            message:
+                "Choose exactly one external text source: --text-file <path> or --stdin-text."
                     .to_string(),
+        }),
+        (Some(path), false) => Ok(Some(PatchTextSource::File(path))),
+        (None, true) => Ok(Some(PatchTextSource::Stdin)),
+        (None, false) => Ok(None),
+    }
+}
+
+fn read_patch_text_source(source: PatchTextSource) -> Result<String, IdenteditError> {
+    match source {
+        PatchTextSource::File(path) => {
+            std::fs::read_to_string(&path).map_err(|error| IdenteditError::io(&path, error))
+        }
+        PatchTextSource::Stdin => {
+            let mut buffer = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buffer)
+                .map_err(|error| IdenteditError::StdinRead { source: error })?;
+            Ok(buffer)
+        }
+    }
+}
+
+fn resolve_patch_text_payload(
+    flag_name: &str,
+    raw_value: Option<Option<String>>,
+    text_source: Option<PatchTextSource>,
+) -> Result<Option<String>, IdenteditError> {
+    match raw_value {
+        None => Ok(None),
+        Some(Some(inline)) => {
+            if text_source.is_some() {
+                Err(IdenteditError::InvalidRequest {
+                    message: format!(
+                        "{flag_name} accepts either inline text or one external text source. Use {flag_name} <text>, {flag_name} --text-file <path>, or {flag_name} --stdin-text."
+                    ),
+                })
+            } else {
+                Ok(Some(inline))
+            }
+        }
+        Some(None) => {
+            let source = text_source.ok_or_else(|| IdenteditError::InvalidRequest {
+                message: format!(
+                    "{flag_name} requires text. Provide {flag_name} <text>, {flag_name} --text-file <path>, or {flag_name} --stdin-text."
+                ),
+            })?;
+            read_patch_text_source(source).map(Some)
+        }
+    }
+}
+
+fn text_arg_present(raw_value: &Option<Option<String>>) -> bool {
+    raw_value.is_some()
+}
+
+fn reject_unused_text_source(
+    text_source: Option<PatchTextSource>,
+    valid_operations: &str,
+) -> Result<(), IdenteditError> {
+    if text_source.is_some() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "External text sources require a text-taking operation. Use {valid_operations} with --text-file <path> or --stdin-text."
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn resolve_patch_flag_target(args: &PatchArgs) -> Result<PatchFlagTarget, IdenteditError> {
+    let selector_present = args.kind.is_some() || args.name.is_some();
+
+    if let Some(path) = args.config_path.clone() {
+        if args.at.is_some() || args.identity.is_some() || args.anchor.is_some() || selector_present
+        {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "--config-path cannot be combined with --at, --identity, --anchor, --kind, or --name. {}",
+                    config_mode_guidance()
+                ),
             });
         }
         return Ok(PatchFlagTarget::ConfigPath(path));
     }
 
     if let Some(at) = args.at.as_deref() {
-        if args.identity.is_some() || args.anchor.is_some() {
+        if args.identity.is_some() || args.anchor.is_some() || selector_present {
             return Err(IdenteditError::InvalidRequest {
-                message: "--at cannot be combined with legacy --identity/--anchor flags"
-                    .to_string(),
+                message:
+                    "Choose exactly one target selector. Use --at <target> by itself, or use --identity, --anchor, or --kind with --name."
+                        .to_string(),
             });
         }
         return parse_patch_at_target(at);
     }
 
-    match (args.identity.clone(), args.anchor.clone()) {
-        (Some(identity), None) => Ok(PatchFlagTarget::NodeIdentity(identity)),
-        (None, Some(anchor)) => Ok(PatchFlagTarget::LineAnchor(anchor)),
+    match (
+        args.identity.clone(),
+        args.anchor.clone(),
+        args.kind.clone(),
+        args.name.clone(),
+    ) {
+        (Some(identity), None, None, None) => Ok(PatchFlagTarget::NodeIdentity(identity)),
+        (None, Some(anchor), None, None) => Ok(PatchFlagTarget::LineAnchor(anchor)),
+        (None, None, Some(kind), Some(name_pattern)) => {
+            Ok(PatchFlagTarget::NodeSelector { kind, name_pattern })
+        }
+        (None, None, Some(_), None) | (None, None, None, Some(_)) => {
+            Err(IdenteditError::InvalidRequest {
+                message:
+                    "Direct symbol targeting requires both --kind and --name. Example: --kind function_definition --name process_*."
+                        .to_string(),
+            })
+        }
         _ => Err(IdenteditError::InvalidRequest {
-            message: "Exactly one target is required in flag mode: use --at, or legacy --identity/--anchor".to_string(),
+            message:
+                "Choose exactly one target selector in flag mode: --at <target>, --identity <hex16>, --anchor <line:hash>, or --kind <kind> --name <glob>."
+                    .to_string(),
         }),
     }
 }
@@ -352,7 +530,7 @@ fn is_line_anchor_with_hash_len(value: &str, hash_len: usize) -> bool {
         && hash.as_bytes().iter().all(u8::is_ascii_hexdigit)
 }
 
-fn run_patch_json_mode() -> Result<Value, IdenteditError> {
+fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditError> {
     let mut request_body = String::new();
     std::io::stdin()
         .read_to_string(&mut request_body)
@@ -370,6 +548,8 @@ fn run_patch_json_mode() -> Result<Value, IdenteditError> {
         });
     }
 
+    let dry_run = cli_dry_run || request.options.dry_run;
+
     match request.target {
         StdinPatchTarget::Node {
             identity,
@@ -378,23 +558,23 @@ fn run_patch_json_mode() -> Result<Value, IdenteditError> {
             expected_old_hash,
         } => run_patch_json_node(
             request.file,
-            identity,
-            kind,
-            span_hint,
-            expected_old_hash,
+            TransformTarget::node(identity, kind, span_hint, expected_old_hash),
             request.op,
+            dry_run,
             request.options.verbose,
         ),
         StdinPatchTarget::FileStart { expected_file_hash } => run_patch_json_file(
             request.file,
             TransformTarget::FileStart { expected_file_hash },
             request.op,
+            dry_run,
             request.options.verbose,
         ),
         StdinPatchTarget::FileEnd { expected_file_hash } => run_patch_json_file(
             request.file,
             TransformTarget::FileEnd { expected_file_hash },
             request.op,
+            dry_run,
             request.options.verbose,
         ),
         StdinPatchTarget::Line { anchor, end_anchor } => run_patch_json_line(
@@ -403,6 +583,7 @@ fn run_patch_json_mode() -> Result<Value, IdenteditError> {
             end_anchor,
             request.op,
             request.options.auto_repair,
+            dry_run,
         ),
         StdinPatchTarget::ConfigPath {
             path,
@@ -412,6 +593,7 @@ fn run_patch_json_mode() -> Result<Value, IdenteditError> {
             path,
             expected_file_hash,
             request.op,
+            dry_run,
             request.options.verbose,
         ),
     }
@@ -421,6 +603,7 @@ fn run_patch_json_file(
     file: PathBuf,
     target: TransformTarget,
     op: Value,
+    dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
     let file_op = serde_json::from_value::<FilePatchOp>(op).map_err(|error| {
@@ -431,18 +614,23 @@ fn run_patch_json_file(
 
     match file_op {
         FilePatchOp::Insert { new_text } => {
-            run_patch_node_operation(file, target, OpKind::Insert { new_text }, verbose, None)
+            run_patch_node_operation(
+                file,
+                target,
+                OpKind::Insert { new_text },
+                dry_run,
+                verbose,
+                None,
+            )
         }
     }
 }
 
 fn run_patch_json_node(
     file: PathBuf,
-    identity: String,
-    kind: String,
-    span_hint: Option<Span>,
-    expected_old_hash: String,
+    target: TransformTarget,
     op: Value,
+    dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
     let node_op = serde_json::from_value::<NodePatchOp>(op).map_err(|error| {
@@ -450,18 +638,23 @@ fn run_patch_json_node(
             message: format!("Invalid node patch operation payload: {error}"),
         }
     })?;
-    let target = TransformTarget::node(identity, kind, span_hint, expected_old_hash);
     match node_op {
         NodePatchOp::Replace { new_text } => {
-            run_patch_node_operation(file, target, OpKind::Replace { new_text }, verbose, None)
+            run_patch_node_operation(
+                file,
+                target,
+                OpKind::Replace { new_text },
+                dry_run,
+                verbose,
+                None,
+            )
         }
-        NodePatchOp::Delete => {
-            run_patch_node_operation(file, target, OpKind::Delete, verbose, None)
-        }
+        NodePatchOp::Delete => run_patch_node_operation(file, target, OpKind::Delete, dry_run, verbose, None),
         NodePatchOp::InsertBefore { new_text } => run_patch_node_operation(
             file,
             target,
             OpKind::InsertBefore { new_text },
+            dry_run,
             verbose,
             None,
         ),
@@ -469,13 +662,13 @@ fn run_patch_json_node(
             file,
             target,
             OpKind::InsertAfter { new_text },
+            dry_run,
             verbose,
             None,
         ),
-        NodePatchOp::ScopedRegex {
-            pattern,
-            replacement,
-        } => run_patch_scoped_regex_node_operation(file, target, pattern, replacement, verbose),
+        NodePatchOp::ScopedRegex { pattern, replacement } => {
+            run_patch_scoped_regex_node_operation(file, target, pattern, replacement, dry_run, verbose)
+        }
     }
 }
 
@@ -483,6 +676,7 @@ fn run_patch_node_operation(
     file: PathBuf,
     target: TransformTarget,
     op: OpKind,
+    dry_run: bool,
     verbose: bool,
     regex_replacements: Option<usize>,
 ) -> Result<Value, IdenteditError> {
@@ -492,7 +686,13 @@ fn run_patch_node_operation(
             Ok(wrap_single_file(file_change))
         },
         verify_prepared_changeset,
-        |changeset| apply_multi_file_changeset(&changeset),
+        |changeset| {
+            if dry_run {
+                dry_run_multi_file_changeset(&changeset)
+            } else {
+                apply_multi_file_changeset(&changeset)
+            }
+        },
     )?;
 
     serialize_node_patch_response(response, verbose, regex_replacements)
@@ -503,6 +703,7 @@ fn run_patch_scoped_regex_node_operation(
     target: TransformTarget,
     pattern: String,
     replacement: String,
+    dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
     let rewritten = rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement)?;
@@ -512,6 +713,7 @@ fn run_patch_scoped_regex_node_operation(
         OpKind::Replace {
             new_text: rewritten.new_text,
         },
+        dry_run,
         verbose,
         Some(rewritten.replacements),
     )
@@ -541,6 +743,7 @@ fn run_patch_json_line(
     end_anchor: Option<String>,
     op: Value,
     auto_repair: bool,
+    dry_run: bool,
 ) -> Result<Value, IdenteditError> {
     let line_op = serde_json::from_value::<LinePatchOp>(op).map_err(|error| {
         IdenteditError::InvalidRequest {
@@ -562,7 +765,7 @@ fn run_patch_json_line(
             insert_after: InsertAfterEdit { anchor, text },
         },
     };
-    let patch_response = execute_hashline_patch(file, vec![edit], auto_repair)?;
+    let patch_response = execute_hashline_patch(file, vec![edit], auto_repair, dry_run)?;
     serialize_line_patch_response(patch_response)
 }
 
@@ -571,6 +774,7 @@ fn run_patch_json_config(
     path: String,
     expected_file_hash: Option<String>,
     op: Value,
+    dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
     if let Some(object) = op.as_object()
@@ -618,7 +822,7 @@ fn run_patch_json_config(
         )?,
     };
 
-    run_patch_node_operation(file, canonical.target, canonical.op, verbose, None)
+    run_patch_node_operation(file, canonical.target, canonical.op, dry_run, verbose, None)
 }
 
 fn serialize_line_patch_response(response: HashlinePatchResponse) -> Result<Value, IdenteditError> {
@@ -626,11 +830,40 @@ fn serialize_line_patch_response(response: HashlinePatchResponse) -> Result<Valu
         .map_err(|source| IdenteditError::ResponseSerialization { source })
 }
 
+enum PreparedNodePatchOperation {
+    Standard(OpKind),
+    ScopedRegex {
+        pattern: String,
+        replacement: String,
+    },
+}
+
 fn run_patch_flag_node_mode(
     file: PathBuf,
     identity: String,
     args: PatchArgs,
 ) -> Result<Value, IdenteditError> {
+    let operation = prepare_patch_flag_node_operation(&args)?;
+    let handle = resolve_unique_identity_handle_for_patch(&file, &identity)?;
+    execute_patch_flag_node_operation(file, handle, operation, args.dry_run, args.verbose)
+}
+
+fn run_patch_flag_node_selector_mode(
+    file: PathBuf,
+    kind: String,
+    name_pattern: String,
+    args: PatchArgs,
+) -> Result<Value, IdenteditError> {
+    let operation = prepare_patch_flag_node_operation(&args)?;
+    let handle = resolve_unique_selector_handle_for_patch(&file, &kind, &name_pattern)?;
+    execute_patch_flag_node_operation(file, handle, operation, args.dry_run, args.verbose)
+}
+
+fn prepare_patch_flag_node_operation(
+    args: &PatchArgs,
+) -> Result<PreparedNodePatchOperation, IdenteditError> {
+    let text_source = resolve_patch_text_source(args)?;
+
     if args.anchor.is_some()
         || args.end_anchor.is_some()
         || args.insert.is_some()
@@ -643,7 +876,7 @@ fn run_patch_flag_node_mode(
         || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "Node flag mode does not allow line/file/config options (--at line/file-start/file-end, --anchor/--end-anchor/--insert/--set-value/--append-value/--set-line/--replace-range/--insert-after-line/--auto-repair/--create-missing)".to_string(),
+            message: node_mode_guidance(),
         });
     }
 
@@ -654,73 +887,107 @@ fn run_patch_flag_node_mode(
                 .to_string(),
         });
     }
-    let operation_count = usize::from(args.replace.is_some())
-        + usize::from(args.delete)
-        + usize::from(args.insert_before.is_some())
-        + usize::from(args.insert_after.is_some())
-        + usize::from(scoped_regex_present);
 
+    let operation_count = usize::from(text_arg_present(&args.replace))
+        + usize::from(args.delete)
+        + usize::from(text_arg_present(&args.insert_before))
+        + usize::from(text_arg_present(&args.insert_after))
+        + usize::from(scoped_regex_present);
     if operation_count != 1 {
         return Err(IdenteditError::InvalidRequest {
-            message: "Exactly one node operation is required: choose one of --replace, --delete, --insert-before, --insert-after, --scoped-regex+--scoped-replacement".to_string(),
+            message: format!(
+                "Choose exactly one node operation. Node target mode supports {NODE_MODE_OPERATIONS}."
+            ),
         });
     }
-    if let Some(pattern) = args.scoped_regex {
-        let replacement =
-            args.scoped_replacement
-                .ok_or_else(|| IdenteditError::InvalidRequest {
-                    message: "missing payload for --scoped-replacement".to_string(),
-                })?;
-        return run_patch_flag_scoped_regex(file, &identity, pattern, replacement, args.verbose);
+
+    if let Some(pattern) = args.scoped_regex.clone() {
+        let replacement = resolve_patch_text_payload(
+            "--scoped-replacement",
+            args.scoped_replacement.clone(),
+            text_source,
+        )?
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "missing payload for --scoped-replacement".to_string(),
+        })?;
+        return Ok(PreparedNodePatchOperation::ScopedRegex {
+            pattern,
+            replacement,
+        });
     }
 
-    let file_change = if let Some(new_text) = args.replace {
-        build_replace_changeset(&file, &identity, new_text)?
-    } else if args.delete {
-        build_delete_changeset(&file, &identity)?
-    } else if let Some(new_text) = args.insert_before {
-        build_insert_before_changeset(&file, &identity, new_text)?
-    } else {
-        let new_text = args
-            .insert_after
-            .ok_or_else(|| IdenteditError::InvalidRequest {
-                message: "missing operation payload for --insert-after".to_string(),
-            })?;
-        build_insert_after_changeset(&file, &identity, new_text)?
-    };
+    if let Some(new_text) =
+        resolve_patch_text_payload("--replace", args.replace.clone(), text_source.clone())?
+    {
+        return Ok(PreparedNodePatchOperation::Standard(OpKind::Replace {
+            new_text,
+        }));
+    }
 
-    let response = run_resolve_verify_apply(
-        || Ok(wrap_single_file(file_change)),
-        verify_prepared_changeset,
-        |changeset| apply_multi_file_changeset(&changeset),
-    )?;
-    serialize_node_patch_response(response, args.verbose, None)
+    if args.delete {
+        reject_unused_text_source(text_source, NODE_MODE_OPERATIONS)?;
+        return Ok(PreparedNodePatchOperation::Standard(OpKind::Delete));
+    }
+
+    if let Some(new_text) = resolve_patch_text_payload(
+        "--insert-before",
+        args.insert_before.clone(),
+        text_source.clone(),
+    )? {
+        return Ok(PreparedNodePatchOperation::Standard(OpKind::InsertBefore {
+            new_text,
+        }));
+    }
+
+    let new_text = resolve_patch_text_payload(
+        "--insert-after",
+        args.insert_after.clone(),
+        text_source,
+    )?
+    .ok_or_else(|| IdenteditError::InvalidRequest {
+        message: "missing operation payload for --insert-after".to_string(),
+    })?;
+    Ok(PreparedNodePatchOperation::Standard(OpKind::InsertAfter {
+        new_text,
+    }))
 }
 
-fn run_patch_flag_scoped_regex(
+fn execute_patch_flag_node_operation(
     file: PathBuf,
-    identity: &str,
-    pattern: String,
-    replacement: String,
+    handle: SelectionHandle,
+    operation: PreparedNodePatchOperation,
+    dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
-    let handle = resolve_unique_identity_handle_for_patch(&file, identity)?;
     let target = TransformTarget::node(
         handle.identity,
         handle.kind,
         Some(handle.span),
-        hash_text(&handle.text),
+        handle.expected_old_hash,
     );
-    let rewritten = rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement)?;
-    run_patch_node_operation(
-        file,
-        target,
-        OpKind::Replace {
-            new_text: rewritten.new_text,
-        },
-        verbose,
-        Some(rewritten.replacements),
-    )
+
+    match operation {
+        PreparedNodePatchOperation::Standard(op) => {
+            run_patch_node_operation(file, target, op, dry_run, verbose, None)
+        }
+        PreparedNodePatchOperation::ScopedRegex {
+            pattern,
+            replacement,
+        } => {
+            let rewritten =
+                rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement)?;
+            run_patch_node_operation(
+                file,
+                target,
+                OpKind::Replace {
+                    new_text: rewritten.new_text,
+                },
+                dry_run,
+                verbose,
+                Some(rewritten.replacements),
+            )
+        }
+    }
 }
 
 fn run_patch_flag_file_mode(
@@ -728,6 +995,8 @@ fn run_patch_flag_file_mode(
     at_file_start: bool,
     args: PatchArgs,
 ) -> Result<Value, IdenteditError> {
+    let text_source = resolve_patch_text_source(&args)?;
+
     if args.identity.is_some()
         || args.anchor.is_some()
         || args.replace.is_some()
@@ -745,13 +1014,14 @@ fn run_patch_flag_file_mode(
         || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "File target mode accepts only --insert (plus optional --verbose, not --create-missing)".to_string(),
+            message: file_mode_guidance(),
         });
     }
 
-    let insert_text = args.insert.ok_or_else(|| IdenteditError::InvalidRequest {
-        message: "File target mode requires --insert payload".to_string(),
-    })?;
+    let insert_text = resolve_patch_text_payload("--insert", args.insert, text_source)?
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: file_mode_guidance(),
+        })?;
 
     let source = std::fs::read(&file).map_err(|error| IdenteditError::io(&file, error))?;
     let expected_file_hash = hash_bytes(&source);
@@ -766,6 +1036,7 @@ fn run_patch_flag_file_mode(
         OpKind::Insert {
             new_text: insert_text,
         },
+        args.dry_run,
         args.verbose,
         None,
     )
@@ -774,7 +1045,7 @@ fn run_patch_flag_file_mode(
 fn resolve_unique_identity_handle_for_patch(
     file: &Path,
     identity: &str,
-) -> Result<crate::handle::SelectionHandle, IdenteditError> {
+) -> Result<SelectionHandle, IdenteditError> {
     let handles = parse_handles_for_file(file)?;
     let matches = handles
         .into_iter()
@@ -795,11 +1066,40 @@ fn resolve_unique_identity_handle_for_patch(
     }
 }
 
+fn resolve_unique_selector_handle_for_patch(
+    file: &Path,
+    kind: &str,
+    name_pattern: &str,
+) -> Result<SelectionHandle, IdenteditError> {
+    let selector = Selector {
+        kind: kind.to_string(),
+        name_pattern: Some(name_pattern.to_string()),
+        exclude_kinds: vec![],
+    };
+    let selector_description = format!("kind='{kind}', name='{name_pattern}'");
+    let matches = selector.filter(parse_handles_for_file(file)?)?;
+
+    match matches.as_slice() {
+        [] => Err(IdenteditError::TargetMissingSelector {
+            selector: selector_description,
+            file: file.display().to_string(),
+        }),
+        [single] => Ok(single.clone()),
+        candidates => Err(IdenteditError::AmbiguousTargetSelector {
+            selector: selector_description,
+            file: file.display().to_string(),
+            candidates: candidates.len(),
+        }),
+    }
+}
+
 fn run_patch_flag_line_mode(
     file: PathBuf,
     anchor: String,
     args: PatchArgs,
 ) -> Result<Value, IdenteditError> {
+    let text_source = resolve_patch_text_source(&args)?;
+
     if args.identity.is_some()
         || args.replace.is_some()
         || args.insert.is_some()
@@ -814,29 +1114,38 @@ fn run_patch_flag_line_mode(
         || args.verbose
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "Line flag mode does not allow node/file-target options (--identity/--replace/--insert/--scoped-regex/--scoped-replacement/--delete/--insert-before/--insert-after/--verbose/--create-missing)".to_string(),
+            message: line_mode_guidance(),
         });
     }
-    let line_operation_count = usize::from(args.set_line.is_some())
-        + usize::from(args.replace_range.is_some())
-        + usize::from(args.insert_after_line.is_some());
+    let line_operation_count = usize::from(text_arg_present(&args.set_line))
+        + usize::from(text_arg_present(&args.replace_range))
+        + usize::from(text_arg_present(&args.insert_after_line));
     if line_operation_count != 1 {
         return Err(IdenteditError::InvalidRequest {
-            message: "Exactly one line operation is required: choose one of --set-line, --replace-range, --insert-after-line".to_string(),
+            message: format!(
+                "Choose exactly one line operation. Line target mode supports {LINE_MODE_OPERATIONS}."
+            ),
         });
     }
 
-    let edit = if let Some(new_text) = args.set_line {
+    let edit = if let Some(new_text) =
+        resolve_patch_text_payload("--set-line", args.set_line, text_source.clone())?
+    {
         if args.end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
-                message: "--end-anchor is only valid with --replace-range in line flag mode"
-                    .to_string(),
+                message:
+                    "Use --end-anchor only with --replace-range in line target mode."
+                        .to_string(),
             });
         }
         HashlineEdit::SetLine {
             set_line: SetLineEdit { anchor, new_text },
         }
-    } else if let Some(new_text) = args.replace_range {
+    } else if let Some(new_text) = resolve_patch_text_payload(
+        "--replace-range",
+        args.replace_range,
+        text_source.clone(),
+    )? {
         HashlineEdit::ReplaceLines {
             replace_lines: ReplaceLinesEdit {
                 start_anchor: anchor,
@@ -847,21 +1156,25 @@ fn run_patch_flag_line_mode(
     } else {
         if args.end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
-                message: "--end-anchor is only valid with --replace-range in line flag mode"
-                    .to_string(),
+                message:
+                    "Use --end-anchor only with --replace-range in line target mode."
+                        .to_string(),
             });
         }
-        let text = args
-            .insert_after_line
-            .ok_or_else(|| IdenteditError::InvalidRequest {
-                message: "missing operation payload for --insert-after-line".to_string(),
-            })?;
+        let text = resolve_patch_text_payload(
+            "--insert-after-line",
+            args.insert_after_line,
+            text_source,
+        )?
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "missing operation payload for --insert-after-line".to_string(),
+        })?;
         HashlineEdit::InsertAfter {
             insert_after: InsertAfterEdit { anchor, text },
         }
     };
 
-    let patch_response = execute_hashline_patch(file, vec![edit], args.auto_repair)?;
+    let patch_response = execute_hashline_patch(file, vec![edit], args.auto_repair, args.dry_run)?;
     serialize_line_patch_response(patch_response)
 }
 
@@ -870,6 +1183,8 @@ fn run_patch_flag_config_mode(
     path: String,
     args: PatchArgs,
 ) -> Result<Value, IdenteditError> {
+    let text_source = resolve_patch_text_source(&args)?;
+
     if args.at.is_some()
         || args.identity.is_some()
         || args.anchor.is_some()
@@ -886,29 +1201,30 @@ fn run_patch_flag_config_mode(
         || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
-            message: "Config path flag mode supports only --set-value, --append-value, or --delete (plus optional --create-missing/--verbose)".to_string(),
+            message: config_mode_guidance(),
         });
     }
 
     if args.create_missing && (args.delete || args.append_value.is_some()) {
         return Err(IdenteditError::InvalidRequest {
-            message: "--create-missing is only valid with --set-value in config path mode"
-                .to_string(),
+            message: config_mode_guidance(),
         });
     }
 
-    let operation_count = usize::from(args.set_value.is_some())
-        + usize::from(args.append_value.is_some())
+    let operation_count = usize::from(text_arg_present(&args.set_value))
+        + usize::from(text_arg_present(&args.append_value))
         + usize::from(args.delete);
     if operation_count != 1 {
         return Err(IdenteditError::InvalidRequest {
-            message:
-                "Exactly one config path operation is required: choose one of --set-value, --append-value, or --delete"
-                    .to_string(),
+            message: format!(
+                "Choose exactly one config path operation. Config path mode supports {CONFIG_MODE_OPERATIONS}."
+            ),
         });
     }
 
-    let canonical = if let Some(new_text) = args.set_value {
+    let canonical = if let Some(new_text) =
+        resolve_patch_text_payload("--set-value", args.set_value, text_source.clone())?
+    {
         resolve_config_path_operation(
             file.as_path(),
             &path,
@@ -918,7 +1234,9 @@ fn run_patch_flag_config_mode(
                 create_missing: args.create_missing,
             },
         )?
-    } else if let Some(new_text) = args.append_value {
+    } else if let Some(new_text) =
+        resolve_patch_text_payload("--append-value", args.append_value, text_source.clone())?
+    {
         resolve_config_path_operation(
             file.as_path(),
             &path,
@@ -926,10 +1244,18 @@ fn run_patch_flag_config_mode(
             ConfigPathOperation::Append { new_text },
         )?
     } else {
+        reject_unused_text_source(text_source, CONFIG_MODE_OPERATIONS)?;
         resolve_config_path_operation(file.as_path(), &path, None, ConfigPathOperation::Delete)?
     };
 
-    run_patch_node_operation(file, canonical.target, canonical.op, args.verbose, None)
+    run_patch_node_operation(
+        file,
+        canonical.target,
+        canonical.op,
+        args.dry_run,
+        args.verbose,
+        None,
+    )
 }
 
 fn wrap_single_file(file_change: crate::changeset::FileChange) -> MultiFileChangeset {
