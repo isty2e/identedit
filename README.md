@@ -18,7 +18,8 @@ Three entry points covering different editing needs:
 
 **`patch`** — one-shot verified edit (most common):
 ```bash
-identedit patch src/example.py --identity abc123 --replace 'def f(): ...'
+identedit patch src/example.py --kind function_definition --name process_data --replace 'def f(): ...'
+identedit patch src/example.py --at abc123def4567890 --replace 'def f(): ...'
 identedit patch src/example.py --at "42:9e0f1a2b3c4d" --set-line "    return x + y"
 identedit patch config.yaml --config-path server.port --set-value 8080
 identedit patch config.json --config-path items --append-value 4
@@ -80,15 +81,17 @@ cargo install --path .
 ### One-shot patch (most common)
 
 ```bash
-# Replace a function body
-identedit read --kind function_definition --name process_data --json src/example.py
-# → copy identity and expected_old_hash from output
-identedit patch src/example.py --identity <id> --replace 'def process_data(x, y):
+# Replace a function by name (no read step needed)
+identedit patch src/example.py --kind function_definition --name process_data \
+  --replace 'def process_data(x, y):
+    return x + y'
+
+# Same thing using identity hash (when you already have read output)
+identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
     return x + y'
 
 # Patch a specific line
 identedit read --mode line src/example.py
-# → copy LINE:HASH anchor from output
 identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
 
 # Update a config key
@@ -114,11 +117,19 @@ identedit edit --json < request.json | identedit apply
 ### Large new_text (10+ lines)
 
 ```bash
+# Write replacement body to a temp file, then use --text-file
 cat <<'EOF' > /tmp/new_block.py
 def process_data(x, y):
     return x + y
 EOF
 
+identedit patch src/example.py --kind function_definition --name process_data \
+  --replace --text-file /tmp/new_block.py
+```
+
+Or via the `edit` pipeline with `jq --rawfile`:
+
+```bash
 jq -n --rawfile new_text /tmp/new_block.py '{
   command:"edit", file:"src/example.py",
   operations:[{
@@ -131,8 +142,10 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 ### Safe Defaults
 
 - `edit` is always a dry-run. No files modified until explicit `apply`.
+- `patch --dry-run` validates and previews without writing files.
 - Line-anchored patch defaults to strict mode. `--auto-repair` is explicit opt-in.
 - `apply --dry-run` validates and returns a summary without writing.
+- Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
 - Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
 
 ## Error Recovery (Agent Loop)

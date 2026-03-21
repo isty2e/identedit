@@ -9,22 +9,32 @@ Identedit provides two complementary editing modes:
 - **Structural editing** (`read/edit/apply`) — AST-level: replace, delete, or insert whole functions, classes, and blocks
 - **Line-anchored editing** (`read --mode line` + `patch`/`apply --repair`) — precise single-line or range edits with hash-based integrity checks
 
-Canonical command surface:
-- `identedit read`
-- `identedit edit`
-- `identedit apply`
-- `identedit patch`
-- `identedit merge`
-- `identedit grammar`
-
 ## 10-Second Trigger (Recall First)
 
 If any one condition matches, use identedit:
 - 2+ files must succeed/fail together (atomic apply needed)
 - large file and repeated target text (misapply risk)
 - previous `Edit`/`apply_patch` landed in the wrong place
+- insert at file start/end with precondition safety
+- update a nested config key in JSON/YAML/TOML by path
+- multiple operations on the same file (replace + insert, etc.)
 
 If none match, default to `Edit`/`Write` for speed.
+
+## I Want To...
+
+| Task | Command |
+|---|---|
+| Replace a function by name | `identedit patch file --kind function_definition --name foo --replace 'new body'` |
+| Replace using identity hash | `identedit patch file --at <identity-hex16> --replace 'new body'` |
+| Insert at end of file | `identedit patch file --at file-end --insert 'new code'` |
+| Update a config key | `identedit patch file --config-path key.path --set-value 42` |
+| Append to a config array | `identedit patch file --config-path items --append-value '"x"'` |
+| Edit a specific line | `identedit patch file --at "LINE:HASH" --set-line 'new line'` |
+| Replace with large text (10+ lines) | `identedit patch file --kind ... --name ... --replace --text-file /tmp/body.py` |
+| Preview without writing | Add `--dry-run` to any `patch` command |
+| Multiple ops or multi-file atomic | `identedit edit --json` + `identedit apply` (see [Reference](#structural-editing-pipeline)) |
+| Move/copy a structure | `identedit edit` with `move_before`/`copy_after` (see [Operations](#operations)) |
 
 ## Quick Choice (identedit vs Edit/Write)
 
@@ -32,6 +42,9 @@ If none match, default to `Edit`/`Write` for speed.
 |---|---|
 | Multi-file atomic edit/rollback required | `identedit edit --json` + `identedit apply` |
 | Same pattern appears multiple times in a large file | `identedit patch` |
+| Add new function/import at end of file | `identedit patch --at file-end --insert 'text'` |
+| Multiple ops on the same file (replace + insert) | `identedit edit --json` with `operations[]` array |
+| Append item to a config array (JSON/YAML/TOML) | `identedit patch --config-path items --append-value 4` |
 | One-line typo / trivial rename | `Edit` |
 | Rewriting most of a file | `Write` |
 | Bulk rename across many files | `repren` |
@@ -41,33 +54,64 @@ If none match, default to `Edit`/`Write` for speed.
 Most identedit use cases fit in one command:
 
 ```bash
-# Replace a function (read once, then patch)
-identedit read --kind function_definition --name process_data --json src/example.py
-identedit patch src/example.py --identity <id> --replace 'def process_data(x, y):
+# Replace a function by name (no read step needed)
+identedit patch src/example.py --kind function_definition --name process_data \
+  --replace 'def process_data(x, y):
+    return x + y'
+
+# Same thing using identity hash (when you already have read output)
+identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
     return x + y'
 
 # Patch a specific line
 identedit read --mode line src/example.py
 identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
 
+# Append a function at end of file
+identedit patch src/example.py --at file-end --insert 'def new_helper():
+    pass'
+
 # Config key update (no read needed)
 identedit patch config.yaml --config-path server.port --set-value 8080
+
+# Append to a config array
+identedit patch config.json --config-path items --append-value '"new_item"'
+
+# Preview without writing
+identedit patch src/example.py --kind function_definition --name process_data \
+  --replace 'new body' --dry-run
 ```
+
+`--kind` + `--name` targets by symbol name directly — no `read` step needed. The name supports glob patterns (e.g., `process_*`). If the match is ambiguous (multiple candidates) or missing, patch fails with a clear error. Use `--name "*"` to match by kind only (e.g., the sole class in a file).
 
 `patch` handles resolve + precondition validation + apply internally. Use `read → edit → apply` only when you need multi-file atomic or multiple operations in one request.
 
-## Fast Recipe: Large `new_text` Patch
+## Large Text: `--text-file` / `--stdin-text`
 
-Use this when replacing a big function/class body.
+When replacing a big function/class body (10+ lines), use `--text-file` to avoid shell quoting issues:
 
 ```bash
-identedit read --kind function_definition --name target_fn --json /abs/path/file.py
-
 cat <<'EOF' > /tmp/new_block.py
 def target_fn(...):
     ...
 EOF
 
+identedit patch /abs/path/file.py --kind function_definition --name target_fn \
+  --replace --text-file /tmp/new_block.py
+```
+
+Or pipe text via stdin:
+
+```bash
+identedit patch /abs/path/file.py --kind function_definition --name target_fn \
+  --replace --stdin-text < /tmp/new_block.py
+```
+
+`--text-file` and `--stdin-text` work with any text-taking flag (`--replace`, `--insert`, `--set-line`, `--replace-range`, `--insert-after-line`, `--set-value`, `--append-value`, `--scoped-replacement`, `--insert-before`, `--insert-after`). Provide the flag without inline text, then add one source: `--replace --text-file /tmp/body.py` or `--replace --stdin-text`.
+
+For the `edit` pipeline (multi-op or multi-file), use `jq --rawfile` instead:
+
+```bash
 jq -n --rawfile new_text /tmp/new_block.py '{
   command:"edit",
   file:"/abs/path/file.py",
@@ -78,10 +122,26 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 }' | identedit edit --json | identedit apply
 ```
 
-Failure loop:
-1. `read` again for fresh `identity` / `expected_old_hash`.
-2. Rebuild `jq --rawfile` request and retry once.
-3. If it still fails, switch to `Edit`/`Write`.
+## Retry Discipline
+
+Maximum 2 identedit attempts per target (1 original + 1 retry). If the second attempt fails, fall back to direct file editing. Do not loop.
+
+```
+identedit patch fails
+│
+├── precondition_failed / target_missing
+│   └── re-run identedit read → rebuild request → retry (attempt 2)
+│       ├── succeeds → done
+│       └── fails again → Edit/Write. STOP.
+│
+├── ambiguous_target
+│   └── add span_hint from read output → retry (attempt 2)
+│       ├── succeeds → done
+│       └── still ambiguous → Edit/Write. STOP.
+│
+└── any other error (parse_failure, no_provider, ...)
+    └── Edit/Write immediately. Do not retry identedit.
+```
 
 ## Detailed Decision Rules
 
@@ -107,27 +167,6 @@ Default to `Edit`/`Write`/`apply_patch`. Switch to identedit when ANY of the fol
 | Bulk rename across many files | `repren` |
 | File-system rename or package move | shell (`mv`, `git mv`) |
 | File type not supported by identedit | `Edit` |
-
-### Fallback rules
-
-```
-identedit patch fails
-│
-├── precondition_failed / target_missing
-│   └── re-run identedit read → rebuild request → retry (attempt 2)
-│       ├── succeeds → done
-│       └── fails again → Edit/Write. STOP.
-│
-├── ambiguous_target
-│   └── add span_hint from read output → retry (attempt 2)
-│       ├── succeeds → done
-│       └── still ambiguous → Edit/Write. STOP.
-│
-└── any other error (parse_failure, no_provider, ...)
-    └── Edit/Write immediately. Do not retry identedit.
-```
-
-Maximum 2 identedit attempts per target. Never retry a third time.
 
 ## Using with ast-grep
 
@@ -157,40 +196,11 @@ repren and identedit cover different editing scopes and work well together.
 - Rename files and update all references → repren
 - Edit multiple structures atomically with rollback → identedit
 
-## Supported Languages
-
-**Bundled** (work out of the box, no install needed):
-
-Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL (Terraform), Dockerfile
-
-**Installable** via `identedit grammar install`:
-
-Any language with a tree-sitter grammar can be added. Three tiers of install convenience:
-
-Host support note:
-- `grammar install` currently works on macOS and Linux hosts.
-- On Windows hosts, use bundled grammars or copy artifacts built on macOS/Linux.
-
-1. **Registry languages** — no options needed, auto-resolved:
-   ```bash
-   identedit grammar install elixir
-   identedit grammar install zig
-   identedit grammar install dart
-   ```
-   Registry includes: Elixir, Elm, Erlang, Haskell, Julia, Scala, Zig, Dart, OCaml, Clojure, F#, Fortran, Groovy, CUDA, R, Svelte, Vue, Astro, Nix, Racket, Scheme, Solidity, Typst, Pascal, Common Lisp, and more.
-
-2. **Convention languages** — `--ext` required, repo auto-detected:
-   ```bash
-   identedit grammar install somelang --ext xyz
-   ```
-   Works when the grammar repo follows `tree-sitter/tree-sitter-{lang}` or `tree-sitter-grammars/tree-sitter-{lang}` naming.
-
-3. **Custom grammars** — specify repo explicitly:
-   ```bash
-   identedit grammar install mylang --repo https://github.com/user/tree-sitter-mylang --ext ml
-   ```
-
 ---
+
+# Reference
+
+Everything below is power-user and reference material. For most tasks, the sections above are sufficient.
 
 ## Structural Editing Pipeline
 
@@ -261,31 +271,7 @@ identedit edit \
   example.py
 ```
 
-**Large new_text (10+ lines): use `jq --rawfile` to avoid escape issues:**
-
-Use an absolute path for the temp file (e.g. `/tmp/new_block.py`) to avoid working-directory ambiguity.
-
-```bash
-cat <<'EOF' > /tmp/new_block.py
-def process_data(x, y):
-    # new implementation
-    return x + y
-EOF
-
-jq -n --rawfile new_text /tmp/new_block.py '{
-  command:"edit",
-  file:"example.py",
-  operations:[{
-    target:{type:"node", identity:"ca465ff1...", kind:"function_definition", expected_old_hash:"20ba467f..."},
-    op:{type:"replace", new_text:$new_text}
-  }]
-}' | identedit edit --json | identedit apply
-```
-
-If the apply fails:
-1. Re-run `identedit read` to get fresh `identity` and `expected_old_hash`.
-2. Rebuild the `jq` request and retry once.
-3. If it fails again → use `Edit`/`Write` directly. Stop.
+For large `new_text` (10+ lines), use `patch --text-file` instead — see [Large Text](#large-text---text-file----stdin-text).
 
 **JSON mode** (multiple operations, recommended):
 ```bash
@@ -344,6 +330,8 @@ Rule: request payload must include exactly one shape:
 Output: a changeset JSON with compact preview diffs. **No files are modified** — edit is always a dry-run.
 
 By default, previews are compact (`old_hash` + `old_len` instead of full `old_text`). Use `--verbose` to include `old_text` for debugging.
+
+If the apply fails, follow the [Retry Discipline](#retry-discipline).
 
 #### Merging Multiple Edit Outputs
 
@@ -493,12 +481,7 @@ Use `--auto-repair` once if strict matching fails but deterministic remap is pos
 - `ca465ff1a2b3c4d5` (16hex) → node identity
 - `file-start` / `file-end` → file boundary
 
-### Error Recovery Loop
-
-1. Run `read --mode line` to regenerate fresh anchors.
-2. Retry strict `patch` once. If it succeeds, done.
-3. If strict fails due to stale anchors, retry once with `--auto-repair` (this counts as the second attempt).
-4. If still failing, fall back to direct editing. Do not retry further.
+On failure, follow the [Retry Discipline](#retry-discipline). For line-anchored edits specifically: re-run `read --mode line` for fresh anchors, retry strict once, then try `--auto-repair` as the second attempt.
 
 ## Config Path Patching (JSON/YAML/TOML)
 
@@ -552,6 +535,7 @@ Config path rules:
 - `append` requires the resolved target path to be an existing array/sequence.
 - `delete` and `append` reject `create_missing`.
 - Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
+- Config path edits are validated against the target format before writing — syntax-breaking edits are rejected.
 
 ---
 
@@ -596,16 +580,50 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 | `parse_failure` | Source file has syntax errors | Fix syntax first, then retry |
 | `no_provider` | Unsupported file type | Use direct editing instead |
 
-**Retry discipline**: maximum 2 attempts per target (1 original + 1 retry). If the second attempt fails, fall back to direct file editing. Do not loop.
+See [Retry Discipline](#retry-discipline) for attempt limits.
 
 ## Important Notes
 
 - `edit` is always a dry-run. Review the `preview` field before piping to apply.
+- `patch --dry-run` validates and previews the edit without writing files.
 - The `identity` hash is derived from the structure's kind, name, and text content (not position). Two identical functions at different positions share the same identity. It changes when the code content changes.
 - The `expected_old_hash` / `expected_file_hash` fields are preconditions. They ensure you are editing what you think you are editing.
 - Hashline anchors are 12-char blake3 hex hashes. Exact matching, no prefix matching.
 - All identedit output (success and error) is JSON, except `read --mode line` which defaults to text format (`LINE:HASH|content`). Use `--json` for structured output. Parse JSON output, do not grep it.
 - When creating new files, create the file first (e.g., `touch new_file.py`), then use identedit's `file_end` insert to add content structurally.
+
+## Supported Languages
+
+**Bundled** (work out of the box, no install needed):
+
+Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL (Terraform), Dockerfile
+
+**Installable** via `identedit grammar install`:
+
+Any language with a tree-sitter grammar can be added. Three tiers of install convenience:
+
+Host support note:
+- `grammar install` currently works on macOS and Linux hosts.
+- On Windows hosts, use bundled grammars or copy artifacts built on macOS/Linux.
+
+1. **Registry languages** — no options needed, auto-resolved:
+   ```bash
+   identedit grammar install elixir
+   identedit grammar install zig
+   identedit grammar install dart
+   ```
+   Registry includes: Elixir, Elm, Erlang, Haskell, Julia, Scala, Zig, Dart, OCaml, Clojure, F#, Fortran, Groovy, CUDA, R, Svelte, Vue, Astro, Nix, Racket, Scheme, Solidity, Typst, Pascal, Common Lisp, and more.
+
+2. **Convention languages** — `--ext` required, repo auto-detected:
+   ```bash
+   identedit grammar install somelang --ext xyz
+   ```
+   Works when the grammar repo follows `tree-sitter/tree-sitter-{lang}` or `tree-sitter-grammars/tree-sitter-{lang}` naming.
+
+3. **Custom grammars** — specify repo explicitly:
+   ```bash
+   identedit grammar install mylang --repo https://github.com/user/tree-sitter-mylang --ext ml
+   ```
 
 ## Feedback
 
