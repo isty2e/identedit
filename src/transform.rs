@@ -15,7 +15,6 @@ pub struct TransformInstruction {
 #[derive(Debug, Clone)]
 pub struct MatchedChange {
     pub index: usize,
-    pub target: TransformTarget,
     pub op: OpKind,
     pub expected_hash: String,
     pub old_text: String,

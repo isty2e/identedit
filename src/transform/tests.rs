@@ -29,12 +29,6 @@ fn matched_change(
 ) -> MatchedChange {
     MatchedChange {
         index,
-        target: TransformTarget::node(
-            format!("id-{index}"),
-            anchor_kind.to_string(),
-            Some(anchor_span),
-            "hash".to_string(),
-        ),
         op,
         expected_hash: "hash".to_string(),
         old_text: String::new(),

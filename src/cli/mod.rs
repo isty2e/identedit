@@ -1,14 +1,17 @@
 use clap::{Parser, Subcommand};
 
-pub mod apply;
+use crate::cli::read::ReadCommandOutput;
+use crate::error::IdenteditError;
+
+mod apply;
 mod error_response;
 mod merge_plan;
 mod line_patch;
-pub mod edit;
-pub mod grammar;
-pub mod merge;
-pub mod patch;
-pub mod read;
+mod edit;
+mod grammar;
+mod merge;
+mod patch;
+mod read;
 mod read_select;
 mod edit_build;
 
@@ -22,11 +25,11 @@ pub use error_response::render_error_response;
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Commands {
+enum Commands {
     #[command(about = "Read file structure/content with node or line identities")]
     Read(read::ReadArgs),
     #[command(about = "Build an edit plan from canonical targets")]
@@ -39,4 +42,39 @@ pub enum Commands {
     Grammar(grammar::GrammarArgs),
     #[command(about = "One-shot single-target patch (build + apply)")]
     Patch(Box<patch::PatchArgs>),
+}
+
+pub fn run_cli(cli: Cli) -> Result<String, IdenteditError> {
+    match cli.command {
+        Commands::Read(args) => match read::run_read(args)? {
+            ReadCommandOutput::Text(output) => Ok(output),
+            ReadCommandOutput::Json(response) => serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source }),
+        },
+        Commands::Edit(args) => {
+            let response = edit::run_edit(args)?;
+            serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source })
+        }
+        Commands::Apply(args) => {
+            let response = apply::run_apply(args)?;
+            serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source })
+        }
+        Commands::Merge(args) => {
+            let response = merge::run_merge(args)?;
+            serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source })
+        }
+        Commands::Grammar(args) => {
+            let response = grammar::run_grammar(args)?;
+            serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source })
+        }
+        Commands::Patch(args) => {
+            let response = patch::run_patch(*args)?;
+            serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source })
+        }
+    }
 }

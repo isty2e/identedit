@@ -57,8 +57,6 @@ pub struct ApplySummary {
 #[serde(rename_all = "snake_case")]
 pub enum ApplyFileStatus {
     Applied,
-    RolledBack,
-    RollbackFailed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -66,8 +64,6 @@ pub enum ApplyFileStatus {
 pub enum TransactionStatus {
     Committed,
     DryRun,
-    RolledBack,
-    RollbackFailed,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,7 +99,8 @@ fn summarize_apply_results(applied: &[ApplyFileResult]) -> ApplySummary {
     }
 }
 
-pub fn apply_changeset(changeset: &FileChange) -> Result<ApplyResponse, IdenteditError> {
+#[cfg(test)]
+pub(crate) fn apply_changeset(changeset: &FileChange) -> Result<ApplyResponse, IdenteditError> {
     apply_changeset_with_hooks(changeset, || Ok(()), || Ok(()))
 }
 
@@ -208,6 +205,7 @@ where
     apply_changeset_with_hooks(changeset, &mut before_write_hook, || Ok(()))
 }
 
+#[cfg(test)]
 fn apply_changeset_with_hooks<Before, After>(
     changeset: &FileChange,
     before_write_hook: Before,

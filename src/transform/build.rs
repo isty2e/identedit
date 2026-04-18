@@ -122,7 +122,6 @@ fn build_changeset_with_handles(
 
         matched_changes.push(MatchedChange {
             index,
-            target: canonical_target.clone(),
             op: instruction.op.clone(),
             expected_hash: resolved.expected_hash.clone(),
             old_text: resolved.old_text.clone(),
@@ -218,7 +217,6 @@ pub(crate) fn resolve_changeset_targets_in_handles(
 
         matched.push(MatchedChange {
             index,
-            target: operation.target.clone(),
             op: operation.op.clone(),
             expected_hash: resolved.expected_hash,
             old_text: resolved.old_text,
