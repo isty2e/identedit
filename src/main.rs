@@ -1,8 +1,9 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use identedit::cli::read::ReadCommandOutput;
 use identedit::cli::{Cli, Commands};
+use identedit::cli::read::ReadCommandOutput;
+use identedit::cli::render_error_response;
 use identedit::error::IdenteditError;
 
 fn main() -> ExitCode {
@@ -12,13 +13,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            let serialized = serde_json::to_string_pretty(&error.to_error_response()).unwrap_or_else(
-                |_| {
-                    "{\"error\":{\"type\":\"serialization_error\",\"message\":\"Failed to serialize error response\"}}"
-                        .to_string()
-                },
-            );
-            println!("{serialized}");
+            println!("{}", render_error_response(&error));
             ExitCode::FAILURE
         }
     }

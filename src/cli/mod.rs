@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 pub mod apply;
+mod error_response;
 mod merge_plan;
 mod line_patch;
 pub mod edit;
@@ -10,6 +11,8 @@ pub mod patch;
 pub mod read;
 mod read_select;
 mod edit_build;
+
+pub use error_response::render_error_response;
 
 #[derive(Debug, Parser)]
 #[command(name = "identedit")]
