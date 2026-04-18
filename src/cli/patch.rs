@@ -292,26 +292,12 @@ pub fn run_patch(args: PatchArgs) -> Result<Value, IdenteditError> {
         return run_patch_json_mode(args.dry_run);
     }
 
-    let file = args
-        .file
-        .clone()
-        .ok_or_else(|| IdenteditError::InvalidRequest {
-            message: "FILE is required unless --json mode is enabled".to_string(),
-        })?;
-
-    match resolve_patch_flag_target(&args)? {
-        PatchFlagTarget::NodeIdentity(identity) => run_patch_flag_node_mode(file, identity, args),
-        PatchFlagTarget::NodeSelector { kind, name_pattern } => {
-            run_patch_flag_node_selector_mode(file, kind, name_pattern, args)
-        }
-        PatchFlagTarget::LineAnchor(anchor) => run_patch_flag_line_mode(file, anchor, args),
-        PatchFlagTarget::FileStart => run_patch_flag_file_mode(file, true, args),
-        PatchFlagTarget::FileEnd => run_patch_flag_file_mode(file, false, args),
-        PatchFlagTarget::ConfigPath(path) => run_patch_flag_config_mode(file, path, args),
-    }
+    let request = parse_flag_patch_request(&args)?;
+    execute_flag_patch_request(request)
 }
 
-enum PatchFlagTarget {
+#[derive(Debug, Clone)]
+enum PatchTargetIngress {
     NodeIdentity(String),
     NodeSelector { kind: String, name_pattern: String },
     LineAnchor(String),
@@ -324,6 +310,83 @@ enum PatchFlagTarget {
 enum PatchTextSource {
     File(PathBuf),
     Stdin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ApplyBackedExecution {
+    dry_run: bool,
+    verbose: bool,
+}
+
+impl ApplyBackedExecution {
+    fn from_args(args: &PatchArgs) -> Self {
+        Self {
+            dry_run: args.dry_run,
+            verbose: args.verbose,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LineExecution {
+    dry_run: bool,
+    auto_repair: bool,
+}
+
+impl LineExecution {
+    fn from_args(args: &PatchArgs) -> Self {
+        Self {
+            dry_run: args.dry_run,
+            auto_repair: args.auto_repair,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NodeTargetSelector {
+    Identity(String),
+    Selector { kind: String, name_pattern: String },
+}
+
+impl NodeTargetSelector {
+    fn resolve(self, file: &Path) -> Result<SelectionHandle, IdenteditError> {
+        match self {
+            Self::Identity(identity) => resolve_unique_identity_handle_for_patch(file, &identity),
+            Self::Selector { kind, name_pattern } => {
+                resolve_unique_selector_handle_for_patch(file, &kind, &name_pattern)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct NodeFlagPatchRequest {
+    file: PathBuf,
+    selector: NodeTargetSelector,
+    operation: PreparedNodePatchOperation,
+    execution: ApplyBackedExecution,
+}
+
+#[derive(Debug, Clone)]
+struct CanonicalFlagPatchRequest {
+    file: PathBuf,
+    target: TransformTarget,
+    op: OpKind,
+    execution: ApplyBackedExecution,
+}
+
+#[derive(Debug, Clone)]
+struct LineFlagPatchRequest {
+    file: PathBuf,
+    edit: HashlineEdit,
+    execution: LineExecution,
+}
+
+#[derive(Debug, Clone)]
+enum FlagPatchRequest {
+    Node(NodeFlagPatchRequest),
+    Canonical(CanonicalFlagPatchRequest),
+    Line(LineFlagPatchRequest),
 }
 
 const NODE_MODE_OPERATIONS: &str =
@@ -429,7 +492,54 @@ fn reject_unused_text_source(
     Ok(())
 }
 
-fn resolve_patch_flag_target(args: &PatchArgs) -> Result<PatchFlagTarget, IdenteditError> {
+fn parse_flag_patch_request(args: &PatchArgs) -> Result<FlagPatchRequest, IdenteditError> {
+    let file = args
+        .file
+        .clone()
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "FILE is required unless --json mode is enabled".to_string(),
+        })?;
+
+    match resolve_patch_target_ingress(args)? {
+        PatchTargetIngress::NodeIdentity(identity) => {
+            parse_node_flag_patch_request(file, NodeTargetSelector::Identity(identity), args)
+        }
+        PatchTargetIngress::NodeSelector { kind, name_pattern } => parse_node_flag_patch_request(
+            file,
+            NodeTargetSelector::Selector { kind, name_pattern },
+            args,
+        ),
+        PatchTargetIngress::LineAnchor(anchor) => parse_line_flag_patch_request(file, anchor, args),
+        PatchTargetIngress::FileStart => parse_file_flag_patch_request(file, true, args),
+        PatchTargetIngress::FileEnd => parse_file_flag_patch_request(file, false, args),
+        PatchTargetIngress::ConfigPath(path) => parse_config_flag_patch_request(file, path, args),
+    }
+}
+
+fn execute_flag_patch_request(request: FlagPatchRequest) -> Result<Value, IdenteditError> {
+    match request {
+        FlagPatchRequest::Node(request) => execute_node_flag_patch_request(request),
+        FlagPatchRequest::Canonical(request) => run_patch_node_operation(
+            request.file,
+            request.target,
+            request.op,
+            request.execution.dry_run,
+            request.execution.verbose,
+            None,
+        ),
+        FlagPatchRequest::Line(request) => {
+            let response = execute_hashline_patch(
+                request.file,
+                vec![request.edit],
+                request.execution.auto_repair,
+                request.execution.dry_run,
+            )?;
+            serialize_line_patch_response(response)
+        }
+    }
+}
+
+fn resolve_patch_target_ingress(args: &PatchArgs) -> Result<PatchTargetIngress, IdenteditError> {
     let selector_present = args.kind.is_some() || args.name.is_some();
 
     if let Some(path) = args.config_path.clone() {
@@ -442,7 +552,7 @@ fn resolve_patch_flag_target(args: &PatchArgs) -> Result<PatchFlagTarget, Idente
                 ),
             });
         }
-        return Ok(PatchFlagTarget::ConfigPath(path));
+        return Ok(PatchTargetIngress::ConfigPath(path));
     }
 
     if let Some(at) = args.at.as_deref() {
@@ -462,10 +572,10 @@ fn resolve_patch_flag_target(args: &PatchArgs) -> Result<PatchFlagTarget, Idente
         args.kind.clone(),
         args.name.clone(),
     ) {
-        (Some(identity), None, None, None) => Ok(PatchFlagTarget::NodeIdentity(identity)),
-        (None, Some(anchor), None, None) => Ok(PatchFlagTarget::LineAnchor(anchor)),
+        (Some(identity), None, None, None) => Ok(PatchTargetIngress::NodeIdentity(identity)),
+        (None, Some(anchor), None, None) => Ok(PatchTargetIngress::LineAnchor(anchor)),
         (None, None, Some(kind), Some(name_pattern)) => {
-            Ok(PatchFlagTarget::NodeSelector { kind, name_pattern })
+            Ok(PatchTargetIngress::NodeSelector { kind, name_pattern })
         }
         (None, None, Some(_), None) | (None, None, None, Some(_)) => {
             Err(IdenteditError::InvalidRequest {
@@ -478,21 +588,21 @@ fn resolve_patch_flag_target(args: &PatchArgs) -> Result<PatchFlagTarget, Idente
             message:
                 "Choose exactly one target selector in flag mode: --at <target>, --identity <hex16>, --anchor <line:hash>, or --kind <kind> --name <glob>."
                     .to_string(),
-        }),
+            }),
     }
 }
 
-fn parse_patch_at_target(raw: &str) -> Result<PatchFlagTarget, IdenteditError> {
+fn parse_patch_at_target(raw: &str) -> Result<PatchTargetIngress, IdenteditError> {
     let normalized = raw.trim();
     if normalized.eq_ignore_ascii_case("file-start") {
-        return Ok(PatchFlagTarget::FileStart);
+        return Ok(PatchTargetIngress::FileStart);
     }
     if normalized.eq_ignore_ascii_case("file-end") {
-        return Ok(PatchFlagTarget::FileEnd);
+        return Ok(PatchTargetIngress::FileEnd);
     }
 
     if is_hex_with_len(normalized, HASH_HEX_LEN) {
-        return Ok(PatchFlagTarget::NodeIdentity(
+        return Ok(PatchTargetIngress::NodeIdentity(
             normalized.to_ascii_lowercase(),
         ));
     }
@@ -502,7 +612,7 @@ fn parse_patch_at_target(raw: &str) -> Result<PatchFlagTarget, IdenteditError> {
             parse_line_ref(normalized).map_err(|error| IdenteditError::InvalidRequest {
                 message: error.to_string(),
             })?;
-        return Ok(PatchFlagTarget::LineAnchor(format!(
+        return Ok(PatchTargetIngress::LineAnchor(format!(
             "{}:{}",
             parsed.line, parsed.hash
         )));
@@ -830,6 +940,7 @@ fn serialize_line_patch_response(response: HashlinePatchResponse) -> Result<Valu
         .map_err(|source| IdenteditError::ResponseSerialization { source })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PreparedNodePatchOperation {
     Standard(OpKind),
     ScopedRegex {
@@ -838,25 +949,18 @@ enum PreparedNodePatchOperation {
     },
 }
 
-fn run_patch_flag_node_mode(
+fn parse_node_flag_patch_request(
     file: PathBuf,
-    identity: String,
-    args: PatchArgs,
-) -> Result<Value, IdenteditError> {
-    let operation = prepare_patch_flag_node_operation(&args)?;
-    let handle = resolve_unique_identity_handle_for_patch(&file, &identity)?;
-    execute_patch_flag_node_operation(file, handle, operation, args.dry_run, args.verbose)
-}
-
-fn run_patch_flag_node_selector_mode(
-    file: PathBuf,
-    kind: String,
-    name_pattern: String,
-    args: PatchArgs,
-) -> Result<Value, IdenteditError> {
-    let operation = prepare_patch_flag_node_operation(&args)?;
-    let handle = resolve_unique_selector_handle_for_patch(&file, &kind, &name_pattern)?;
-    execute_patch_flag_node_operation(file, handle, operation, args.dry_run, args.verbose)
+    selector: NodeTargetSelector,
+    args: &PatchArgs,
+) -> Result<FlagPatchRequest, IdenteditError> {
+    let operation = prepare_patch_flag_node_operation(args)?;
+    Ok(FlagPatchRequest::Node(NodeFlagPatchRequest {
+        file,
+        selector,
+        operation,
+        execution: ApplyBackedExecution::from_args(args),
+    }))
 }
 
 fn prepare_patch_flag_node_operation(
@@ -952,12 +1056,16 @@ fn prepare_patch_flag_node_operation(
     }))
 }
 
+fn execute_node_flag_patch_request(request: NodeFlagPatchRequest) -> Result<Value, IdenteditError> {
+    let handle = request.selector.resolve(&request.file)?;
+    execute_patch_flag_node_operation(request.file, handle, request.operation, request.execution)
+}
+
 fn execute_patch_flag_node_operation(
     file: PathBuf,
     handle: SelectionHandle,
     operation: PreparedNodePatchOperation,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     let target = TransformTarget::node(
         handle.identity,
@@ -968,7 +1076,14 @@ fn execute_patch_flag_node_operation(
 
     match operation {
         PreparedNodePatchOperation::Standard(op) => {
-            run_patch_node_operation(file, target, op, dry_run, verbose, None)
+            run_patch_node_operation(
+                file,
+                target,
+                op,
+                execution.dry_run,
+                execution.verbose,
+                None,
+            )
         }
         PreparedNodePatchOperation::ScopedRegex {
             pattern,
@@ -982,20 +1097,20 @@ fn execute_patch_flag_node_operation(
                 OpKind::Replace {
                     new_text: rewritten.new_text,
                 },
-                dry_run,
-                verbose,
+                execution.dry_run,
+                execution.verbose,
                 Some(rewritten.replacements),
             )
         }
     }
 }
 
-fn run_patch_flag_file_mode(
+fn parse_file_flag_patch_request(
     file: PathBuf,
     at_file_start: bool,
-    args: PatchArgs,
-) -> Result<Value, IdenteditError> {
-    let text_source = resolve_patch_text_source(&args)?;
+    args: &PatchArgs,
+) -> Result<FlagPatchRequest, IdenteditError> {
+    let text_source = resolve_patch_text_source(args)?;
 
     if args.identity.is_some()
         || args.anchor.is_some()
@@ -1018,7 +1133,7 @@ fn run_patch_flag_file_mode(
         });
     }
 
-    let insert_text = resolve_patch_text_payload("--insert", args.insert, text_source)?
+    let insert_text = resolve_patch_text_payload("--insert", args.insert.clone(), text_source)?
         .ok_or_else(|| IdenteditError::InvalidRequest {
             message: file_mode_guidance(),
         })?;
@@ -1030,16 +1145,15 @@ fn run_patch_flag_file_mode(
     } else {
         TransformTarget::FileEnd { expected_file_hash }
     };
-    run_patch_node_operation(
+
+    Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {
         file,
         target,
-        OpKind::Insert {
+        op: OpKind::Insert {
             new_text: insert_text,
         },
-        args.dry_run,
-        args.verbose,
-        None,
-    )
+        execution: ApplyBackedExecution::from_args(args),
+    }))
 }
 
 fn resolve_unique_identity_handle_for_patch(
@@ -1093,12 +1207,12 @@ fn resolve_unique_selector_handle_for_patch(
     }
 }
 
-fn run_patch_flag_line_mode(
+fn parse_line_flag_patch_request(
     file: PathBuf,
     anchor: String,
-    args: PatchArgs,
-) -> Result<Value, IdenteditError> {
-    let text_source = resolve_patch_text_source(&args)?;
+    args: &PatchArgs,
+) -> Result<FlagPatchRequest, IdenteditError> {
+    let text_source = resolve_patch_text_source(args)?;
 
     if args.identity.is_some()
         || args.replace.is_some()
@@ -1129,7 +1243,7 @@ fn run_patch_flag_line_mode(
     }
 
     let edit = if let Some(new_text) =
-        resolve_patch_text_payload("--set-line", args.set_line, text_source.clone())?
+        resolve_patch_text_payload("--set-line", args.set_line.clone(), text_source.clone())?
     {
         if args.end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
@@ -1143,13 +1257,13 @@ fn run_patch_flag_line_mode(
         }
     } else if let Some(new_text) = resolve_patch_text_payload(
         "--replace-range",
-        args.replace_range,
+        args.replace_range.clone(),
         text_source.clone(),
     )? {
         HashlineEdit::ReplaceLines {
             replace_lines: ReplaceLinesEdit {
                 start_anchor: anchor,
-                end_anchor: args.end_anchor,
+                end_anchor: args.end_anchor.clone(),
                 new_text,
             },
         }
@@ -1163,7 +1277,7 @@ fn run_patch_flag_line_mode(
         }
         let text = resolve_patch_text_payload(
             "--insert-after-line",
-            args.insert_after_line,
+            args.insert_after_line.clone(),
             text_source,
         )?
         .ok_or_else(|| IdenteditError::InvalidRequest {
@@ -1174,16 +1288,19 @@ fn run_patch_flag_line_mode(
         }
     };
 
-    let patch_response = execute_hashline_patch(file, vec![edit], args.auto_repair, args.dry_run)?;
-    serialize_line_patch_response(patch_response)
+    Ok(FlagPatchRequest::Line(LineFlagPatchRequest {
+        file,
+        edit,
+        execution: LineExecution::from_args(args),
+    }))
 }
 
-fn run_patch_flag_config_mode(
+fn parse_config_flag_patch_request(
     file: PathBuf,
     path: String,
-    args: PatchArgs,
-) -> Result<Value, IdenteditError> {
-    let text_source = resolve_patch_text_source(&args)?;
+    args: &PatchArgs,
+) -> Result<FlagPatchRequest, IdenteditError> {
+    let text_source = resolve_patch_text_source(args)?;
 
     if args.at.is_some()
         || args.identity.is_some()
@@ -1223,7 +1340,7 @@ fn run_patch_flag_config_mode(
     }
 
     let canonical = if let Some(new_text) =
-        resolve_patch_text_payload("--set-value", args.set_value, text_source.clone())?
+        resolve_patch_text_payload("--set-value", args.set_value.clone(), text_source.clone())?
     {
         resolve_config_path_operation(
             file.as_path(),
@@ -1235,7 +1352,11 @@ fn run_patch_flag_config_mode(
             },
         )?
     } else if let Some(new_text) =
-        resolve_patch_text_payload("--append-value", args.append_value, text_source.clone())?
+        resolve_patch_text_payload(
+            "--append-value",
+            args.append_value.clone(),
+            text_source.clone(),
+        )?
     {
         resolve_config_path_operation(
             file.as_path(),
@@ -1248,14 +1369,12 @@ fn run_patch_flag_config_mode(
         resolve_config_path_operation(file.as_path(), &path, None, ConfigPathOperation::Delete)?
     };
 
-    run_patch_node_operation(
+    Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {
         file,
-        canonical.target,
-        canonical.op,
-        args.dry_run,
-        args.verbose,
-        None,
-    )
+        target: canonical.target,
+        op: canonical.op,
+        execution: ApplyBackedExecution::from_args(args),
+    }))
 }
 
 fn wrap_single_file(file_change: crate::changeset::FileChange) -> MultiFileChangeset {
@@ -1269,4 +1388,157 @@ fn verify_prepared_changeset(
     changeset: MultiFileChangeset,
 ) -> Result<MultiFileChangeset, IdenteditError> {
     Ok(changeset)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use tempfile::NamedTempFile;
+
+    use super::{
+        ApplyBackedExecution, FlagPatchRequest, HashlineEdit, LineExecution, NodeFlagPatchRequest,
+        NodeTargetSelector, PatchArgs, PreparedNodePatchOperation, parse_flag_patch_request,
+    };
+    use crate::changeset::{OpKind, TransformTarget};
+
+    fn base_args(file: PathBuf) -> PatchArgs {
+        PatchArgs {
+            json: false,
+            at: None,
+            identity: None,
+            anchor: None,
+            end_anchor: None,
+            config_path: None,
+            kind: None,
+            name: None,
+            replace: None,
+            text_file: None,
+            stdin_text: false,
+            set_value: None,
+            append_value: None,
+            create_missing: false,
+            insert: None,
+            scoped_regex: None,
+            scoped_replacement: None,
+            delete: false,
+            insert_before: None,
+            insert_after: None,
+            set_line: None,
+            replace_range: None,
+            insert_after_line: None,
+            auto_repair: false,
+            dry_run: false,
+            verbose: false,
+            file: Some(file),
+        }
+    }
+
+    #[test]
+    fn parse_flag_patch_request_builds_node_request_for_direct_symbol_targeting() {
+        let mut args = base_args(PathBuf::from("fixture.py"));
+        args.kind = Some("function_definition".to_string());
+        args.name = Some("process_*".to_string());
+        args.replace = Some(Some("def process_data():\n    return 1\n".to_string()));
+        args.dry_run = true;
+        args.verbose = true;
+
+        let request = parse_flag_patch_request(&args).expect("node request should parse");
+        let FlagPatchRequest::Node(NodeFlagPatchRequest {
+            selector,
+            operation,
+            execution,
+            ..
+        }) = request
+        else {
+            panic!("expected node request");
+        };
+
+        assert_eq!(
+            selector,
+            NodeTargetSelector::Selector {
+                kind: "function_definition".to_string(),
+                name_pattern: "process_*".to_string(),
+            }
+        );
+        assert_eq!(
+            operation,
+            PreparedNodePatchOperation::Standard(OpKind::Replace {
+                new_text: "def process_data():\n    return 1\n".to_string(),
+            })
+        );
+        assert_eq!(
+            execution,
+            ApplyBackedExecution {
+                dry_run: true,
+                verbose: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_flag_patch_request_builds_line_request_with_line_execution_options() {
+        let mut args = base_args(PathBuf::from("fixture.py"));
+        args.at = Some("12:0123456789ab".to_string());
+        args.set_line = Some(Some("replacement".to_string()));
+        args.auto_repair = true;
+        args.dry_run = true;
+
+        let request = parse_flag_patch_request(&args).expect("line request should parse");
+        let FlagPatchRequest::Line(line_request) = request else {
+            panic!("expected line request");
+        };
+
+        match line_request.edit {
+            HashlineEdit::SetLine { set_line } => {
+                assert_eq!(set_line.anchor, "12:0123456789ab");
+                assert_eq!(set_line.new_text, "replacement");
+            }
+            other => panic!("expected set-line edit, got {other:?}"),
+        }
+        assert_eq!(
+            line_request.execution,
+            LineExecution {
+                dry_run: true,
+                auto_repair: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_flag_patch_request_builds_canonical_request_for_file_insert() {
+        let temp = NamedTempFile::new().expect("temp file");
+        std::fs::write(temp.path(), "body\n").expect("write source");
+
+        let mut args = base_args(temp.path().to_path_buf());
+        args.at = Some("file-end".to_string());
+        args.insert = Some(Some("\n# tail\n".to_string()));
+        args.verbose = true;
+
+        let request = parse_flag_patch_request(&args).expect("file request should parse");
+        let FlagPatchRequest::Canonical(request) = request else {
+            panic!("expected canonical request");
+        };
+
+        assert_eq!(request.file, temp.path());
+        assert_eq!(
+            request.op,
+            OpKind::Insert {
+                new_text: "\n# tail\n".to_string(),
+            }
+        );
+        assert_eq!(
+            request.execution,
+            ApplyBackedExecution {
+                dry_run: false,
+                verbose: true,
+            }
+        );
+        match request.target {
+            TransformTarget::FileEnd { expected_file_hash } => {
+                assert_eq!(expected_file_hash, crate::hash::hash_bytes(b"body\n"));
+            }
+            other => panic!("expected file-end target, got {other:?}"),
+        }
+    }
 }
