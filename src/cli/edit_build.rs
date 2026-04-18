@@ -11,9 +11,7 @@ use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
 use crate::transform::TransformInstruction;
-use crate::transform::build::{
-    build_changeset, build_delete_changeset, build_replace_changeset,
-};
+use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
 use crate::transform::parse::parse_handles_for_file;
 use crate::transform::resolve::resolve_target_in_handles;
 
@@ -454,9 +452,8 @@ fn parse_stdin_edit_shape(
         let files = request.files.expect("checked has_batch");
         if files.is_empty() {
             return Err(IdenteditError::InvalidRequest {
-                message:
-                    "edit JSON request field 'files' must contain at least one file entry"
-                        .to_string(),
+                message: "edit JSON request field 'files' must contain at least one file entry"
+                    .to_string(),
             });
         }
         return Ok(files

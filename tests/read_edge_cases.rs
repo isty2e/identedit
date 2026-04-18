@@ -1536,9 +1536,11 @@ fn returns_error_when_json_mode_payload_contains_file_and_files() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
     assert!(
-        response["error"]["message"].as_str().is_some_and(|message| {
-            message.contains("either 'file' or 'files'") && message.contains("not both")
-        }),
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message.contains("either 'file' or 'files'") && message.contains("not both")
+            }),
         "expected shape-conflict message"
     );
 }

@@ -153,9 +153,9 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
             }
         }
         let response = super::read_select::run_read_select_from_stdin(args.verbose)?;
-        return Ok(ReadCommandOutput::Json(ReadResponse::from_read_select_response(
-            response,
-        )));
+        return Ok(ReadCommandOutput::Json(
+            ReadResponse::from_read_select_response(response),
+        ));
     }
 
     let provider_registry = ProviderRegistry::default();

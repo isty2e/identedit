@@ -5,9 +5,9 @@ use serde::Serialize;
 
 use crate::error::IdenteditError;
 use crate::hashline::{
-    HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult, HashlineCheckSummary,
-    HashlineEdit, HashlineMismatch, HashlineMismatchStatus, apply_hashline_edits_with_mode,
-    check_hashline_edits,
+    HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult,
+    HashlineCheckSummary, HashlineEdit, HashlineMismatch, HashlineMismatchStatus,
+    apply_hashline_edits_with_mode, check_hashline_edits,
 };
 use crate::patch::engine::run_resolve_verify_apply;
 

@@ -1,0 +1,879 @@
+use std::collections::HashMap;
+use std::path::Path;
+
+use tree_sitter::{Node, Tree};
+
+use crate::error::IdenteditError;
+use crate::handle::{SelectionHandle, Span};
+use crate::provider::node_text;
+
+use super::ConfigPathOperation;
+use super::render::{append_requires_array_error, array_index_out_of_bounds_error};
+use super::syntax::{PathToken, expected_path_container_error, path_tokens_display, token_display};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResolvedContainerEdit {
+    pub(super) container_span: Span,
+    pub(super) container_kind: String,
+    pub(super) replace_span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TomlCandidate {
+    path: Vec<PathToken>,
+    container_span: Span,
+    container_kind: String,
+    set_span: Span,
+    set_kind: String,
+    delete_entry_span: Span,
+}
+
+pub(super) fn resolve_json_path(
+    tree: &Tree,
+    source: &[u8],
+    path_tokens: &[PathToken],
+    operation: &ConfigPathOperation,
+    raw_path: &str,
+) -> Result<ResolvedContainerEdit, IdenteditError> {
+    let mut current =
+        json_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "JSON document has no root value".to_string(),
+        })?;
+
+    for (index, token) in path_tokens.iter().enumerate() {
+        let last = index + 1 == path_tokens.len();
+        match token {
+            PathToken::Key(expected_key) => {
+                if current.kind() != "object" {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        token,
+                        current.kind(),
+                    ));
+                }
+
+                let mut matches = Vec::new();
+                for child in named_children(current) {
+                    if child.kind() != "pair" {
+                        continue;
+                    }
+                    let Some(key_node) = child.child_by_field_name("key") else {
+                        continue;
+                    };
+                    let Some(raw_key) = node_text(key_node, source) else {
+                        continue;
+                    };
+                    let decoded = decode_json_string(&raw_key)
+                        .unwrap_or_else(|| raw_key.trim_matches('"').to_string());
+                    if decoded == *expected_key {
+                        matches.push(child);
+                    }
+                }
+
+                let matched_pair = unique_match(raw_path, token, matches)?;
+                let value_node = matched_pair
+                    .child_by_field_name("value")
+                    .ok_or_else(|| IdenteditError::InvalidRequest {
+                        message: format!(
+                            "Config path '{raw_path}' matched key '{expected_key}' without a value node"
+                        ),
+                    })?;
+
+                if last {
+                    return Ok(match operation {
+                        ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
+                            container_span: span_from_node(current),
+                            container_kind: current.kind().to_string(),
+                            replace_span: span_from_node(value_node),
+                        },
+                        ConfigPathOperation::Append { .. } => {
+                            if value_node.kind() != "array" {
+                                return Err(append_requires_array_error(
+                                    raw_path,
+                                    value_node.kind(),
+                                ));
+                            }
+                            ResolvedContainerEdit {
+                                container_span: span_from_node(value_node),
+                                container_kind: value_node.kind().to_string(),
+                                replace_span: span_from_node(value_node),
+                            }
+                        }
+                        ConfigPathOperation::Delete => ResolvedContainerEdit {
+                            container_span: span_from_node(current),
+                            container_kind: current.kind().to_string(),
+                            replace_span: adjusted_delete_span_for_container(
+                                source,
+                                span_from_node(current),
+                                current.kind(),
+                                span_from_node(matched_pair),
+                            ),
+                        },
+                    });
+                }
+
+                current = value_node;
+            }
+            PathToken::Index(expected_index) => {
+                if current.kind() != "array" {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        token,
+                        current.kind(),
+                    ));
+                }
+
+                let elements = named_children(current);
+                let entry = elements.get(*expected_index).ok_or_else(|| {
+                    array_index_out_of_bounds_error(raw_path, *expected_index, elements.len())
+                })?;
+
+                if last {
+                    return Ok(match operation {
+                        ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
+                            container_span: span_from_node(current),
+                            container_kind: current.kind().to_string(),
+                            replace_span: span_from_node(*entry),
+                        },
+                        ConfigPathOperation::Append { .. } => {
+                            if entry.kind() != "array" {
+                                return Err(append_requires_array_error(raw_path, entry.kind()));
+                            }
+                            ResolvedContainerEdit {
+                                container_span: span_from_node(*entry),
+                                container_kind: entry.kind().to_string(),
+                                replace_span: span_from_node(*entry),
+                            }
+                        }
+                        ConfigPathOperation::Delete => ResolvedContainerEdit {
+                            container_span: span_from_node(current),
+                            container_kind: current.kind().to_string(),
+                            replace_span: adjusted_delete_span_for_container(
+                                source,
+                                span_from_node(current),
+                                current.kind(),
+                                span_from_node(*entry),
+                            ),
+                        },
+                    });
+                }
+
+                current = *entry;
+            }
+        }
+    }
+
+    Err(IdenteditError::InvalidRequest {
+        message: format!("Config path '{raw_path}' did not resolve to an editable value"),
+    })
+}
+
+pub(super) fn resolve_yaml_path(
+    tree: &Tree,
+    source: &[u8],
+    path_tokens: &[PathToken],
+    operation: &ConfigPathOperation,
+    raw_path: &str,
+) -> Result<ResolvedContainerEdit, IdenteditError> {
+    let mut current =
+        yaml_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "YAML document has no root value".to_string(),
+        })?;
+
+    for (index, token) in path_tokens.iter().enumerate() {
+        let last = index + 1 == path_tokens.len();
+        match token {
+            PathToken::Key(expected_key) => {
+                let pair_kind = match current.kind() {
+                    "block_mapping" => "block_mapping_pair",
+                    "flow_mapping" => "flow_pair",
+                    _ => {
+                        return Err(expected_path_container_error(
+                            raw_path,
+                            token,
+                            current.kind(),
+                        ));
+                    }
+                };
+
+                let mut matches = Vec::new();
+                for pair in named_children(current) {
+                    if pair.kind() != pair_kind {
+                        continue;
+                    }
+                    let Some(key_node) = pair.child_by_field_name("key") else {
+                        continue;
+                    };
+                    let Some(key_text) = yaml_key_text(key_node, source) else {
+                        continue;
+                    };
+                    if key_text == *expected_key {
+                        matches.push(pair);
+                    }
+                }
+
+                let matched_pair = unique_match(raw_path, token, matches)?;
+                let value_node = matched_pair
+                    .child_by_field_name("value")
+                    .and_then(yaml_unwrap_node)
+                    .ok_or_else(|| IdenteditError::InvalidRequest {
+                        message: format!(
+                            "Config path '{raw_path}' matched key '{expected_key}' without a value node"
+                        ),
+                    })?;
+
+                if last {
+                    return Ok(match operation {
+                        ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
+                            container_span: span_from_node(current),
+                            container_kind: current.kind().to_string(),
+                            replace_span: span_from_node(value_node),
+                        },
+                        ConfigPathOperation::Append { .. } => {
+                            if value_node.kind() != "block_sequence"
+                                && value_node.kind() != "flow_sequence"
+                            {
+                                return Err(append_requires_array_error(
+                                    raw_path,
+                                    value_node.kind(),
+                                ));
+                            }
+                            ResolvedContainerEdit {
+                                container_span: span_from_node(value_node),
+                                container_kind: value_node.kind().to_string(),
+                                replace_span: span_from_node(value_node),
+                            }
+                        }
+                        ConfigPathOperation::Delete => ResolvedContainerEdit {
+                            container_span: span_from_node(current),
+                            container_kind: current.kind().to_string(),
+                            replace_span: adjusted_delete_span_for_container(
+                                source,
+                                span_from_node(current),
+                                current.kind(),
+                                span_from_node(matched_pair),
+                            ),
+                        },
+                    });
+                }
+
+                current = value_node;
+            }
+            PathToken::Index(expected_index) => match current.kind() {
+                "block_sequence" => {
+                    let items = named_children(current);
+                    let item = items.get(*expected_index).ok_or_else(|| {
+                        array_index_out_of_bounds_error(raw_path, *expected_index, items.len())
+                    })?;
+                    let value_node = yaml_unwrap_node(*item).ok_or_else(|| IdenteditError::InvalidRequest {
+                        message: format!(
+                            "Config path '{raw_path}' index [{expected_index}] has no YAML value node"
+                        ),
+                    })?;
+                    if last {
+                        return Ok(match operation {
+                            ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
+                                container_span: span_from_node(current),
+                                container_kind: current.kind().to_string(),
+                                replace_span: span_from_node(value_node),
+                            },
+                            ConfigPathOperation::Append { .. } => {
+                                if value_node.kind() != "block_sequence"
+                                    && value_node.kind() != "flow_sequence"
+                                {
+                                    return Err(append_requires_array_error(
+                                        raw_path,
+                                        value_node.kind(),
+                                    ));
+                                }
+                                ResolvedContainerEdit {
+                                    container_span: span_from_node(value_node),
+                                    container_kind: value_node.kind().to_string(),
+                                    replace_span: span_from_node(value_node),
+                                }
+                            }
+                            ConfigPathOperation::Delete => ResolvedContainerEdit {
+                                container_span: span_from_node(current),
+                                container_kind: current.kind().to_string(),
+                                replace_span: adjusted_delete_span_for_container(
+                                    source,
+                                    span_from_node(current),
+                                    current.kind(),
+                                    span_from_node(*item),
+                                ),
+                            },
+                        });
+                    }
+                    current = value_node;
+                }
+                "flow_sequence" => {
+                    let items = named_children(current);
+                    let item = items.get(*expected_index).ok_or_else(|| {
+                        array_index_out_of_bounds_error(raw_path, *expected_index, items.len())
+                    })?;
+                    let next = yaml_unwrap_node(*item).unwrap_or(*item);
+                    if last {
+                        return Ok(match operation {
+                            ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
+                                container_span: span_from_node(current),
+                                container_kind: current.kind().to_string(),
+                                replace_span: span_from_node(next),
+                            },
+                            ConfigPathOperation::Append { .. } => {
+                                if next.kind() != "block_sequence" && next.kind() != "flow_sequence"
+                                {
+                                    return Err(append_requires_array_error(raw_path, next.kind()));
+                                }
+                                ResolvedContainerEdit {
+                                    container_span: span_from_node(next),
+                                    container_kind: next.kind().to_string(),
+                                    replace_span: span_from_node(next),
+                                }
+                            }
+                            ConfigPathOperation::Delete => ResolvedContainerEdit {
+                                container_span: span_from_node(current),
+                                container_kind: current.kind().to_string(),
+                                replace_span: adjusted_delete_span_for_container(
+                                    source,
+                                    span_from_node(current),
+                                    current.kind(),
+                                    span_from_node(*item),
+                                ),
+                            },
+                        });
+                    }
+                    current = next;
+                }
+                _ => {
+                    return Err(expected_path_container_error(
+                        raw_path,
+                        token,
+                        current.kind(),
+                    ));
+                }
+            },
+        }
+    }
+
+    Err(IdenteditError::InvalidRequest {
+        message: format!("Config path '{raw_path}' did not resolve to an editable value"),
+    })
+}
+
+pub(super) fn resolve_toml_path(
+    tree: &Tree,
+    source: &[u8],
+    path_tokens: &[PathToken],
+    operation: &ConfigPathOperation,
+    raw_path: &str,
+) -> Result<ResolvedContainerEdit, IdenteditError> {
+    let root = tree.root_node();
+    let mut candidates = Vec::new();
+    collect_toml_candidates(root, source, &mut candidates);
+
+    let matched = candidates
+        .iter()
+        .filter(|candidate| candidate.path == path_tokens)
+        .collect::<Vec<_>>();
+
+    let selected = match matched.as_slice() {
+        [] => {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!("Config path '{raw_path}' was not found in TOML document"),
+            });
+        }
+        [single] => *single,
+        many => {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Config path '{raw_path}' is ambiguous in TOML document ({})",
+                    many.len()
+                ),
+            });
+        }
+    };
+
+    let (container_span, container_kind, replace_span) = match operation {
+        ConfigPathOperation::Set { .. } => (
+            selected.container_span,
+            selected.container_kind.clone(),
+            selected.set_span,
+        ),
+        ConfigPathOperation::Append { .. } => {
+            if selected.set_kind != "array" {
+                return Err(append_requires_array_error(raw_path, &selected.set_kind));
+            }
+            (
+                selected.set_span,
+                selected.set_kind.clone(),
+                selected.set_span,
+            )
+        }
+        ConfigPathOperation::Delete => (
+            selected.container_span,
+            selected.container_kind.clone(),
+            adjusted_delete_span_for_container(
+                source,
+                selected.container_span,
+                &selected.container_kind,
+                selected.delete_entry_span,
+            ),
+        ),
+    };
+
+    Ok(ResolvedContainerEdit {
+        container_span,
+        container_kind,
+        replace_span,
+    })
+}
+
+pub(super) fn json_root_value(root: Node<'_>) -> Option<Node<'_>> {
+    let node = root;
+    if node.kind() == "document" {
+        if let Some(value) = node.child_by_field_name("value") {
+            return Some(value);
+        }
+        return first_named_child(node);
+    }
+    first_named_child(node).or(Some(node))
+}
+
+pub(super) fn yaml_root_value(root: Node<'_>) -> Option<Node<'_>> {
+    let mut node = root;
+    if node.kind() == "stream" {
+        node = first_named_child(node)?;
+    }
+    if node.kind() == "document" {
+        node = first_named_child(node)?;
+    }
+    yaml_unwrap_node(node)
+}
+
+pub(super) fn span_from_node(node: Node<'_>) -> Span {
+    Span {
+        start: node.start_byte(),
+        end: node.end_byte(),
+    }
+}
+
+pub(super) fn find_handle_for_span(
+    file: &Path,
+    handles: &[SelectionHandle],
+    span: Span,
+    expected_kind: &str,
+) -> Result<SelectionHandle, IdenteditError> {
+    let matches_by_kind = handles
+        .iter()
+        .filter(|handle| handle.span == span && handle.kind == expected_kind)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if let [single] = matches_by_kind.as_slice() {
+        return Ok(single.clone());
+    }
+
+    let matches_by_span = handles
+        .iter()
+        .filter(|handle| handle.span == span)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    match matches_by_span.as_slice() {
+        [] => Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path resolver produced span [{}, {}) without a matching structural handle in '{}'",
+                span.start,
+                span.end,
+                file.display()
+            ),
+        }),
+        [single] => Ok(single.clone()),
+        many => Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path resolver produced ambiguous span [{}, {}) kind '{}' in '{}' ({} handles)",
+                span.start,
+                span.end,
+                expected_kind,
+                file.display(),
+                many.len()
+            ),
+        }),
+    }
+}
+
+pub(super) fn rewrite_container_text(
+    source_text: &str,
+    container_span: Span,
+    replace_span: Span,
+    replacement: &str,
+) -> Result<String, IdenteditError> {
+    if container_span.start > container_span.end || container_span.end > source_text.len() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid container span [{}, {}) during config path rewrite",
+                container_span.start, container_span.end
+            ),
+        });
+    }
+    if replace_span.start > replace_span.end
+        || replace_span.start < container_span.start
+        || replace_span.end > container_span.end
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid replace span [{}, {}) inside container [{}, {}) during config path rewrite",
+                replace_span.start, replace_span.end, container_span.start, container_span.end
+            ),
+        });
+    }
+
+    let mut container_text = source_text[container_span.start..container_span.end].to_string();
+    let relative_start = replace_span.start - container_span.start;
+    let relative_end = replace_span.end - container_span.start;
+    container_text.replace_range(relative_start..relative_end, replacement);
+    Ok(container_text)
+}
+
+pub(super) fn rewrite_full_source_text(
+    source_text: &str,
+    target_span: Span,
+    replacement: &str,
+) -> Result<String, IdenteditError> {
+    if target_span.start > target_span.end || target_span.end > source_text.len() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid full-source replace span [{}, {}) during config path rewrite",
+                target_span.start, target_span.end
+            ),
+        });
+    }
+
+    let mut updated = source_text.to_string();
+    updated.replace_range(target_span.start..target_span.end, replacement);
+    Ok(updated)
+}
+
+fn collect_toml_candidates(root: Node<'_>, source: &[u8], out: &mut Vec<TomlCandidate>) {
+    let mut array_table_counts: HashMap<String, usize> = HashMap::new();
+    for child in named_children(root) {
+        match child.kind() {
+            "pair" => collect_toml_pair_candidates(child, source, Vec::new(), root, out),
+            "table" => {
+                let prefix = toml_table_prefix(child, source);
+                for pair in named_children(child) {
+                    if pair.kind() == "pair" {
+                        collect_toml_pair_candidates(pair, source, prefix.clone(), child, out);
+                    }
+                }
+            }
+            "table_array_element" => {
+                let prefix = toml_table_prefix(child, source);
+                let counter_key = path_tokens_display(&prefix);
+                let index = array_table_counts
+                    .entry(counter_key)
+                    .and_modify(|value| *value += 1)
+                    .or_insert(0);
+                let mut indexed_prefix = prefix;
+                indexed_prefix.push(PathToken::Index(*index));
+                for pair in named_children(child) {
+                    if pair.kind() == "pair" {
+                        collect_toml_pair_candidates(
+                            pair,
+                            source,
+                            indexed_prefix.clone(),
+                            child,
+                            out,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_toml_pair_candidates(
+    pair: Node<'_>,
+    source: &[u8],
+    prefix: Vec<PathToken>,
+    container: Node<'_>,
+    out: &mut Vec<TomlCandidate>,
+) {
+    let Some((key_segments, value_node)) = toml_pair_key_and_value(pair, source) else {
+        return;
+    };
+
+    let mut full_path = prefix;
+    full_path.extend(key_segments.into_iter().map(PathToken::Key));
+
+    out.push(TomlCandidate {
+        path: full_path.clone(),
+        container_span: span_from_node(container),
+        container_kind: container.kind().to_string(),
+        set_span: span_from_node(value_node),
+        set_kind: value_node.kind().to_string(),
+        delete_entry_span: span_from_node(pair),
+    });
+
+    collect_toml_nested_value_candidates(value_node, source, full_path, out);
+}
+
+fn collect_toml_nested_value_candidates(
+    value: Node<'_>,
+    source: &[u8],
+    prefix: Vec<PathToken>,
+    out: &mut Vec<TomlCandidate>,
+) {
+    match value.kind() {
+        "inline_table" => {
+            for child in named_children(value) {
+                if child.kind() == "pair" {
+                    collect_toml_pair_candidates(child, source, prefix.clone(), value, out);
+                }
+            }
+        }
+        "array" => {
+            let elements = named_children(value);
+            for (index, element) in elements.into_iter().enumerate() {
+                let mut indexed_path = prefix.clone();
+                indexed_path.push(PathToken::Index(index));
+
+                out.push(TomlCandidate {
+                    path: indexed_path.clone(),
+                    container_span: span_from_node(value),
+                    container_kind: value.kind().to_string(),
+                    set_span: span_from_node(element),
+                    set_kind: element.kind().to_string(),
+                    delete_entry_span: span_from_node(element),
+                });
+
+                collect_toml_nested_value_candidates(element, source, indexed_path, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn toml_table_prefix(table: Node<'_>, source: &[u8]) -> Vec<PathToken> {
+    let mut prefix = Vec::new();
+    for child in named_children(table) {
+        if child.kind() == "pair" {
+            break;
+        }
+        for segment in toml_key_segments(child, source) {
+            prefix.push(PathToken::Key(segment));
+        }
+    }
+    prefix
+}
+
+fn toml_pair_key_and_value<'a>(pair: Node<'a>, source: &[u8]) -> Option<(Vec<String>, Node<'a>)> {
+    let children = named_children(pair);
+    if children.len() < 2 {
+        return None;
+    }
+
+    let key_node = pair
+        .child_by_field_name("key")
+        .or_else(|| children.first().copied())?;
+    let value_node = pair.child_by_field_name("value").or_else(|| {
+        children
+            .iter()
+            .rev()
+            .find(|node| node.kind() != "comment")
+            .copied()
+    })?;
+    let key_segments = toml_key_segments(key_node, source);
+    if key_segments.is_empty() {
+        return None;
+    }
+
+    Some((key_segments, value_node))
+}
+
+fn toml_key_segments(key_node: Node<'_>, source: &[u8]) -> Vec<String> {
+    match key_node.kind() {
+        "bare_key" => node_text(key_node, source)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .into_iter()
+            .collect(),
+        "quoted_key" => node_text(key_node, source)
+            .map(|value| decode_quoted_string(&value))
+            .into_iter()
+            .collect(),
+        "dotted_key" => {
+            let mut segments = Vec::new();
+            for child in named_children(key_node) {
+                segments.extend(toml_key_segments(child, source));
+            }
+            segments
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn yaml_unwrap_node(mut node: Node<'_>) -> Option<Node<'_>> {
+    loop {
+        match node.kind() {
+            "block_node" | "flow_node" | "block_sequence_item" => {
+                node = first_named_child(node)?;
+            }
+            _ => return Some(node),
+        }
+    }
+}
+
+fn yaml_key_text(key_node: Node<'_>, source: &[u8]) -> Option<String> {
+    let node = yaml_unwrap_node(key_node)?;
+    let raw = node_text(node, source)?;
+    Some(match node.kind() {
+        "double_quote_scalar" => decode_quoted_string(&raw),
+        "single_quote_scalar" => raw
+            .strip_prefix('\'')
+            .and_then(|value| value.strip_suffix('\''))
+            .map(|value| value.replace("''", "'"))
+            .unwrap_or(raw),
+        _ => raw.trim().to_string(),
+    })
+}
+
+fn decode_quoted_string(raw: &str) -> String {
+    if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+        serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.trim_matches('"').to_string())
+    } else {
+        raw.to_string()
+    }
+}
+
+fn decode_json_string(text: &str) -> Option<String> {
+    serde_json::from_str::<String>(text).ok()
+}
+
+fn unique_match<'a>(
+    raw_path: &str,
+    token: &PathToken,
+    matches: Vec<Node<'a>>,
+) -> Result<Node<'a>, IdenteditError> {
+    match matches.as_slice() {
+        [] => Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' segment {} was not found",
+                token_display(token)
+            ),
+        }),
+        [single] => Ok(*single),
+        many => Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' segment {} is ambiguous ({})",
+                token_display(token),
+                many.len()
+            ),
+        }),
+    }
+}
+
+fn adjusted_delete_span_for_container(
+    source: &[u8],
+    container_span: Span,
+    container_kind: &str,
+    entry_span: Span,
+) -> Span {
+    if is_comma_delimited_container(container_kind) {
+        return adjusted_comma_delimited_delete_span(source, container_span, entry_span);
+    }
+
+    adjusted_line_delimited_delete_span(source, container_span, entry_span)
+}
+
+fn is_comma_delimited_container(kind: &str) -> bool {
+    matches!(
+        kind,
+        "object" | "array" | "flow_mapping" | "flow_sequence" | "inline_table"
+    )
+}
+
+fn adjusted_comma_delimited_delete_span(
+    source: &[u8],
+    container_span: Span,
+    entry_span: Span,
+) -> Span {
+    let mut start = entry_span.start;
+    let mut end = entry_span.end;
+
+    let mut next_significant = end;
+    while next_significant < container_span.end && source[next_significant].is_ascii_whitespace() {
+        next_significant += 1;
+    }
+    if next_significant < container_span.end && source[next_significant] == b',' {
+        end = next_significant + 1;
+        while end < container_span.end && (source[end] == b' ' || source[end] == b'\t') {
+            end += 1;
+        }
+        return Span { start, end };
+    }
+
+    let mut previous_significant = start;
+    while previous_significant > container_span.start
+        && source[previous_significant - 1].is_ascii_whitespace()
+    {
+        previous_significant -= 1;
+    }
+    if previous_significant > container_span.start && source[previous_significant - 1] == b',' {
+        start = previous_significant - 1;
+    }
+
+    Span { start, end }
+}
+
+fn adjusted_line_delimited_delete_span(
+    source: &[u8],
+    container_span: Span,
+    entry_span: Span,
+) -> Span {
+    let mut start = entry_span.start;
+    let mut end = entry_span.end;
+
+    let mut line_start = start;
+    while line_start > container_span.start
+        && source[line_start - 1] != b'\n'
+        && source[line_start - 1] != b'\r'
+    {
+        line_start -= 1;
+    }
+    if source[line_start..start]
+        .iter()
+        .all(|byte| *byte == b' ' || *byte == b'\t')
+    {
+        start = line_start;
+    }
+
+    if end < container_span.end {
+        if source[end] == b'\r' {
+            if end + 1 < container_span.end && source[end + 1] == b'\n' {
+                end += 2;
+            } else {
+                end += 1;
+            }
+        } else if source[end] == b'\n' {
+            end += 1;
+        }
+    } else if start > container_span.start && source[start - 1] == b'\n' {
+        start -= 1;
+        if start > container_span.start && source[start - 1] == b'\r' {
+            start -= 1;
+        }
+    }
+
+    Span { start, end }
+}
+
+fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).collect()
+}
+
+fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
+    named_children(node).into_iter().next()
+}

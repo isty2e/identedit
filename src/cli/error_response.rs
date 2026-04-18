@@ -2,8 +2,7 @@ use serde::Serialize;
 
 use crate::error::IdenteditError;
 
-const SERIALIZATION_FALLBACK: &str =
-    "{\"error\":{\"type\":\"serialization_error\",\"message\":\"Failed to serialize error response\"}}";
+const SERIALIZATION_FALLBACK: &str = "{\"error\":{\"type\":\"serialization_error\",\"message\":\"Failed to serialize error response\"}}";
 
 #[derive(Debug, Serialize)]
 struct ErrorResponse {

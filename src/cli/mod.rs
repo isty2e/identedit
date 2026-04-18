@@ -4,16 +4,16 @@ use crate::cli::read::ReadCommandOutput;
 use crate::error::IdenteditError;
 
 mod apply;
-mod error_response;
-mod merge_plan;
-mod line_patch;
 mod edit;
+mod edit_build;
+mod error_response;
 mod grammar;
+mod line_patch;
 mod merge;
+mod merge_plan;
 mod patch;
 mod read;
 mod read_select;
-mod edit_build;
 
 pub use error_response::render_error_response;
 

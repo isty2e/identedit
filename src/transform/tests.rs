@@ -2,11 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::changeset::{OpKind, hash_text};
 
-use super::{
-    MatchedChange, TransformTarget,
-};
 use super::conflict::{reject_move_operation, validate_change_conflicts};
 use super::resolve::resolve_target_in_handles;
+use super::{MatchedChange, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 

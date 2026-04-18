@@ -382,9 +382,7 @@ impl<'de> Deserialize<'de> for ChangePreview {
     }
 }
 
-fn reject_legacy_move_placeholder_fields<E>(
-    wire: &ChangePreviewWire,
-) -> result::Result<(), E>
+fn reject_legacy_move_placeholder_fields<E>(wire: &ChangePreviewWire) -> result::Result<(), E>
 where
     E: de::Error,
 {
@@ -394,13 +392,21 @@ where
         ));
     }
 
-    if wire.old_text.as_deref().is_some_and(|text| !text.is_empty()) {
+    if wire
+        .old_text
+        .as_deref()
+        .is_some_and(|text| !text.is_empty())
+    {
         return Err(E::custom(
             "move preview legacy old_text placeholder must be empty when provided",
         ));
     }
 
-    if wire.new_text.as_deref().is_some_and(|text| !text.is_empty()) {
+    if wire
+        .new_text
+        .as_deref()
+        .is_some_and(|text| !text.is_empty())
+    {
         return Err(E::custom(
             "move preview legacy new_text placeholder must be empty when provided",
         ));

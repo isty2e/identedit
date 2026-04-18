@@ -391,8 +391,7 @@ enum FlagPatchRequest {
     Line(LineFlagPatchRequest),
 }
 
-const NODE_MODE_OPERATIONS: &str =
-    "--replace, --delete, --insert-before, --insert-after, or --scoped-regex with --scoped-replacement";
+const NODE_MODE_OPERATIONS: &str = "--replace, --delete, --insert-before, --insert-after, or --scoped-regex with --scoped-replacement";
 const LINE_MODE_OPERATIONS: &str = "--set-line, --replace-range, or --insert-after-line";
 const CONFIG_MODE_OPERATIONS: &str = "--set-value, --append-value, or --delete";
 
@@ -422,9 +421,8 @@ fn config_mode_guidance() -> String {
 fn resolve_patch_text_source(args: &PatchArgs) -> Result<Option<PatchTextSource>, IdenteditError> {
     match (args.text_file.clone(), args.stdin_text) {
         (Some(_), true) => Err(IdenteditError::InvalidRequest {
-            message:
-                "Choose exactly one external text source: --text-file <path> or --stdin-text."
-                    .to_string(),
+            message: "Choose exactly one external text source: --text-file <path> or --stdin-text."
+                .to_string(),
         }),
         (Some(path), false) => Ok(Some(PatchTextSource::File(path))),
         (None, true) => Ok(Some(PatchTextSource::Stdin)),
@@ -725,16 +723,14 @@ fn run_patch_json_file(
     })?;
 
     match file_op {
-        FilePatchOp::Insert { new_text } => {
-            run_patch_node_operation(
-                file,
-                target,
-                OpKind::Insert { new_text },
-                dry_run,
-                verbose,
-                None,
-            )
-        }
+        FilePatchOp::Insert { new_text } => run_patch_node_operation(
+            file,
+            target,
+            OpKind::Insert { new_text },
+            dry_run,
+            verbose,
+            None,
+        ),
     }
 }
 
@@ -751,17 +747,17 @@ fn run_patch_json_node(
         }
     })?;
     match node_op {
-        NodePatchOp::Replace { new_text } => {
-            run_patch_node_operation(
-                file,
-                target,
-                OpKind::Replace { new_text },
-                dry_run,
-                verbose,
-                None,
-            )
+        NodePatchOp::Replace { new_text } => run_patch_node_operation(
+            file,
+            target,
+            OpKind::Replace { new_text },
+            dry_run,
+            verbose,
+            None,
+        ),
+        NodePatchOp::Delete => {
+            run_patch_node_operation(file, target, OpKind::Delete, dry_run, verbose, None)
         }
-        NodePatchOp::Delete => run_patch_node_operation(file, target, OpKind::Delete, dry_run, verbose, None),
         NodePatchOp::InsertBefore { new_text } => run_patch_node_operation(
             file,
             target,
@@ -778,9 +774,17 @@ fn run_patch_json_node(
             verbose,
             None,
         ),
-        NodePatchOp::ScopedRegex { pattern, replacement } => {
-            run_patch_scoped_regex_node_operation(file, target, pattern, replacement, dry_run, verbose)
-        }
+        NodePatchOp::ScopedRegex {
+            pattern,
+            replacement,
+        } => run_patch_scoped_regex_node_operation(
+            file,
+            target,
+            pattern,
+            replacement,
+            dry_run,
+            verbose,
+        ),
     }
 }
 
@@ -1045,14 +1049,11 @@ fn prepare_patch_flag_node_operation(
         }));
     }
 
-    let new_text = resolve_patch_text_payload(
-        "--insert-after",
-        args.insert_after.clone(),
-        text_source,
-    )?
-    .ok_or_else(|| IdenteditError::InvalidRequest {
-        message: "missing operation payload for --insert-after".to_string(),
-    })?;
+    let new_text =
+        resolve_patch_text_payload("--insert-after", args.insert_after.clone(), text_source)?
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: "missing operation payload for --insert-after".to_string(),
+            })?;
     Ok(PreparedNodePatchOperation::Standard(OpKind::InsertAfter {
         new_text,
     }))
@@ -1078,14 +1079,7 @@ fn execute_patch_flag_node_operation(
 
     match operation {
         PreparedNodePatchOperation::Standard(op) => {
-            run_patch_node_operation(
-                file,
-                target,
-                op,
-                execution.dry_run,
-                execution.verbose,
-                None,
-            )
+            run_patch_node_operation(file, target, op, execution.dry_run, execution.verbose, None)
         }
         PreparedNodePatchOperation::ScopedRegex {
             pattern,
@@ -1249,9 +1243,8 @@ fn parse_line_flag_patch_request(
     {
         if args.end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
-                message:
-                    "Use --end-anchor only with --replace-range in line target mode."
-                        .to_string(),
+                message: "Use --end-anchor only with --replace-range in line target mode."
+                    .to_string(),
             });
         }
         HashlineEdit::SetLine {
@@ -1272,9 +1265,8 @@ fn parse_line_flag_patch_request(
     } else {
         if args.end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
-                message:
-                    "Use --end-anchor only with --replace-range in line target mode."
-                        .to_string(),
+                message: "Use --end-anchor only with --replace-range in line target mode."
+                    .to_string(),
             });
         }
         let text = resolve_patch_text_payload(
@@ -1353,13 +1345,11 @@ fn parse_config_flag_patch_request(
                 create_missing: args.create_missing,
             },
         )?
-    } else if let Some(new_text) =
-        resolve_patch_text_payload(
-            "--append-value",
-            args.append_value.clone(),
-            text_source.clone(),
-        )?
-    {
+    } else if let Some(new_text) = resolve_patch_text_payload(
+        "--append-value",
+        args.append_value.clone(),
+        text_source.clone(),
+    )? {
         resolve_config_path_operation(
             file.as_path(),
             &path,

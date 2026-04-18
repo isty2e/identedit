@@ -16,13 +16,13 @@ pub type DynamicLanguageLoader = fn() -> Result<tree_sitter::Language, Identedit
 
 #[cfg(test)]
 use catalog::load_python_language;
+#[cfg(test)]
+use catalog::python_language_spec;
 use catalog::{
     C_CPP_HEADER_EXTENSIONS, C_CPP_HEADER_PROVIDER_NAME, LanguageSource, LanguageSpec,
     LoadedGrammar, basename_aliases_for_provider, bundled_language_specs, leak_extensions,
     leak_string,
 };
-#[cfg(test)]
-use catalog::python_language_spec;
 #[cfg(test)]
 use header::HeaderDialect;
 use header::parse_c_cpp_header_with_dialect;

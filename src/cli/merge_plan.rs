@@ -4,9 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::changeset::{ChangeOp, FileChange, MultiFileChangeset, OpKind};
 use crate::error::IdenteditError;
 
-pub fn run_merge_inputs(
-    inputs: Vec<PathBuf>,
-) -> Result<MultiFileChangeset, IdenteditError> {
+pub fn run_merge_inputs(inputs: Vec<PathBuf>) -> Result<MultiFileChangeset, IdenteditError> {
     let mut merged_by_file = BTreeMap::<String, FileChange>::new();
 
     for input in &inputs {

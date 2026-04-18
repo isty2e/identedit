@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use crate::changeset::{ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget, hash_text};
+use crate::changeset::{
+    ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget, hash_text,
+};
 use crate::error::IdenteditError;
 use crate::handle::Span;
 use crate::transform::MatchedChange;
@@ -125,10 +127,7 @@ pub(super) fn apply_replacements_to_text(
     Ok(source_text)
 }
 
-fn text_preview(
-    operation: &ChangeOp,
-    index: usize,
-) -> Result<&TextChangePreview, IdenteditError> {
+fn text_preview(operation: &ChangeOp, index: usize) -> Result<&TextChangePreview, IdenteditError> {
     operation
         .preview
         .as_text()
@@ -158,9 +157,7 @@ pub(super) fn validate_preview_consistency(
         validate_target_preview_span_consistency(matched.index, operation)?;
         validate_preview_old_state(matched.index, preview, matched)?;
 
-        if preview.matched_span != matched.matched_span
-            && !allow_stale_preview_span(operation)
-        {
+        if preview.matched_span != matched.matched_span && !allow_stale_preview_span(operation) {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Operation {} preview.matched_span does not match resolved target span; span_hint may be stale",

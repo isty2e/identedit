@@ -362,10 +362,8 @@ fn patch_json_mode_rejects_flag_text_source_options() {
         }
     });
 
-    let output = run_identedit_with_stdin(
-        &["patch", "--json", "--stdin-text"],
-        &request.to_string(),
-    );
+    let output =
+        run_identedit_with_stdin(&["patch", "--json", "--stdin-text"], &request.to_string());
 
     assert!(
         !output.status.success(),
@@ -525,10 +523,7 @@ fn patch_replace_text_file_non_utf8_returns_io_error_without_mutation() {
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
-    assert!(
-        !output.status.success(),
-        "non-utf8 text file should fail"
-    );
+    assert!(!output.status.success(), "non-utf8 text file should fail");
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "io_error");
     let after = fs::read_to_string(&file_path).expect("file should still be readable");
@@ -853,10 +848,7 @@ fn patch_config_set_value_text_file_invalid_json_does_not_mutate_file() {
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
-    assert!(
-        !output.status.success(),
-        "invalid JSON payload should fail"
-    );
+    assert!(!output.status.success(), "invalid JSON payload should fail");
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
     let after = fs::read_to_string(&file_path).expect("file should remain readable");
@@ -882,14 +874,14 @@ fn patch_replace_text_file_directory_returns_io_error_without_mutation() {
         identity,
         "--replace",
         "--text-file",
-        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        payload_dir
+            .path()
+            .to_str()
+            .expect("payload path should be utf-8"),
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
-    assert!(
-        !output.status.success(),
-        "directory payload should fail"
-    );
+    assert!(!output.status.success(), "directory payload should fail");
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "io_error");
     let after = fs::read_to_string(&file_path).expect("file should remain readable");
@@ -967,10 +959,7 @@ fn patch_config_set_value_text_file_invalid_yaml_does_not_mutate_file() {
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
-    assert!(
-        !output.status.success(),
-        "invalid YAML payload should fail"
-    );
+    assert!(!output.status.success(), "invalid YAML payload should fail");
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
     let after = fs::read_to_string(&file_path).expect("file should remain readable");
@@ -993,10 +982,7 @@ fn patch_config_set_value_text_file_invalid_toml_does_not_mutate_file() {
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
-    assert!(
-        !output.status.success(),
-        "invalid TOML payload should fail"
-    );
+    assert!(!output.status.success(), "invalid TOML payload should fail");
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
     let after = fs::read_to_string(&file_path).expect("file should remain readable");
@@ -1131,7 +1117,10 @@ fn patch_file_insert_text_file_directory_returns_io_error_without_mutation() {
         "file-end",
         "--insert",
         "--text-file",
-        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        payload_dir
+            .path()
+            .to_str()
+            .expect("payload path should be utf-8"),
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
@@ -1161,7 +1150,10 @@ fn patch_line_set_line_text_file_directory_returns_io_error_without_mutation() {
         anchor.as_str(),
         "--set-line",
         "--text-file",
-        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        payload_dir
+            .path()
+            .to_str()
+            .expect("payload path should be utf-8"),
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
@@ -1190,7 +1182,10 @@ fn patch_config_append_text_file_directory_returns_io_error_without_mutation() {
         "items",
         "--append-value",
         "--text-file",
-        payload_dir.path().to_str().expect("payload path should be utf-8"),
+        payload_dir
+            .path()
+            .to_str()
+            .expect("payload path should be utf-8"),
         file_path.to_str().expect("path should be utf-8"),
     ]);
 
@@ -1517,9 +1512,7 @@ fn patch_kind_name_requires_both_flags() {
         .as_str()
         .expect("error message should be present");
     assert!(
-        message.contains("--kind")
-            && message.contains("--name")
-            && message.contains("Example"),
+        message.contains("--kind") && message.contains("--name") && message.contains("Example"),
         "selector mode error should mention both required flags and show the direct fix"
     );
 }
