@@ -23,6 +23,7 @@ target
 reference
 .DS_Store
 .beads
+.tickets/
 .claude
 .gitattributes
 scripts
