@@ -3,7 +3,8 @@ use tempfile::tempdir;
 use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::provider::ProviderRegistry;
-use crate::transform::{build_replace_changeset, parse_handles_for_file};
+use crate::transform::build::build_replace_changeset;
+use crate::transform::parse::parse_handles_for_file;
 
 use super::super::{
     ApplyFileStatus, FileRollbackSnapshot, acquire_apply_lock, apply_changesets_with_hooks,

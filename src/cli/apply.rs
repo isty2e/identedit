@@ -228,7 +228,7 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
         file: file_change.file.clone(),
         operations: line_operations,
     };
-    let resolved = crate::transform::resolve_changeset_targets(&line_only_change)?;
+    let resolved = crate::transform::build::resolve_changeset_targets(&line_only_change)?;
 
     for (resolved_index, matched_change) in resolved.into_iter().enumerate() {
         let original_index = original_indices

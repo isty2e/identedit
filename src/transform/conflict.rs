@@ -6,7 +6,7 @@ use crate::handle::Span;
 
 use super::MatchedChange;
 
-pub(super) fn reject_move_operation(op: &OpKind, index: usize) -> Result<(), IdenteditError> {
+pub(crate) fn reject_move_operation(op: &OpKind, index: usize) -> Result<(), IdenteditError> {
     if let OpKind::Move { .. } = op {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
@@ -18,7 +18,7 @@ pub(super) fn reject_move_operation(op: &OpKind, index: usize) -> Result<(), Ide
     Ok(())
 }
 
-pub(super) fn validate_change_conflicts(
+pub(crate) fn validate_change_conflicts(
     matched_changes: &[MatchedChange],
 ) -> Result<(), IdenteditError> {
     let mut anchor_groups: BTreeMap<(String, usize, usize), Vec<&MatchedChange>> = BTreeMap::new();

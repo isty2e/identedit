@@ -8,10 +8,9 @@ use crate::changeset::{FileChange, hash_bytes};
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::provider::ProviderRegistry;
-use crate::transform::{
-    parse_handles_for_source_with_registry, resolve_changeset_targets_in_handles,
-    validate_change_conflicts,
-};
+use crate::transform::build::resolve_changeset_targets_in_handles;
+use crate::transform::conflict::validate_change_conflicts;
+use crate::transform::parse::parse_handles_for_source_with_registry;
 
 use super::io::{
     ApplyFileLock, ApplyGuardState, acquire_apply_lock, capture_apply_guard_state,

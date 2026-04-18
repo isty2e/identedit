@@ -8,7 +8,7 @@ use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 use crate::hash::hash_bytes;
 use crate::provider::node_text;
-use crate::transform::parse_handles_for_source;
+use crate::transform::parse::parse_handles_for_source;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigPathOperation {

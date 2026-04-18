@@ -17,7 +17,9 @@ use crate::patch::config_path::{ConfigPathOperation, resolve_config_path_operati
 use crate::patch::engine::run_resolve_verify_apply;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
 use crate::selector::Selector;
-use crate::transform::{TransformInstruction, build_changeset, parse_handles_for_file};
+use crate::transform::TransformInstruction;
+use crate::transform::build::build_changeset;
+use crate::transform::parse::parse_handles_for_file;
 
 use super::line_patch::{HashlinePatchResponse, execute_hashline_patch};
 

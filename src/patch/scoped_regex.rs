@@ -4,7 +4,8 @@ use regex::Regex;
 
 use crate::changeset::TransformTarget;
 use crate::error::IdenteditError;
-use crate::transform::{parse_handles_for_file, resolve_target_in_handles};
+use crate::transform::parse::parse_handles_for_file;
+use crate::transform::resolve::resolve_target_in_handles;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScopedRegexRewrite {

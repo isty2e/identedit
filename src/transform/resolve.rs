@@ -420,7 +420,7 @@ fn op_kind_name(op: &OpKind) -> &'static str {
     }
 }
 
-pub(super) fn resolve_target_in_handles(
+pub(crate) fn resolve_target_in_handles(
     file: &Path,
     handles: &[SelectionHandle],
     target: &TransformTarget,
@@ -429,7 +429,7 @@ pub(super) fn resolve_target_in_handles(
     resolve_target_in_handles_with_index(file, &handle_index, target)
 }
 
-pub(super) fn resolve_target_in_handles_with_index(
+fn resolve_target_in_handles_with_index(
     file: &Path,
     handle_index: &HandleIndex<'_>,
     target: &TransformTarget,
