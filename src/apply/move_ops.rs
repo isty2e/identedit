@@ -100,43 +100,45 @@ fn validate_move_preview(
     operation: &ChangeOp,
     destination: &Path,
 ) -> Result<(), IdenteditError> {
-    let Some(preview) = operation.preview.move_preview.as_ref() else {
-        // Backward-compatible path: legacy move payloads may omit preview.move.
-        return Ok(());
-    };
+    match &operation.preview {
+        crate::changeset::ChangePreview::Move(preview) => {
+            let Some(move_preview) = preview.move_preview.as_ref() else {
+                // Backward-compatible path: move preview payload may be omitted.
+                return Ok(());
+            };
 
-    if preview.from != changeset.file || preview.to != destination {
-        return Err(IdenteditError::InvalidRequest {
-            message: format!(
-                "Move preview mismatch for '{}': expected move.from='{}' and move.to='{}'",
-                changeset.file.display(),
-                changeset.file.display(),
-                destination.display(),
-            ),
-        });
+            if move_preview.from != changeset.file || move_preview.to != destination {
+                return Err(IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Move preview mismatch for '{}': expected move.from='{}' and move.to='{}'",
+                        changeset.file.display(),
+                        changeset.file.display(),
+                        destination.display(),
+                    ),
+                });
+            }
+
+            Ok(())
+        }
+        crate::changeset::ChangePreview::Text(preview) => {
+            if preview.old_text.as_deref().unwrap_or("").is_empty()
+                && preview.old_hash.is_none()
+                && preview.old_len.is_none()
+                && preview.new_text.is_empty()
+                && preview.matched_span.start == 0
+                && preview.matched_span.end == 0
+            {
+                return Ok(());
+            }
+
+            Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Move operation for '{}' must use move preview fields or legacy empty placeholder text preview",
+                    changeset.file.display()
+                ),
+            })
+        }
     }
-
-    if !operation
-        .preview
-        .old_text
-        .as_deref()
-        .unwrap_or("")
-        .is_empty()
-        || operation.preview.old_hash.is_some()
-        || operation.preview.old_len.is_some()
-        || !operation.preview.new_text.is_empty()
-        || operation.preview.matched_span.start != 0
-        || operation.preview.matched_span.end != 0
-    {
-        return Err(IdenteditError::InvalidRequest {
-            message: format!(
-                "Move operation for '{}' must use canonical placeholder preview fields (old_text/new_text empty, no compact old_hash/old_len, matched_span [0,0))",
-                changeset.file.display()
-            ),
-        });
-    }
-
-    Ok(())
 }
 
 fn validate_move_graph(move_edges: &[MoveEdge]) -> Result<Vec<NormalizedMoveEdge>, IdenteditError> {

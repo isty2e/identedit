@@ -250,15 +250,24 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
                 ),
             })?;
 
-        operation.preview.matched_span = matched_change.matched_span;
-        if operation.preview.old_text.is_some() {
-            operation.preview.old_text = Some(matched_change.old_text);
-            operation.preview.old_hash = None;
-            operation.preview.old_len = None;
+        let Some(preview) = operation.preview.as_text_mut() else {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Internal apply repair error: operation {} does not use a text preview",
+                    original_index
+                ),
+            });
+        };
+
+        preview.matched_span = matched_change.matched_span;
+        if preview.old_text.is_some() {
+            preview.old_text = Some(matched_change.old_text);
+            preview.old_hash = None;
+            preview.old_len = None;
         } else {
-            operation.preview.old_hash = Some(hash_text(&matched_change.old_text));
-            operation.preview.old_len = Some(matched_change.old_text.len());
-            operation.preview.old_text = None;
+            preview.old_hash = Some(hash_text(&matched_change.old_text));
+            preview.old_len = Some(matched_change.old_text.len());
+            preview.old_text = None;
         }
     }
 

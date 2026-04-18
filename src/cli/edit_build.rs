@@ -648,17 +648,20 @@ fn parse_stdin_operation_kind(
 fn apply_preview_mode(changeset: &mut MultiFileChangeset, verbose: bool) {
     for file in &mut changeset.files {
         for operation in &mut file.operations {
+            let Some(preview) = operation.preview.as_text_mut() else {
+                continue;
+            };
             if verbose {
-                operation.preview.old_hash = None;
-                operation.preview.old_len = None;
-                if operation.preview.old_text.is_none() {
-                    operation.preview.old_text = Some(String::new());
+                preview.old_hash = None;
+                preview.old_len = None;
+                if preview.old_text.is_none() {
+                    preview.old_text = Some(String::new());
                 }
             } else {
-                let old_text = operation.preview.old_text.clone().unwrap_or_default();
-                operation.preview.old_hash = Some(hash_text(&old_text));
-                operation.preview.old_len = Some(old_text.len());
-                operation.preview.old_text = None;
+                let old_text = preview.old_text.clone().unwrap_or_default();
+                preview.old_hash = Some(hash_text(&old_text));
+                preview.old_len = Some(old_text.len());
+                preview.old_text = None;
             }
         }
     }

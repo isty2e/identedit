@@ -303,9 +303,16 @@ pub enum OpKind {
     Move { to: PathBuf },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum ChangePreview {
+    Text(TextChangePreview),
+    Move(MoveChangePreview),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ChangePreview {
+pub struct TextChangePreview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,6 +321,11 @@ pub struct ChangePreview {
     pub old_len: Option<usize>,
     pub new_text: String,
     pub matched_span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveChangePreview {
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "move")]
     pub move_preview: Option<MovePreview>,
 }
@@ -323,6 +335,130 @@ pub struct ChangePreview {
 pub struct MovePreview {
     pub from: PathBuf,
     pub to: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChangePreviewWire {
+    #[serde(default)]
+    old_text: Option<String>,
+    #[serde(default)]
+    old_hash: Option<String>,
+    #[serde(default)]
+    old_len: Option<usize>,
+    #[serde(default)]
+    new_text: Option<String>,
+    #[serde(default)]
+    matched_span: Option<Span>,
+    #[serde(default, rename = "move")]
+    move_preview: Option<MovePreview>,
+}
+
+impl<'de> Deserialize<'de> for ChangePreview {
+    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = ChangePreviewWire::deserialize(deserializer)?;
+
+        if let Some(move_preview) = wire.move_preview.clone() {
+            reject_legacy_move_placeholder_fields(&wire)?;
+            return Ok(Self::Move(MoveChangePreview {
+                move_preview: Some(move_preview),
+            }));
+        }
+
+        Ok(Self::Text(TextChangePreview {
+            old_text: wire.old_text,
+            old_hash: wire.old_hash,
+            old_len: wire.old_len,
+            new_text: wire
+                .new_text
+                .ok_or_else(|| de::Error::missing_field("new_text"))?,
+            matched_span: wire
+                .matched_span
+                .ok_or_else(|| de::Error::missing_field("matched_span"))?,
+        }))
+    }
+}
+
+fn reject_legacy_move_placeholder_fields<E>(
+    wire: &ChangePreviewWire,
+) -> result::Result<(), E>
+where
+    E: de::Error,
+{
+    if wire.old_hash.is_some() || wire.old_len.is_some() {
+        return Err(E::custom(
+            "move preview does not accept old_hash/old_len placeholder fields",
+        ));
+    }
+
+    if wire.old_text.as_deref().is_some_and(|text| !text.is_empty()) {
+        return Err(E::custom(
+            "move preview legacy old_text placeholder must be empty when provided",
+        ));
+    }
+
+    if wire.new_text.as_deref().is_some_and(|text| !text.is_empty()) {
+        return Err(E::custom(
+            "move preview legacy new_text placeholder must be empty when provided",
+        ));
+    }
+
+    if wire
+        .matched_span
+        .is_some_and(|span| span.start != 0 || span.end != 0)
+    {
+        return Err(E::custom(
+            "move preview legacy matched_span placeholder must be [0, 0) when provided",
+        ));
+    }
+
+    Ok(())
+}
+
+impl ChangePreview {
+    pub fn text(
+        old_text: Option<String>,
+        old_hash: Option<String>,
+        old_len: Option<usize>,
+        new_text: String,
+        matched_span: Span,
+    ) -> Self {
+        Self::Text(TextChangePreview {
+            old_text,
+            old_hash,
+            old_len,
+            new_text,
+            matched_span,
+        })
+    }
+
+    pub fn move_operation(move_preview: Option<MovePreview>) -> Self {
+        Self::Move(MoveChangePreview { move_preview })
+    }
+
+    pub fn as_text(&self) -> Option<&TextChangePreview> {
+        match self {
+            Self::Text(preview) => Some(preview),
+            Self::Move(_) => None,
+        }
+    }
+
+    pub fn as_text_mut(&mut self) -> Option<&mut TextChangePreview> {
+        match self {
+            Self::Text(preview) => Some(preview),
+            Self::Move(_) => None,
+        }
+    }
+
+    pub fn as_move(&self) -> Option<&MoveChangePreview> {
+        match self {
+            Self::Text(_) => None,
+            Self::Move(preview) => Some(preview),
+        }
+    }
 }
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
@@ -338,9 +474,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ChangeOp, MovePreview, MultiFileChangeset, OpKind, TransactionMode, TransformTarget,
-        hash_text,
+        ChangeOp, ChangePreview, MovePreview, MultiFileChangeset, OpKind, TextChangePreview,
+        TransactionMode, TransformTarget, hash_text,
     };
+    use crate::handle::Span;
 
     #[test]
     fn multi_file_changeset_defaults_transaction_mode_to_all_or_nothing() {
@@ -434,11 +571,48 @@ mod tests {
             other => panic!("expected move op, got {other:?}"),
         }
         assert_eq!(
-            parsed.preview.move_preview,
-            Some(MovePreview {
+            parsed.preview,
+            ChangePreview::move_operation(Some(MovePreview {
                 from: PathBuf::from("fixture.py"),
                 to: PathBuf::from("renamed.py"),
-            })
+            }))
+        );
+    }
+
+    #[test]
+    fn change_op_deserializes_legacy_move_preview_placeholder_shape() {
+        let payload = r#"{
+            "target": {
+                "identity": "id-1",
+                "kind": "function_definition",
+                "expected_old_hash": "hash-1"
+            },
+            "op": {
+                "type": "move",
+                "to": "renamed.py"
+            },
+            "preview": {
+                "old_text": "",
+                "new_text": "",
+                "matched_span": {
+                    "start": 0,
+                    "end": 0
+                },
+                "move": {
+                    "from": "fixture.py",
+                    "to": "renamed.py"
+                }
+            }
+        }"#;
+
+        let parsed: ChangeOp =
+            serde_json::from_str(payload).expect("legacy move preview should deserialize");
+        assert_eq!(
+            parsed.preview,
+            ChangePreview::move_operation(Some(MovePreview {
+                from: PathBuf::from("fixture.py"),
+                to: PathBuf::from("renamed.py"),
+            }))
         );
     }
 
@@ -513,6 +687,16 @@ mod tests {
             OpKind::Insert { new_text } => assert_eq!(new_text, "# header\n"),
             other => panic!("expected insert op, got {other:?}"),
         }
+        assert_eq!(
+            parsed.preview,
+            ChangePreview::Text(TextChangePreview {
+                old_text: Some(String::new()),
+                old_hash: None,
+                old_len: None,
+                new_text: "# header\n".to_string(),
+                matched_span: Span { start: 0, end: 0 },
+            })
+        );
     }
 
     #[test]

@@ -2,7 +2,6 @@ use tempfile::tempdir;
 
 use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
-use crate::handle::Span;
 use crate::provider::ProviderRegistry;
 use crate::transform::{build_replace_changeset, parse_handles_for_file};
 
@@ -41,17 +40,10 @@ fn build_move_changeset(source: &std::path::Path, destination: &std::path::Path)
             op: OpKind::Move {
                 to: destination.to_path_buf(),
             },
-            preview: ChangePreview {
-                old_text: Some(String::new()),
-                old_hash: None,
-                old_len: None,
-                new_text: String::new(),
-                matched_span: Span { start: 0, end: 0 },
-                move_preview: Some(crate::changeset::MovePreview {
-                    from: source.to_path_buf(),
-                    to: destination.to_path_buf(),
-                }),
-            },
+            preview: ChangePreview::move_operation(Some(crate::changeset::MovePreview {
+                from: source.to_path_buf(),
+                to: destination.to_path_buf(),
+            })),
         }],
     }
 }
@@ -1477,7 +1469,7 @@ fn move_validation_allows_missing_move_preview_payload_for_backward_compatibilit
     std::fs::write(&source, "def move_me():\n    return 1\n").expect("fixture write should work");
 
     let mut move_changeset = build_move_changeset(&source, &destination);
-    move_changeset.operations[0].preview.move_preview = None;
+    move_changeset.operations[0].preview = ChangePreview::move_operation(None);
 
     let plans = validate_move_operation_constraints(&[move_changeset])
         .expect("missing move preview should remain backward-compatible");
@@ -1492,10 +1484,11 @@ fn move_validation_rejects_mismatched_move_preview_paths() {
     std::fs::write(&source, "def move_me():\n    return 1\n").expect("fixture write should work");
 
     let mut move_changeset = build_move_changeset(&source, &destination);
-    move_changeset.operations[0].preview.move_preview = Some(crate::changeset::MovePreview {
-        from: directory.path().join("other.py"),
-        to: destination.clone(),
-    });
+    move_changeset.operations[0].preview =
+        ChangePreview::move_operation(Some(crate::changeset::MovePreview {
+            from: directory.path().join("other.py"),
+            to: destination.clone(),
+        }));
 
     let error = validate_move_operation_constraints(&[move_changeset])
         .expect_err("mismatched move preview should be rejected");

@@ -151,14 +151,13 @@ fn build_changeset_with_handles(
         operations.push(ChangeOp {
             target: canonical_target,
             op: instruction.op,
-            preview: ChangePreview {
-                old_text: Some(resolved.old_text),
-                old_hash: None,
-                old_len: None,
-                new_text: preview_new_text,
-                matched_span: resolved.matched_span,
-                move_preview: None,
-            },
+            preview: ChangePreview::text(
+                Some(resolved.old_text),
+                None,
+                None,
+                preview_new_text,
+                resolved.matched_span,
+            ),
         });
     }
 
