@@ -1,15 +1,24 @@
 use std::path::PathBuf;
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde_json::Value;
 
 use crate::error::IdenteditError;
 
+mod diff;
 mod execute;
 mod flag;
 mod json;
 mod target;
 mod text;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+pub enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
 
 #[derive(Debug, Args)]
 pub struct PatchArgs {
@@ -160,13 +169,29 @@ pub struct PatchArgs {
     pub auto_repair: bool,
     #[arg(long, help = "Validate and preview without writing files")]
     pub dry_run: bool,
+    #[arg(long, help = "Emit dry-run preview as unified diff instead of JSON")]
+    pub diff: bool,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "WHEN",
+        help = "Colorize --diff output (auto|always|never)"
+    )]
+    pub color: Option<ColorMode>,
     #[arg(long, help = "Include per-file apply results in output (flag mode)")]
     pub verbose: bool,
     #[arg(value_name = "FILE", help = "Target file path in flag mode")]
     pub file: Option<PathBuf>,
 }
 
-pub fn run_patch(args: PatchArgs) -> Result<Value, IdenteditError> {
+pub(super) enum PatchCommandOutput {
+    Json(Value),
+    Text(String),
+}
+
+pub(super) fn run_patch(args: PatchArgs) -> Result<PatchCommandOutput, IdenteditError> {
+    validate_output_options(&args)?;
+
     if args.json {
         if args.text_file.is_some() || args.stdin_text {
             return Err(IdenteditError::InvalidRequest {
@@ -175,11 +200,36 @@ pub fn run_patch(args: PatchArgs) -> Result<Value, IdenteditError> {
                         .to_string(),
             });
         }
-        return json::run_patch_json_mode(args.dry_run);
+        return json::run_patch_json_mode(args.dry_run).map(PatchCommandOutput::Json);
     }
 
     let request = flag::parse_flag_patch_request(&args)?;
     execute::execute_flag_patch_request(request)
+}
+
+fn validate_output_options(args: &PatchArgs) -> Result<(), IdenteditError> {
+    if args.diff && args.json {
+        return Err(IdenteditError::InvalidRequest {
+            message:
+                "--diff is only supported in patch flag mode; JSON patch mode always returns JSON."
+                    .to_string(),
+        });
+    }
+
+    if args.diff && !args.dry_run {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--diff requires --dry-run so preview output cannot be confused with an applied edit."
+                .to_string(),
+        });
+    }
+
+    if args.color.is_some() && !args.diff {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--color is only meaningful with --diff.".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -189,10 +239,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::PatchArgs;
-    use super::execute::{
-        ApplyBackedExecution, FlagPatchRequest, LineExecution, NodeFlagPatchRequest,
-        PreparedNodePatchOperation,
-    };
+    use super::execute::{FlagPatchRequest, NodeFlagPatchRequest, PreparedNodePatchOperation};
     use super::flag::parse_flag_patch_request;
     use super::target::NodeTargetSelector;
     use crate::changeset::{OpKind, TransformTarget};
@@ -226,6 +273,8 @@ mod tests {
             insert_after_line: None,
             auto_repair: false,
             dry_run: false,
+            diff: false,
+            color: None,
             verbose: false,
             file: Some(file),
         }
@@ -264,13 +313,8 @@ mod tests {
                 new_text: "def process_data():\n    return 1\n".to_string(),
             })
         );
-        assert_eq!(
-            execution,
-            ApplyBackedExecution {
-                dry_run: true,
-                verbose: true,
-            }
-        );
+        assert!(execution.dry_run);
+        assert!(execution.verbose);
     }
 
     #[test]
@@ -293,13 +337,8 @@ mod tests {
             }
             other => panic!("expected set-line edit, got {other:?}"),
         }
-        assert_eq!(
-            line_request.execution,
-            LineExecution {
-                dry_run: true,
-                auto_repair: true,
-            }
-        );
+        assert!(line_request.execution.dry_run);
+        assert!(line_request.execution.auto_repair);
     }
 
     #[test]
@@ -324,13 +363,8 @@ mod tests {
                 new_text: "\n# tail\n".to_string(),
             }
         );
-        assert_eq!(
-            request.execution,
-            ApplyBackedExecution {
-                dry_run: false,
-                verbose: true,
-            }
-        );
+        assert!(!request.execution.dry_run);
+        assert!(request.execution.verbose);
         match request.target {
             TransformTarget::FileEnd { expected_file_hash } => {
                 assert_eq!(expected_file_hash, hash_bytes(b"body\n"));

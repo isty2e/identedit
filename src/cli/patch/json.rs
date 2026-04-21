@@ -12,7 +12,8 @@ use crate::patch::config_path::{ConfigPathOperation, resolve_config_path_operati
 
 use super::super::line_patch::execute_hashline_patch;
 use super::execute::{
-    run_patch_node_operation, run_patch_scoped_regex_node_operation, serialize_line_patch_response,
+    run_patch_node_operation_json, run_patch_scoped_regex_node_operation,
+    serialize_line_patch_response,
 };
 
 #[derive(Debug, Deserialize)]
@@ -202,7 +203,7 @@ fn run_patch_json_file(
     })?;
 
     match file_op {
-        FilePatchOp::Insert { new_text } => run_patch_node_operation(
+        FilePatchOp::Insert { new_text } => run_patch_node_operation_json(
             file,
             target,
             OpKind::Insert { new_text },
@@ -227,7 +228,7 @@ fn run_patch_json_node(
     })?;
 
     match node_op {
-        NodePatchOp::Replace { new_text } => run_patch_node_operation(
+        NodePatchOp::Replace { new_text } => run_patch_node_operation_json(
             file,
             target,
             OpKind::Replace { new_text },
@@ -236,9 +237,9 @@ fn run_patch_json_node(
             None,
         ),
         NodePatchOp::Delete => {
-            run_patch_node_operation(file, target, OpKind::Delete, dry_run, verbose, None)
+            run_patch_node_operation_json(file, target, OpKind::Delete, dry_run, verbose, None)
         }
-        NodePatchOp::InsertBefore { new_text } => run_patch_node_operation(
+        NodePatchOp::InsertBefore { new_text } => run_patch_node_operation_json(
             file,
             target,
             OpKind::InsertBefore { new_text },
@@ -246,7 +247,7 @@ fn run_patch_json_node(
             verbose,
             None,
         ),
-        NodePatchOp::InsertAfter { new_text } => run_patch_node_operation(
+        NodePatchOp::InsertAfter { new_text } => run_patch_node_operation_json(
             file,
             target,
             OpKind::InsertAfter { new_text },
@@ -353,5 +354,5 @@ fn run_patch_json_config(
         )?,
     };
 
-    run_patch_node_operation(file, canonical.target, canonical.op, dry_run, verbose, None)
+    run_patch_node_operation_json(file, canonical.target, canonical.op, dry_run, verbose, None)
 }

@@ -12,14 +12,19 @@ use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
 use crate::transform::TransformInstruction;
 use crate::transform::build::build_changeset;
 
-use super::super::line_patch::{HashlinePatchResponse, execute_hashline_patch};
-use super::PatchArgs;
+use super::super::line_patch::{
+    HashlinePatchExecution, HashlinePatchResponse, execute_hashline_patch,
+    execute_hashline_patch_with_preview,
+};
+use super::diff::{render_changeset_diff, render_file_diff};
 use super::target::NodeTargetSelector;
+use super::{ColorMode, PatchArgs, PatchCommandOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApplyBackedExecution {
     pub dry_run: bool,
     pub verbose: bool,
+    output: PatchOutputMode,
 }
 
 impl ApplyBackedExecution {
@@ -27,6 +32,15 @@ impl ApplyBackedExecution {
         Self {
             dry_run: args.dry_run,
             verbose: args.verbose,
+            output: PatchOutputMode::from_args(args),
+        }
+    }
+
+    pub(super) fn json(dry_run: bool, verbose: bool) -> Self {
+        Self {
+            dry_run,
+            verbose,
+            output: PatchOutputMode::Json,
         }
     }
 }
@@ -35,6 +49,7 @@ impl ApplyBackedExecution {
 pub struct LineExecution {
     pub dry_run: bool,
     pub auto_repair: bool,
+    output: PatchOutputMode,
 }
 
 impl LineExecution {
@@ -42,6 +57,25 @@ impl LineExecution {
         Self {
             dry_run: args.dry_run,
             auto_repair: args.auto_repair,
+            output: PatchOutputMode::from_args(args),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PatchOutputMode {
+    Json,
+    Diff { color: ColorMode },
+}
+
+impl PatchOutputMode {
+    fn from_args(args: &PatchArgs) -> Self {
+        if args.diff {
+            Self::Diff {
+                color: args.color.unwrap_or(ColorMode::Auto),
+            }
+        } else {
+            Self::Json
         }
     }
 }
@@ -87,32 +121,44 @@ pub enum PreparedNodePatchOperation {
 
 pub(super) fn execute_flag_patch_request(
     request: FlagPatchRequest,
-) -> Result<Value, IdenteditError> {
+) -> Result<PatchCommandOutput, IdenteditError> {
     match request {
         FlagPatchRequest::Node(request) => execute_node_flag_patch_request(request),
         FlagPatchRequest::Canonical(request) => run_patch_node_operation(
             request.file,
             request.target,
             request.op,
-            request.execution.dry_run,
-            request.execution.verbose,
+            request.execution,
             None,
         ),
-        FlagPatchRequest::Line(request) => {
-            let response = execute_hashline_patch(
-                request.file,
-                vec![request.edit],
-                request.execution.auto_repair,
-                request.execution.dry_run,
-            )?;
-            serialize_line_patch_response(response)
-        }
+        FlagPatchRequest::Line(request) => match request.execution.output {
+            PatchOutputMode::Json => {
+                let response = execute_hashline_patch(
+                    request.file,
+                    vec![request.edit],
+                    request.execution.auto_repair,
+                    request.execution.dry_run,
+                )?;
+                serialize_line_patch_response(response).map(PatchCommandOutput::Json)
+            }
+            PatchOutputMode::Diff { color } => {
+                let execution = execute_hashline_patch_with_preview(
+                    request.file,
+                    vec![request.edit],
+                    request.execution.auto_repair,
+                    request.execution.dry_run,
+                )?;
+                Ok(PatchCommandOutput::Text(render_line_patch_diff(
+                    execution, color,
+                )))
+            }
+        },
     }
 }
 
 pub(super) fn execute_node_flag_patch_request(
     request: NodeFlagPatchRequest,
-) -> Result<Value, IdenteditError> {
+) -> Result<PatchCommandOutput, IdenteditError> {
     let handle = request.selector.resolve(&request.file)?;
     execute_patch_flag_node_operation(request.file, handle, request.operation, request.execution)
 }
@@ -122,7 +168,7 @@ fn execute_patch_flag_node_operation(
     handle: SelectionHandle,
     operation: PreparedNodePatchOperation,
     execution: ApplyBackedExecution,
-) -> Result<Value, IdenteditError> {
+) -> Result<PatchCommandOutput, IdenteditError> {
     let target = TransformTarget::node(
         handle.identity,
         handle.kind,
@@ -132,7 +178,7 @@ fn execute_patch_flag_node_operation(
 
     match operation {
         PreparedNodePatchOperation::Standard(op) => {
-            run_patch_node_operation(file, target, op, execution.dry_run, execution.verbose, None)
+            run_patch_node_operation(file, target, op, execution, None)
         }
         PreparedNodePatchOperation::ScopedRegex {
             pattern,
@@ -146,8 +192,7 @@ fn execute_patch_flag_node_operation(
                 OpKind::Replace {
                     new_text: rewritten.new_text,
                 },
-                execution.dry_run,
-                execution.verbose,
+                execution,
                 Some(rewritten.replacements),
             )
         }
@@ -158,26 +203,62 @@ pub(super) fn run_patch_node_operation(
     file: PathBuf,
     target: TransformTarget,
     op: OpKind,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
-) -> Result<Value, IdenteditError> {
-    let response = run_resolve_verify_apply(
+) -> Result<PatchCommandOutput, IdenteditError> {
+    let outcome = run_resolve_verify_apply(
         || {
             let file_change = build_changeset(&file, vec![TransformInstruction { target, op }])?;
             Ok(wrap_single_file(file_change))
         },
         verify_prepared_changeset,
         |changeset| {
-            if dry_run {
+            let response = if execution.dry_run {
                 dry_run_multi_file_changeset(&changeset)
             } else {
                 apply_multi_file_changeset(&changeset)
-            }
+            }?;
+            Ok::<_, IdenteditError>(PatchApplyOutcome {
+                changeset,
+                response,
+            })
         },
     )?;
 
-    serialize_node_patch_response(response, verbose, regex_replacements)
+    match execution.output {
+        PatchOutputMode::Json => {
+            serialize_node_patch_response(outcome.response, execution.verbose, regex_replacements)
+                .map(PatchCommandOutput::Json)
+        }
+        PatchOutputMode::Diff { color } => Ok(PatchCommandOutput::Text(render_changeset_diff(
+            &outcome.changeset,
+            color,
+        )?)),
+    }
+}
+
+pub(super) fn run_patch_node_operation_json(
+    file: PathBuf,
+    target: TransformTarget,
+    op: OpKind,
+    dry_run: bool,
+    verbose: bool,
+    regex_replacements: Option<usize>,
+) -> Result<Value, IdenteditError> {
+    let output = run_patch_node_operation(
+        file,
+        target,
+        op,
+        ApplyBackedExecution::json(dry_run, verbose),
+        regex_replacements,
+    )?;
+    match output {
+        PatchCommandOutput::Json(value) => Ok(value),
+        PatchCommandOutput::Text(_) => Err(IdenteditError::InvalidRequest {
+            message: "Internal patch error: JSON mode unexpectedly produced text output"
+                .to_string(),
+        }),
+    }
 }
 
 pub(super) fn run_patch_scoped_regex_node_operation(
@@ -189,7 +270,7 @@ pub(super) fn run_patch_scoped_regex_node_operation(
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
     let rewritten = rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement)?;
-    run_patch_node_operation(
+    run_patch_node_operation_json(
         file,
         target,
         OpKind::Replace {
@@ -224,6 +305,20 @@ pub(super) fn serialize_line_patch_response(
 ) -> Result<Value, IdenteditError> {
     serde_json::to_value(response)
         .map_err(|source| IdenteditError::ResponseSerialization { source })
+}
+
+struct PatchApplyOutcome {
+    changeset: MultiFileChangeset,
+    response: ApplyResponse,
+}
+
+fn render_line_patch_diff(execution: HashlinePatchExecution, color: ColorMode) -> String {
+    render_file_diff(
+        &execution.response.file,
+        &execution.source,
+        &execution.applied_content,
+        color,
+    )
 }
 
 fn wrap_single_file(file_change: FileChange) -> MultiFileChangeset {

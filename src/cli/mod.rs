@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+use crate::cli::patch::PatchCommandOutput;
 use crate::cli::read::ReadCommandOutput;
 use crate::error::IdenteditError;
 
@@ -71,10 +72,10 @@ pub fn run_cli(cli: Cli) -> Result<String, IdenteditError> {
             serde_json::to_string_pretty(&response)
                 .map_err(|source| IdenteditError::ResponseSerialization { source })
         }
-        Commands::Patch(args) => {
-            let response = patch::run_patch(*args)?;
-            serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source })
-        }
+        Commands::Patch(args) => match patch::run_patch(*args)? {
+            PatchCommandOutput::Text(output) => Ok(output),
+            PatchCommandOutput::Json(response) => serde_json::to_string_pretty(&response)
+                .map_err(|source| IdenteditError::ResponseSerialization { source }),
+        },
     }
 }

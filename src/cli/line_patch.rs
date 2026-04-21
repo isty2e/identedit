@@ -38,12 +38,28 @@ pub struct HashlinePatchResponse {
     pub operations_applied: usize,
 }
 
+#[derive(Debug)]
+pub(crate) struct HashlinePatchExecution {
+    pub response: HashlinePatchResponse,
+    pub source: String,
+    pub applied_content: String,
+}
+
 pub(crate) fn execute_hashline_patch(
     file: PathBuf,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
     dry_run: bool,
 ) -> Result<HashlinePatchResponse, IdenteditError> {
+    Ok(execute_hashline_patch_with_preview(file, edits, auto_repair, dry_run)?.response)
+}
+
+pub(crate) fn execute_hashline_patch_with_preview(
+    file: PathBuf,
+    edits: Vec<HashlineEdit>,
+    auto_repair: bool,
+    dry_run: bool,
+) -> Result<HashlinePatchExecution, IdenteditError> {
     run_resolve_verify_apply(
         || resolve_hashline_patch_request(file, edits, auto_repair, dry_run),
         verify_hashline_patch_request,
@@ -114,7 +130,7 @@ fn verify_hashline_patch_request(
 
 fn apply_hashline_patch_request(
     verified: VerifiedHashlinePatch,
-) -> Result<HashlinePatchResponse, IdenteditError> {
+) -> Result<HashlinePatchExecution, IdenteditError> {
     let strict_check = build_hashline_check_payload(
         verified.strict_check_result.clone(),
         verified.auto_repair || !verified.strict_check_result.ok,
@@ -129,7 +145,7 @@ fn apply_hashline_patch_request(
             .map_err(|error| IdenteditError::io(&verified.file, error))?;
     }
 
-    Ok(HashlinePatchResponse {
+    let response = HashlinePatchResponse {
         file: verified.file,
         auto_repair: verified.auto_repair,
         dry_run: verified.dry_run,
@@ -141,6 +157,12 @@ fn apply_hashline_patch_request(
         changed,
         operations_total: applied.operations_total,
         operations_applied: applied.operations_applied,
+    };
+
+    Ok(HashlinePatchExecution {
+        response,
+        source: verified.source,
+        applied_content: applied.content,
     })
 }
 

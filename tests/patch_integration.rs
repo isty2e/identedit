@@ -1488,6 +1488,160 @@ fn patch_kind_name_replace_dry_run_previews_without_writing() {
 }
 
 #[test]
+fn patch_kind_name_replace_dry_run_diff_outputs_unified_diff_without_writing() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--replace",
+        "def process_data(value):\n    return value * 13",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "kind/name patch dry-run diff failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("--- "));
+    assert!(diff.contains("+++ "));
+    assert!(diff.contains("@@ -1,3 +1,2 @@"));
+    assert!(diff.contains("-def process_data(value):"));
+    assert!(diff.contains("-    result = value + 1"));
+    assert!(diff.contains("+def process_data(value):"));
+    assert!(diff.contains("+    return value * 13"));
+    assert!(
+        serde_json::from_str::<Value>(&diff).is_err(),
+        "diff output must not be JSON"
+    );
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "dry-run diff must not modify the source file"
+    );
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_diff_can_force_color() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--kind",
+        "function_definition",
+        "--name",
+        "process_*",
+        "--replace",
+        "def process_data(value):\n    return value * 17",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "always",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "colored dry-run diff failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("\u{1b}[31m-"));
+    assert!(diff.contains("\u{1b}[32m+"));
+    assert!(diff.contains("\u{1b}[36m@@"));
+}
+
+#[test]
+fn patch_diff_without_dry_run_reports_invalid_request() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--insert",
+        "\n# epilogue\n",
+        "--diff",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "--diff without --dry-run should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--diff") && message.contains("--dry-run"),
+        "error should explain that diff output is dry-run only"
+    );
+}
+
+#[test]
+fn patch_color_without_diff_reports_invalid_request() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--insert",
+        "\n# epilogue\n",
+        "--dry-run",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "--color without --diff should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--color") && message.contains("--diff"),
+        "error should explain that color only affects diff output"
+    );
+}
+
+#[test]
+fn patch_json_mode_rejects_diff_output() {
+    let output = run_identedit_with_stdin(&["patch", "--json", "--diff"], "{}");
+
+    assert!(
+        !output.status.success(),
+        "--json --diff should fail before interpreting stdin"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(
+        message.contains("--diff") && message.contains("JSON"),
+        "error should explain that JSON mode always returns JSON"
+    );
+}
+
+#[test]
 fn patch_kind_name_requires_both_flags() {
     let file_path = copy_fixture_to_temp_python("example.py");
 
@@ -2273,6 +2427,39 @@ fn patch_file_end_dry_run_does_not_modify_file() {
 }
 
 #[test]
+fn patch_file_end_dry_run_diff_outputs_insert_preview_without_writing() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        "file-end",
+        "--insert",
+        "\n# epilogue\n",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "file-end dry-run diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("@@ -8,0 +8,2 @@"));
+    assert!(diff.contains("+# epilogue"));
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "file-end dry-run diff must not modify the file"
+    );
+}
+
+#[test]
 fn patch_line_flag_set_line_applies_change() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
@@ -2342,6 +2529,48 @@ fn patch_line_flag_set_line_dry_run_previews_without_writing() {
 
     let after = fs::read_to_string(&file_path).expect("file should be readable");
     assert_eq!(after, source, "line-mode dry-run must not modify the file");
+}
+
+#[test]
+fn patch_line_flag_set_line_dry_run_diff_outputs_file_diff_without_writing() {
+    let source = "a\nb\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let anchor = line_ref(source, 2);
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        &anchor,
+        "--set-line",
+        "B",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        output.status.success(),
+        "line dry-run diff failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("@@ -1,2 +1,2 @@"));
+    assert!(diff.contains("-b"));
+    assert!(diff.contains("+B"));
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "line dry-run diff must not modify the file"
+    );
 }
 
 #[test]
