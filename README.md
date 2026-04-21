@@ -46,7 +46,7 @@ Use the canonical CLI entry points: `read`, `edit`, `apply`, `patch`, `merge`, `
 - **Precondition-verified.** Every edit checks that the target hasn't changed since the agent last read it. No silent corruption.
 - **Transactional.** Multi-file edits are all-or-nothing with automatic rollback on failure.
 - **Diagnosable.** Failures return structured JSON with specific error types and recovery suggestions.
-- **Move and copy.** Structural units can be moved or copied within or across files atomically.
+- **Move.** Structural units can be moved within or across files atomically.
 - **Two granularities.** Structure-level for large changes, line-level for small ones. Same safety guarantees for both.
 
 ## Supported Languages
@@ -155,6 +155,7 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 - `apply --dry-run` validates and returns a summary without writing.
 - Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
 - Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
+- Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests/lints after non-trivial edits.
 
 ## Error Recovery (Agent Loop)
 

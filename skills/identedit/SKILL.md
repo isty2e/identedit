@@ -1,6 +1,6 @@
 ---
 name: identedit
-description: "Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous Edit landed in wrong place. Supports replace/patch/move/copy of functions/lines, config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
+description: "Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous Edit landed in wrong place. Supports replace/patch/move of functions/lines, config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
 ---
 
 # Identedit — Agent-Oriented Code Editing
@@ -15,6 +15,7 @@ If any one condition matches, use identedit:
 - 2+ files must succeed/fail together (atomic apply needed)
 - large file and repeated target text (misapply risk)
 - previous `Edit`/`apply_patch` landed in the wrong place
+- previous patch failed because context did not match
 - insert at file start/end with precondition safety
 - update a nested config key in JSON/YAML/TOML by path
 - multiple operations on the same file (replace + insert, etc.)
@@ -31,11 +32,13 @@ If none match, default to `Edit`/`Write` for speed.
 | Insert at end of file | `identedit patch file --at file-end --insert 'new code'` |
 | Update a config key | `identedit patch file --config-path key.path --set-value 42` |
 | Append to a config array | `identedit patch file --config-path items --append-value '"x"'` |
+| Create a missing config key | `identedit patch file --config-path a.b --set-value 1 --create-missing` |
 | Edit a specific line | `identedit patch file --at "LINE:HASH" --set-line 'new line'` |
 | Replace with large text (10+ lines) | `identedit patch file --symbol foo --replace --text-file /tmp/body.py` |
-| Preview without writing | Add `--dry-run` to any `patch` command |
+| Preview as diff before writing | `identedit patch file --symbol foo --replace --text-file /tmp/body.py --dry-run --diff` |
+| Regex replace inside one function/class | `identedit patch file --symbol foo --scoped-regex 'old' --scoped-replacement 'new'` |
 | Multiple ops or multi-file atomic | `identedit edit --json` + `identedit apply` (see [Reference](#structural-editing-pipeline)) |
-| Move/copy a structure | `identedit edit` with `move_before`/`copy_after` (see [Operations](#operations)) |
+| Move a structure | Use `edit --json` with `move_before`/`move_after` (see [Operations](#operations)) |
 
 ## Quick Choice (identedit vs Edit/Write)
 
@@ -46,6 +49,7 @@ If none match, default to `Edit`/`Write` for speed.
 | Add new function/import at end of file | `identedit patch --at file-end --insert 'text'` |
 | Multiple ops on the same file (replace + insert) | `identedit edit --json` with `operations[]` array |
 | Append item to a config array (JSON/YAML/TOML) | `identedit patch --config-path items --append-value 4` |
+| Regex must be scoped to one function/class | `identedit patch --symbol foo --scoped-regex ...` |
 | One-line typo / trivial rename | `Edit` |
 | Rewriting most of a file | `Write` |
 | Bulk rename across many files | `repren` |
@@ -83,9 +87,9 @@ identedit patch config.yaml --config-path server.port --set-value 8080
 # Append to a config array
 identedit patch config.json --config-path items --append-value '"new_item"'
 
-# Preview without writing
+# Preview as unified diff without writing
 identedit patch src/example.py --symbol process_data \
-  --replace 'new body' --dry-run
+  --replace --text-file /tmp/new_body.py --dry-run --diff
 ```
 
 `--symbol` targets a unique named node directly — no `read` step needed. It accepts a local name (`process_data`) or a containing-name path (`Processor.process_data`). If the match is ambiguous or missing, patch fails without writing. For ambiguous targets, inspect `error.candidates`: each candidate includes `identity`, `kind`, `name`, `qualified_name`, `span`, `line`, and a one-line `preview`.
@@ -93,6 +97,9 @@ identedit patch src/example.py --symbol process_data \
 Use `--kind` + `--name` when you need kind-specific glob matching (e.g., `--kind function_definition --name "process_*"`). The name supports glob patterns. Use `--name "*"` to match by kind only (e.g., the sole class in a file).
 
 `patch` handles resolve + precondition validation + apply internally. Use `read → edit → apply` only when you need multi-file atomic or multiple operations in one request.
+
+For non-trivial replacements, prefer `--dry-run --diff` first.
+For config paths, `--create-missing` creates only missing map/table keys; arrays are never auto-expanded. YAML/TOML creation can reject comment-preserving cases, in which case fall back to direct editing.
 
 ## Large Text: `--text-file` / `--stdin-text`
 
@@ -188,7 +195,7 @@ Default to `Edit`/`Write`/`apply_patch`. Switch to identedit when ANY of the fol
 | Editing 2+ files that must succeed or fail together | `identedit edit --json` + `identedit apply` (multi-file atomic) |
 | File > 150 lines AND the target pattern appears more than once | `identedit patch` — prevents silent misapply. Check: `wc -l file` > 150, then `grep -c "target_text" file` > 1. |
 | Previous `Edit`/`apply_patch` applied to the wrong location | `identedit patch` — identity-based targeting doesn't rely on text matching |
-| Moving or copying a structural unit within or across files | `identedit edit` with `move_before`/`move_after`/`copy_before`/`copy_after` |
+| Moving a structural unit within or across files | `identedit edit` with `move_before`/`move_after` |
 | Regex replace that must stay inside one function/class, not leak to others | `identedit patch` with `scoped_regex` |
 | Updating a nested config key in JSON/YAML/TOML by path | `identedit patch --config-path` |
 
@@ -396,8 +403,6 @@ Merge policy is strict by default:
 | `insert_after` | `node` | Insert text immediately after a structure |
 | `move_before` | `node` (source + dest) | Move source node to just before destination node |
 | `move_after` | `node` (source + dest) | Move source node to just after destination node |
-| `copy_before` | `node` (source + dest) | Copy source node to just before destination (source stays) |
-| `copy_after` | `node` (source + dest) | Copy source node to just after destination (source stays) |
 | `scoped_regex` | `node` | Regex replace within the node's text (precondition-verified) |
 | `insert` | `file_start` | Insert text at the beginning of the file |
 | `insert` | `file_end` | Insert text at the end of the file |
@@ -623,7 +628,7 @@ See [Retry Discipline](#retry-discipline) for attempt limits.
 - The `identity` hash is derived from the structure's kind, name, and text content (not position). Two identical functions at different positions share the same identity. It changes when the code content changes.
 - The `expected_old_hash` / `expected_file_hash` fields are preconditions. They ensure you are editing what you think you are editing.
 - Hashline anchors are 12-char blake3 hex hashes. Exact matching, no prefix matching.
-- All identedit output (success and error) is JSON, except `read --mode line` which defaults to text format (`LINE:HASH|content`). Use `--json` for structured output. Parse JSON output, do not grep it.
+- All identedit output (success and error) is JSON, except `read --mode line` which defaults to text format (`LINE:HASH|content`) and `patch --dry-run --diff` which emits unified diff text. Use `--json` for structured `read --mode line` output. Parse JSON output, do not grep it.
 - When creating new files, create the file first (e.g., `touch new_file.py`), then use identedit's `file_end` insert to add content structurally.
 
 ## Supported Languages
