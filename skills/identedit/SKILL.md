@@ -151,6 +151,30 @@ identedit patch fails
     └── Edit/Write immediately. Do not retry identedit.
 ```
 
+## Post-Edit Verification
+
+Identedit verifies edit preconditions, not semantic correctness. After non-trivial code edits, run the narrowest useful project verifier yourself.
+
+Recommended pattern:
+
+```bash
+identedit patch src/foo.py --symbol process_data --replace --text-file /tmp/process_data.py --dry-run --diff
+identedit patch src/foo.py --symbol process_data --replace --text-file /tmp/process_data.py
+python -m compileall src/foo.py
+pytest tests/test_foo.py -q
+```
+
+For multi-file edits:
+
+```bash
+identedit edit --json < /tmp/edit-request.json > /tmp/changeset.json
+identedit apply --dry-run /tmp/changeset.json
+identedit apply /tmp/changeset.json
+cargo test affected_module::tests
+```
+
+If the verifier fails, treat it as a workflow failure, not an identedit failure: the edit already applied. Inspect verifier output and repair with one bounded follow-up edit attempt.
+
 ## Detailed Decision Rules
 
 Default to `Edit`/`Write`/`apply_patch`. Switch to identedit when ANY of the following conditions hold.
