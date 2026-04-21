@@ -18,7 +18,7 @@ mod read_select;
 pub use error_response::render_error_response;
 
 #[derive(Debug, Parser)]
-#[command(name = "identedit")]
+#[command(name = "identedit", version)]
 #[command(about = "Agent-oriented editing engine")]
 #[command(
     long_about = "Agent-oriented structural and line-based editing engine. Canonical flow: read -> edit -> apply, with patch for one-shot edits."

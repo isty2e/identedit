@@ -59,6 +59,21 @@ fn top_level_help_exposes_new_command_surface() {
 }
 
 #[test]
+fn top_level_version_reports_package_version() {
+    let output = run_identedit(&["--version"]);
+    assert!(
+        output.status.success(),
+        "version should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert_eq!(
+        text.trim(),
+        format!("identedit {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn read_line_mode_outputs_line_hash_anchors() {
     let file = copy_fixture_to_temp_python("example.py");
     let read_output = run_identedit(&[
