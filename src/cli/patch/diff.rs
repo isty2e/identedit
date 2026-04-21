@@ -79,20 +79,21 @@ fn render_text_preview_diff(
                 .to_string(),
         })?;
     let old_start_line = line_number_at_byte(source, preview.matched_span)?;
-    let old_line_count = diff_line_count(old_text);
-    let new_line_count = diff_line_count(&preview.new_text);
+    let Some(hunk) = minimal_diff_hunk(old_text, &preview.new_text) else {
+        return Ok(());
+    };
 
     render_diff_header(rendered, file);
     render_hunk_header(
         rendered,
-        old_start_line,
-        old_line_count,
-        old_start_line,
-        new_line_count,
+        old_start_line + hunk.line_offset,
+        hunk.old_lines.len(),
+        old_start_line + hunk.line_offset,
+        hunk.new_lines.len(),
         use_color,
     );
-    render_removed_lines(rendered, old_text, use_color);
-    render_added_lines(rendered, &preview.new_text, use_color);
+    render_removed_line_values(rendered, &hunk.old_lines, use_color);
+    render_added_line_values(rendered, &hunk.new_lines, use_color);
     Ok(())
 }
 
@@ -117,13 +118,21 @@ fn render_hunk_header(
 }
 
 fn render_removed_lines(rendered: &mut String, text: &str, use_color: bool) {
-    for line in diff_lines(text) {
+    render_removed_line_values(rendered, &diff_lines(text), use_color);
+}
+
+fn render_added_lines(rendered: &mut String, text: &str, use_color: bool) {
+    render_added_line_values(rendered, &diff_lines(text), use_color);
+}
+
+fn render_removed_line_values(rendered: &mut String, lines: &[String], use_color: bool) {
+    for line in lines {
         push_colored_line(rendered, &format!("-{line}"), RED, use_color);
     }
 }
 
-fn render_added_lines(rendered: &mut String, text: &str, use_color: bool) {
-    for line in diff_lines(text) {
+fn render_added_line_values(rendered: &mut String, lines: &[String], use_color: bool) {
+    for line in lines {
         push_colored_line(rendered, &format!("+{line}"), GREEN, use_color);
     }
 }
@@ -159,6 +168,48 @@ fn diff_line_count(text: &str) -> usize {
     diff_lines(text).len()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct MinimalDiffHunk {
+    line_offset: usize,
+    old_lines: Vec<String>,
+    new_lines: Vec<String>,
+}
+
+fn minimal_diff_hunk(old_text: &str, new_text: &str) -> Option<MinimalDiffHunk> {
+    let old_lines = diff_lines(old_text);
+    let new_lines = diff_lines(new_text);
+
+    let common_prefix = old_lines
+        .iter()
+        .zip(new_lines.iter())
+        .take_while(|(old, new)| old == new)
+        .count();
+
+    let remaining_old = old_lines.len().saturating_sub(common_prefix);
+    let remaining_new = new_lines.len().saturating_sub(common_prefix);
+    let max_suffix = remaining_old.min(remaining_new);
+    let common_suffix = (0..max_suffix)
+        .take_while(|offset| {
+            old_lines[old_lines.len() - 1 - offset] == new_lines[new_lines.len() - 1 - offset]
+        })
+        .count();
+
+    let old_end = old_lines.len() - common_suffix;
+    let new_end = new_lines.len() - common_suffix;
+    let changed_old = old_lines[common_prefix..old_end].to_vec();
+    let changed_new = new_lines[common_prefix..new_end].to_vec();
+
+    if changed_old.is_empty() && changed_new.is_empty() {
+        return None;
+    }
+
+    Some(MinimalDiffHunk {
+        line_offset: common_prefix,
+        old_lines: changed_old,
+        new_lines: changed_new,
+    })
+}
+
 fn line_number_at_byte(source: &str, span: Span) -> Result<usize, IdenteditError> {
     if span.start > source.len() || !source.is_char_boundary(span.start) {
         return Err(IdenteditError::InvalidRequest {
@@ -186,7 +237,7 @@ fn should_color(color: ColorMode) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_line_count, diff_lines};
+    use super::{MinimalDiffHunk, diff_line_count, diff_lines, minimal_diff_hunk};
 
     #[test]
     fn diff_lines_do_not_emit_extra_line_for_trailing_newline() {
@@ -204,5 +255,34 @@ mod tests {
         assert_eq!(diff_line_count("a"), 1);
         assert_eq!(diff_line_count("a\nb"), 2);
         assert_eq!(diff_line_count("a\nb\n"), 2);
+    }
+
+    #[test]
+    fn minimal_diff_hunk_trims_common_prefix_and_suffix() {
+        assert_eq!(
+            minimal_diff_hunk("a\nold\nz\n", "a\nnew\nz\n"),
+            Some(MinimalDiffHunk {
+                line_offset: 1,
+                old_lines: vec!["old".to_string()],
+                new_lines: vec!["new".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunk_returns_none_for_identical_text() {
+        assert_eq!(minimal_diff_hunk("a\nb\n", "a\nb\n"), None);
+    }
+
+    #[test]
+    fn minimal_diff_hunk_handles_pure_insertion_between_common_lines() {
+        assert_eq!(
+            minimal_diff_hunk("a\nz\n", "a\nnew\nz\n"),
+            Some(MinimalDiffHunk {
+                line_offset: 1,
+                old_lines: Vec::new(),
+                new_lines: vec!["new".to_string()],
+            })
+        );
     }
 }

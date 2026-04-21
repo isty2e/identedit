@@ -1755,10 +1755,10 @@ fn patch_kind_name_replace_dry_run_diff_outputs_unified_diff_without_writing() {
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(diff.contains("--- "));
     assert!(diff.contains("+++ "));
-    assert!(diff.contains("@@ -1,3 +1,2 @@"));
-    assert!(diff.contains("-def process_data(value):"));
+    assert!(diff.contains("@@ -2,2 +2,1 @@"));
+    assert!(!diff.contains("-def process_data(value):"));
+    assert!(!diff.contains("+def process_data(value):"));
     assert!(diff.contains("-    result = value + 1"));
-    assert!(diff.contains("+def process_data(value):"));
     assert!(diff.contains("+    return value * 13"));
     assert!(
         serde_json::from_str::<Value>(&diff).is_err(),
@@ -1769,6 +1769,70 @@ fn patch_kind_name_replace_dry_run_diff_outputs_unified_diff_without_writing() {
         before,
         "dry-run diff must not modify the source file"
     );
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_diff_omits_unchanged_suffix_context() {
+    let source = "def sample():\n    before()\n    old()\n    after()\n";
+    let mut temp_file = Builder::new()
+        .suffix(".py")
+        .tempfile()
+        .expect("temp python file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("temp python file write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "sample",
+        "--replace",
+        "def sample():\n    before()\n    new()\n    after()",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "minimal diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("@@ -3,1 +3,1 @@"));
+    assert!(diff.contains("-    old()"));
+    assert!(diff.contains("+    new()"));
+    assert!(!diff.contains("before()"));
+    assert!(!diff.contains("after()"));
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_diff_is_empty_for_noop_replacement() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "process_data",
+        "--replace",
+        "def process_data(value):\n    result = value + 1\n    return result",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "no-op minimal diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert_eq!(diff.trim(), "");
 }
 
 #[test]
