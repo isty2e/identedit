@@ -227,6 +227,105 @@ fn apply_dry_run_previews_without_writing() {
 }
 
 #[test]
+fn apply_dry_run_reports_compact_multi_file_summary() {
+    let first_file = copy_fixture_to_temp_python("example.py");
+    let second_file = copy_fixture_to_temp_python("example.py");
+    let first_before = fs::read_to_string(&first_file).expect("first file should be readable");
+    let second_before = fs::read_to_string(&second_file).expect("second file should be readable");
+
+    let first_read = read_json(&first_file);
+    let second_read = read_json(&second_file);
+    let first_identity = first_read["handles"][0]["identity"]
+        .as_str()
+        .expect("first identity should be present");
+    let second_identity = second_read["handles"][0]["identity"]
+        .as_str()
+        .expect("second identity should be present");
+
+    let first_edit = run_identedit(&[
+        "edit",
+        "--identity",
+        first_identity,
+        "--replace",
+        "def process_data(value):\n    return value - 10",
+        first_file.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        first_edit.status.success(),
+        "first edit should succeed: {}",
+        String::from_utf8_lossy(&first_edit.stderr)
+    );
+    let second_edit = run_identedit(&[
+        "edit",
+        "--identity",
+        second_identity,
+        "--replace",
+        "def process_data(value):\n    return value + 10",
+        second_file.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(
+        second_edit.status.success(),
+        "second edit should succeed: {}",
+        String::from_utf8_lossy(&second_edit.stderr)
+    );
+
+    let first_changeset: Value =
+        serde_json::from_slice(&first_edit.stdout).expect("first edit stdout should be json");
+    let second_changeset: Value =
+        serde_json::from_slice(&second_edit.stdout).expect("second edit stdout should be json");
+    let combined = json!({
+        "files": [
+            first_changeset["files"][0].clone(),
+            second_changeset["files"][0].clone(),
+        ],
+        "transaction": { "mode": "all_or_nothing" },
+    });
+
+    let dry_run = run_identedit_with_stdin(&["apply", "--dry-run"], &combined.to_string());
+    assert!(
+        dry_run.status.success(),
+        "apply --dry-run should succeed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    let response: Value = serde_json::from_slice(&dry_run.stdout).expect("stdout should be json");
+
+    assert_eq!(response["summary"]["files_modified"], 2);
+    assert_eq!(response["summary"]["operations_applied"], 2);
+    assert_eq!(response["summary"]["operations_failed"], 0);
+    assert_eq!(response["transaction"]["mode"], "all_or_nothing");
+    assert_eq!(response["transaction"]["status"], "dry_run");
+    assert_eq!(response["dry_run"]["status"], "ready");
+    assert_eq!(response["dry_run"]["files_checked"], 2);
+    assert_eq!(response["dry_run"]["would_modify_files"], 2);
+    assert_eq!(response["dry_run"]["would_apply_operations"], 2);
+    assert_eq!(response["dry_run"]["preconditions"], "passed");
+    assert_eq!(response["dry_run"]["ambiguous_targets"], 0);
+    assert_eq!(response["dry_run"]["stale_targets"], 0);
+    assert_eq!(
+        response["dry_run"]["files"]
+            .as_array()
+            .expect("dry-run files should be an array")
+            .len(),
+        2
+    );
+    assert!(
+        response.get("applied").is_none(),
+        "compact dry-run should not include verbose applied entries"
+    );
+
+    assert_eq!(
+        fs::read_to_string(&first_file).expect("first file should remain readable"),
+        first_before,
+        "dry-run must not modify first file"
+    );
+    assert_eq!(
+        fs::read_to_string(&second_file).expect("second file should remain readable"),
+        second_before,
+        "dry-run must not modify second file"
+    );
+}
+
+#[test]
 fn apply_repair_remaps_stale_line_anchors() {
     let file = copy_fixture_to_temp_python("example.py");
     let line_read = run_identedit(&[

@@ -7,8 +7,8 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 
 use crate::apply::{
-    ApplyFailureInjection, ApplyFileResult, ApplyResponse, ApplySummary, ApplyTransaction,
-    apply_multi_file_changeset, apply_multi_file_changeset_with_injection,
+    ApplyDryRunSummary, ApplyFailureInjection, ApplyFileResult, ApplyResponse, ApplySummary,
+    ApplyTransaction, apply_multi_file_changeset, apply_multi_file_changeset_with_injection,
     dry_run_multi_file_changeset,
 };
 use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget, hash_text};
@@ -51,6 +51,8 @@ struct StdinApplyRequest {
 pub struct ApplyCliResponse {
     pub summary: ApplySummary,
     pub transaction: ApplyTransaction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<ApplyDryRunSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied: Option<Vec<ApplyFileResult>>,
 }
@@ -295,11 +297,13 @@ pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> Ap
         applied,
         summary,
         transaction,
+        dry_run,
     } = response;
 
     ApplyCliResponse {
         summary,
         transaction,
+        dry_run,
         applied: verbose.then_some(applied),
     }
 }

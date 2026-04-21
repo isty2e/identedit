@@ -36,6 +36,8 @@ pub struct ApplyResponse {
     pub applied: Vec<ApplyFileResult>,
     pub summary: ApplySummary,
     pub transaction: ApplyTransaction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<ApplyDryRunSummary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +53,36 @@ pub struct ApplySummary {
     pub files_modified: usize,
     pub operations_applied: usize,
     pub operations_failed: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ApplyDryRunSummary {
+    pub status: ApplyDryRunStatus,
+    pub files_checked: usize,
+    pub would_modify_files: usize,
+    pub would_apply_operations: usize,
+    pub preconditions: ApplyDryRunPreconditions,
+    pub ambiguous_targets: usize,
+    pub stale_targets: usize,
+    pub files: Vec<ApplyDryRunFileSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyDryRunStatus {
+    Ready,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyDryRunPreconditions {
+    Passed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ApplyDryRunFileSummary {
+    pub file: String,
+    pub operations: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -96,6 +128,30 @@ fn summarize_apply_results(applied: &[ApplyFileResult]) -> ApplySummary {
         files_modified,
         operations_applied,
         operations_failed,
+    }
+}
+
+fn summarize_dry_run(applied: &[ApplyFileResult]) -> ApplyDryRunSummary {
+    let files = applied
+        .iter()
+        .map(|result| ApplyDryRunFileSummary {
+            file: result.file.clone(),
+            operations: result.operations_total,
+        })
+        .collect::<Vec<_>>();
+
+    ApplyDryRunSummary {
+        status: ApplyDryRunStatus::Ready,
+        files_checked: applied.len(),
+        would_modify_files: applied
+            .iter()
+            .filter(|result| result.operations_total > 0)
+            .count(),
+        would_apply_operations: applied.iter().map(|result| result.operations_total).sum(),
+        preconditions: ApplyDryRunPreconditions::Passed,
+        ambiguous_targets: 0,
+        stale_targets: 0,
+        files,
     }
 }
 
@@ -154,11 +210,13 @@ pub fn dry_run_multi_file_changeset(
         mode: TransactionMode::AllOrNothing,
         status: TransactionStatus::DryRun,
     };
+    let dry_run = summarize_dry_run(&applied);
 
     Ok(ApplyResponse {
         applied,
         summary,
         transaction,
+        dry_run: Some(dry_run),
     })
 }
 
@@ -292,6 +350,7 @@ where
         applied,
         summary,
         transaction,
+        dry_run: None,
     })
 }
 
