@@ -170,8 +170,10 @@ For multi-file edits:
 identedit edit --json < /tmp/edit-request.json > /tmp/changeset.json
 identedit apply --dry-run /tmp/changeset.json
 identedit apply /tmp/changeset.json
-cargo test affected_module::tests
+<project-specific verifier command>
 ```
+
+Examples: `pytest tests/test_foo.py -q`, `cargo test affected_module::tests`, `npm test -- --runInBand`.
 
 If the verifier fails, treat it as a workflow failure, not an identedit failure: the edit already applied. Inspect verifier output and repair with one bounded follow-up edit attempt.
 
