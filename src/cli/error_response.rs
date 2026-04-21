@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::error::IdenteditError;
+use crate::error::{IdenteditError, TargetCandidateContext};
 
 const SERIALIZATION_FALLBACK: &str = "{\"error\":{\"type\":\"serialization_error\",\"message\":\"Failed to serialize error response\"}}";
 
@@ -15,6 +15,37 @@ struct ErrorBody {
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     suggestion: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    candidates: Vec<TargetCandidateContext>,
+}
+
+impl ErrorBody {
+    fn new(
+        error_type: impl Into<String>,
+        message: impl Into<String>,
+        suggestion: Option<String>,
+    ) -> Self {
+        Self {
+            r#type: error_type.into(),
+            message: message.into(),
+            suggestion,
+            candidates: vec![],
+        }
+    }
+
+    fn with_candidates(
+        error_type: impl Into<String>,
+        message: impl Into<String>,
+        suggestion: Option<String>,
+        candidates: Vec<TargetCandidateContext>,
+    ) -> Self {
+        Self {
+            r#type: error_type.into(),
+            message: message.into(),
+            suggestion,
+            candidates,
+        }
+    }
 }
 
 pub fn render_error_response(error: &IdenteditError) -> String {
@@ -28,10 +59,10 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
             extension: _,
             supported_extensions,
         } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "no_provider".to_string(),
-                message: error.to_string(),
-                suggestion: Some(format!(
+            error: ErrorBody::new(
+                "no_provider",
+                error.to_string(),
+                Some(format!(
                     "Supported extensions: {}",
                     supported_extensions
                         .iter()
@@ -39,108 +70,95 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),
-            },
+            ),
         },
         IdenteditError::InvalidRequest { .. } | IdenteditError::InvalidJsonRequest { .. } => {
             ErrorResponse {
-                error: ErrorBody {
-                    r#type: "invalid_request".to_string(),
-                    message: error.to_string(),
-                    suggestion: None,
-                },
+                error: ErrorBody::new("invalid_request", error.to_string(), None),
             }
         }
         IdenteditError::ResourceBusy { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "resource_busy".to_string(),
-                message: error.to_string(),
-                suggestion: Some("Retry after the current apply operation completes".to_string()),
-            },
+            error: ErrorBody::new(
+                "resource_busy",
+                error.to_string(),
+                Some("Retry after the current apply operation completes".to_string()),
+            ),
         },
         IdenteditError::PathChanged { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "path_changed".to_string(),
-                message: error.to_string(),
-                suggestion: Some(
+            error: ErrorBody::new(
+                "path_changed",
+                error.to_string(),
+                Some(
                     "Re-run 'identedit read' and 'identedit edit', then retry apply".to_string(),
                 ),
-            },
+            ),
         },
         IdenteditError::InvalidNamePattern { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "invalid_selector".to_string(),
-                message: error.to_string(),
-                suggestion: Some("Use a valid glob pattern such as 'process_*'".to_string()),
-            },
+            error: ErrorBody::new(
+                "invalid_selector",
+                error.to_string(),
+                Some("Use a valid glob pattern such as 'process_*'".to_string()),
+            ),
         },
         IdenteditError::ParseFailure { .. } | IdenteditError::LanguageSetup { .. } => {
             ErrorResponse {
-                error: ErrorBody {
-                    r#type: "parse_failure".to_string(),
-                    message: error.to_string(),
-                    suggestion: None,
-                },
+                error: ErrorBody::new("parse_failure", error.to_string(), None),
             }
         }
         IdenteditError::GrammarInstall { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "grammar_install_failed".to_string(),
-                message: error.to_string(),
-                suggestion: None,
-            },
+            error: ErrorBody::new("grammar_install_failed", error.to_string(), None),
         },
         IdenteditError::Io { .. } | IdenteditError::StdinRead { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "io_error".to_string(),
-                message: error.to_string(),
-                suggestion: None,
-            },
+            error: ErrorBody::new("io_error", error.to_string(), None),
         },
         IdenteditError::ResponseSerialization { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "serialization_error".to_string(),
-                message: error.to_string(),
-                suggestion: None,
-            },
+            error: ErrorBody::new("serialization_error", error.to_string(), None),
         },
         IdenteditError::TargetMissing { .. } | IdenteditError::TargetMissingSelector { .. } => {
             ErrorResponse {
-                error: ErrorBody {
-                    r#type: "target_missing".to_string(),
-                    message: error.to_string(),
-                    suggestion: Some(
+                error: ErrorBody::new(
+                    "target_missing",
+                    error.to_string(),
+                    Some(
                         "Re-run 'identedit read' to inspect current handles".to_string(),
                     ),
-                },
+                ),
             }
         }
-        IdenteditError::AmbiguousTarget { .. }
-        | IdenteditError::AmbiguousTargetSelector { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "ambiguous_target".to_string(),
-                message: error.to_string(),
-                suggestion: Some(
+        IdenteditError::AmbiguousTarget {
+            candidate_contexts,
+            ..
+        }
+        | IdenteditError::AmbiguousTargetSelector {
+            candidate_contexts,
+            ..
+        } => ErrorResponse {
+            error: ErrorBody::with_candidates(
+                "ambiguous_target",
+                error.to_string(),
+                Some(
                     "Use a more specific selector or re-run 'identedit read' to disambiguate"
                         .to_string(),
                 ),
-            },
+                candidate_contexts.clone(),
+            ),
         },
         IdenteditError::PreconditionFailed { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "precondition_failed".to_string(),
-                message: error.to_string(),
-                suggestion: Some("Re-run 'identedit read' to get updated handles".to_string()),
-            },
+            error: ErrorBody::new(
+                "precondition_failed",
+                error.to_string(),
+                Some("Re-run 'identedit read' to get updated handles".to_string()),
+            ),
         },
         IdenteditError::RollbackFailed { .. } => ErrorResponse {
-            error: ErrorBody {
-                r#type: "rollback_failed".to_string(),
-                message: error.to_string(),
-                suggestion: Some(
+            error: ErrorBody::new(
+                "rollback_failed",
+                error.to_string(),
+                Some(
                     "Inspect affected files, manually reconcile rollback failures, then re-run identedit read/edit/apply"
                         .to_string(),
                 ),
-            },
+            ),
         },
     }
 }
@@ -237,6 +255,7 @@ mod tests {
                 identity: "id-2".to_string(),
                 file: "fixture.py".to_string(),
                 candidates: 2,
+                candidate_contexts: vec![],
             },
             "ambiguous_target",
             Some("more specific selector"),

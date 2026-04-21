@@ -88,7 +88,7 @@ identedit patch src/example.py --symbol process_data \
   --replace 'new body' --dry-run
 ```
 
-`--symbol` targets a unique named node directly — no `read` step needed. It accepts a local name (`process_data`) or a containing-name path (`Processor.process_data`). If the match is ambiguous or missing, patch fails without writing.
+`--symbol` targets a unique named node directly — no `read` step needed. It accepts a local name (`process_data`) or a containing-name path (`Processor.process_data`). If the match is ambiguous or missing, patch fails without writing. For ambiguous targets, inspect `error.candidates`: each candidate includes `identity`, `kind`, `name`, `qualified_name`, `span`, `line`, and a one-line `preview`.
 
 Use `--kind` + `--name` when you need kind-specific glob matching (e.g., `--kind function_definition --name "process_*"`). The name supports glob patterns. Use `--name "*"` to match by kind only (e.g., the sole class in a file).
 
@@ -143,7 +143,7 @@ identedit patch fails
 │       └── fails again → Edit/Write. STOP.
 │
 ├── ambiguous_target
-│   └── add span_hint from read output → retry (attempt 2)
+│   └── inspect error.candidates → choose qualified symbol/identity/span_hint → retry (attempt 2)
 │       ├── succeeds → done
 │       └── still ambiguous → Edit/Write. STOP.
 │
@@ -581,7 +581,7 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 |---|---|---|
 | `precondition_failed` | File changed since read | Re-run read, rebuild edit request, retry |
 | `target_missing` | Structure no longer exists | Re-run read to discover current state |
-| `ambiguous_target` | Multiple matches for identity | Add `span_hint` or re-run read for fresh handles |
+| `ambiguous_target` | Multiple matches for a selector | Inspect `error.candidates`, then retry with `--symbol <qualified_name>`, `--at <identity>`, or JSON `span_hint` |
 | `path_changed` | File modified during apply | Re-run full pipeline (read, edit, apply) |
 | `resource_busy` | Another apply in progress | Wait briefly, retry |
 | `rollback_failed` | Apply failed and rollback incomplete | Inspect files manually, then re-run pipeline |

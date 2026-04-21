@@ -491,6 +491,7 @@ fn resolve_target_in_handles_with_index(
                     identity: identity.clone(),
                     file: file.display().to_string(),
                     candidates: stale_candidates.len(),
+                    candidate_contexts: vec![],
                 });
             }
         }
@@ -557,6 +558,7 @@ fn resolve_target_in_handles_with_index(
             identity: identity.clone(),
             file: file.display().to_string(),
             candidates: by_kind.len(),
+            candidate_contexts: vec![],
         });
     }
 
@@ -575,6 +577,7 @@ fn resolve_target_in_handles_with_index(
             identity: identity.clone(),
             file: file.display().to_string(),
             candidates: narrowed_by_span.len(),
+            candidate_contexts: vec![],
         });
     }
 
@@ -599,6 +602,7 @@ fn resolve_unique_kind_hash_candidate(
             identity: identity.to_string(),
             file: file.display().to_string(),
             candidates: candidates.len(),
+            candidate_contexts: vec![],
         });
     }
 

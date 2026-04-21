@@ -1,7 +1,22 @@
 use std::path::Path;
 
 use miette::Diagnostic;
+use serde::Serialize;
 use thiserror::Error;
+
+use crate::handle::Span;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TargetCandidateContext {
+    pub identity: String,
+    pub expected_old_hash: String,
+    pub kind: String,
+    pub name: Option<String>,
+    pub qualified_name: Option<String>,
+    pub span: Span,
+    pub line: usize,
+    pub preview: String,
+}
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum IdenteditError {
@@ -73,6 +88,7 @@ pub enum IdenteditError {
         identity: String,
         file: String,
         candidates: usize,
+        candidate_contexts: Vec<TargetCandidateContext>,
     },
 
     #[error(
@@ -82,6 +98,7 @@ pub enum IdenteditError {
         selector: String,
         file: String,
         candidates: usize,
+        candidate_contexts: Vec<TargetCandidateContext>,
     },
 
     #[error(

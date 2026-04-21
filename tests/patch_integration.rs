@@ -1542,6 +1542,23 @@ fn patch_symbol_unqualified_duplicate_reports_ambiguous_target() {
         .as_str()
         .expect("error message should be present");
     assert!(message.contains("symbol='process_data'"));
+    let candidates = response["error"]["candidates"]
+        .as_array()
+        .expect("ambiguous symbol response should include candidate contexts");
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["name"], "process_data");
+    assert_eq!(candidates[0]["qualified_name"], "process_data");
+    assert_eq!(candidates[0]["line"], 1);
+    assert_eq!(candidates[0]["preview"], "def process_data(value):");
+    assert_eq!(candidates[1]["name"], "process_data");
+    assert_eq!(candidates[1]["qualified_name"], "Processor.process_data");
+    assert_eq!(candidates[1]["line"], 6);
+    assert_eq!(candidates[1]["preview"], "def process_data(self, value):");
+    assert!(candidates.iter().all(|candidate| {
+        candidate["identity"]
+            .as_str()
+            .is_some_and(|value| value.len() == 16)
+    }));
     assert_eq!(
         fs::read_to_string(&file_path).expect("file should be readable"),
         source,
@@ -1573,6 +1590,17 @@ fn patch_symbol_duplicate_qualified_name_reports_ambiguous_target() {
         .as_str()
         .expect("error message should be present");
     assert!(message.contains("symbol='Processor.process_data'"));
+    let candidates = response["error"]["candidates"]
+        .as_array()
+        .expect("ambiguous qualified symbol response should include candidate contexts");
+    assert_eq!(candidates.len(), 2);
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate["qualified_name"] == "Processor.process_data")
+    );
+    assert_eq!(candidates[0]["line"], 2);
+    assert_eq!(candidates[1]["line"], 7);
     assert_eq!(
         fs::read_to_string(&file_path).expect("file should be readable"),
         source,
@@ -1946,6 +1974,16 @@ fn patch_kind_name_reports_ambiguous_target_for_duplicate_symbol() {
             }),
         "ambiguous-target message should describe the selector"
     );
+    let candidates = response["error"]["candidates"]
+        .as_array()
+        .expect("ambiguous kind/name response should include candidate contexts");
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["kind"], "function_definition");
+    assert_eq!(candidates[0]["name"], "duplicate");
+    assert_eq!(candidates[0]["qualified_name"], "duplicate");
+    assert_eq!(candidates[0]["line"], 1);
+    assert_eq!(candidates[0]["preview"], "def duplicate():");
+    assert_eq!(candidates[1]["line"], 5);
 }
 
 #[test]
@@ -2360,6 +2398,17 @@ fn patch_returns_ambiguous_target_error_for_duplicate_identity() {
     let response: Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "ambiguous_target");
+    let candidates = response["error"]["candidates"]
+        .as_array()
+        .expect("ambiguous identity response should include candidate contexts");
+    assert_eq!(candidates.len(), 2);
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate["identity"] == identity)
+    );
+    assert_eq!(candidates[0]["line"], 1);
+    assert_eq!(candidates[1]["line"], 5);
 }
 
 #[test]

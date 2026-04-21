@@ -133,7 +133,7 @@ identedit patch src/example.py --kind function_definition --name process_data \
   --replace --text-file /tmp/new_block.py
 ```
 
-Use `--symbol` for a unique local name (`process_data`) or containing-name path (`Processor.process_data`). If a symbol is ambiguous or missing, patch fails without writing. Use `--kind` + `--name` when you need kind-specific glob matching such as `--name "process_*"`.
+Use `--symbol` for a unique local name (`process_data`) or containing-name path (`Processor.process_data`). If a symbol is ambiguous or missing, patch fails without writing. Ambiguous responses include `error.candidates` with identity, span, line, qualified name, and preview context. Use `--kind` + `--name` when you need kind-specific glob matching such as `--name "process_*"`.
 
 Or via the `edit` pipeline with `jq --rawfile`:
 
@@ -159,7 +159,7 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 ## Error Recovery (Agent Loop)
 
 1. If `patch` fails with `precondition_failed` or `target_missing`: re-run `read`, rebuild request, retry once.
-2. If `ambiguous_target`: add `span_hint` from `read` output, retry once.
+2. If `ambiguous_target`: inspect `error.candidates`, then retry with a qualified symbol, identity, or JSON `span_hint`.
 3. Maximum 2 attempts per target. If the second attempt fails, fall back to direct file editing.
 
 ## Docs

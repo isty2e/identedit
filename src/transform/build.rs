@@ -76,6 +76,7 @@ fn resolve_unique_identity_handle<'a>(
             identity: identity.to_string(),
             file: file.display().to_string(),
             candidates: candidates.len(),
+            candidate_contexts: vec![],
         }),
     }
 }

@@ -126,6 +126,7 @@ fn resolve_target_returns_ambiguous_when_stale_span_hint_matches_multiple_candid
             identity,
             file,
             candidates,
+            ..
         } => {
             assert_eq!(identity, "missing-identity");
             assert_eq!(file, "fixture.py");
@@ -246,6 +247,7 @@ fn resolve_target_kind_and_hash_fallback_rejects_ambiguous_candidates() {
             identity,
             file,
             candidates,
+            ..
         } => {
             assert_eq!(identity, "stale-identity");
             assert_eq!(file, "fixture.py");
