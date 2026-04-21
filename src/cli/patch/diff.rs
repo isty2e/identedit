@@ -11,6 +11,7 @@ const RESET: &str = "\x1b[0m";
 const RED: &str = "\x1b[31m";
 const GREEN: &str = "\x1b[32m";
 const CYAN: &str = "\x1b[36m";
+const MAX_LCS_CELLS: usize = 200_000;
 
 pub(super) fn render_changeset_diff(
     changeset: &MultiFileChangeset,
@@ -79,21 +80,24 @@ fn render_text_preview_diff(
                 .to_string(),
         })?;
     let old_start_line = line_number_at_byte(source, preview.matched_span)?;
-    let Some(hunk) = minimal_diff_hunk(old_text, &preview.new_text) else {
+    let hunks = minimal_diff_hunks(old_text, &preview.new_text);
+    if hunks.is_empty() {
         return Ok(());
-    };
+    }
 
     render_diff_header(rendered, file);
-    render_hunk_header(
-        rendered,
-        old_start_line + hunk.line_offset,
-        hunk.old_lines.len(),
-        old_start_line + hunk.line_offset,
-        hunk.new_lines.len(),
-        use_color,
-    );
-    render_removed_line_values(rendered, &hunk.old_lines, use_color);
-    render_added_line_values(rendered, &hunk.new_lines, use_color);
+    for hunk in hunks {
+        render_hunk_header(
+            rendered,
+            old_start_line + hunk.old_start_offset,
+            hunk.old_lines.len(),
+            old_start_line + hunk.new_start_offset,
+            hunk.new_lines.len(),
+            use_color,
+        );
+        render_removed_line_values(rendered, &hunk.old_lines, use_color);
+        render_added_line_values(rendered, &hunk.new_lines, use_color);
+    }
     Ok(())
 }
 
@@ -169,16 +173,46 @@ fn diff_line_count(text: &str) -> usize {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct MinimalDiffHunk {
-    line_offset: usize,
+struct LineDiffHunk {
+    old_start_offset: usize,
+    new_start_offset: usize,
     old_lines: Vec<String>,
     new_lines: Vec<String>,
 }
 
-fn minimal_diff_hunk(old_text: &str, new_text: &str) -> Option<MinimalDiffHunk> {
+#[derive(Debug, PartialEq, Eq)]
+enum LineDiffOp {
+    Equal,
+    Remove(String),
+    Add(String),
+}
+
+fn minimal_diff_hunks(old_text: &str, new_text: &str) -> Vec<LineDiffHunk> {
+    if old_text == new_text {
+        return Vec::new();
+    }
+
     let old_lines = diff_lines(old_text);
     let new_lines = diff_lines(new_text);
 
+    if old_lines == new_lines {
+        return vec![LineDiffHunk {
+            old_start_offset: 0,
+            new_start_offset: 0,
+            old_lines,
+            new_lines,
+        }];
+    }
+
+    if old_lines.len().saturating_mul(new_lines.len()) > MAX_LCS_CELLS {
+        return single_trimmed_hunk(old_lines, new_lines);
+    }
+
+    let ops = line_diff_ops(&old_lines, &new_lines);
+    collect_line_diff_hunks(ops)
+}
+
+fn single_trimmed_hunk(old_lines: Vec<String>, new_lines: Vec<String>) -> Vec<LineDiffHunk> {
     let common_prefix = old_lines
         .iter()
         .zip(new_lines.iter())
@@ -200,14 +234,105 @@ fn minimal_diff_hunk(old_text: &str, new_text: &str) -> Option<MinimalDiffHunk> 
     let changed_new = new_lines[common_prefix..new_end].to_vec();
 
     if changed_old.is_empty() && changed_new.is_empty() {
-        return None;
+        return Vec::new();
     }
 
-    Some(MinimalDiffHunk {
-        line_offset: common_prefix,
+    vec![LineDiffHunk {
+        old_start_offset: common_prefix,
+        new_start_offset: common_prefix,
         old_lines: changed_old,
         new_lines: changed_new,
-    })
+    }]
+}
+
+fn line_diff_ops(old_lines: &[String], new_lines: &[String]) -> Vec<LineDiffOp> {
+    let old_len = old_lines.len();
+    let new_len = new_lines.len();
+    let width = new_len + 1;
+    let mut lcs = vec![0usize; (old_len + 1) * width];
+
+    for old_index in (0..old_len).rev() {
+        for new_index in (0..new_len).rev() {
+            let index = old_index * width + new_index;
+            lcs[index] = if old_lines[old_index] == new_lines[new_index] {
+                1 + lcs[(old_index + 1) * width + new_index + 1]
+            } else {
+                lcs[(old_index + 1) * width + new_index].max(lcs[old_index * width + new_index + 1])
+            };
+        }
+    }
+
+    let mut old_index = 0usize;
+    let mut new_index = 0usize;
+    let mut ops = Vec::new();
+
+    while old_index < old_len || new_index < new_len {
+        if old_index < old_len
+            && new_index < new_len
+            && old_lines[old_index] == new_lines[new_index]
+        {
+            ops.push(LineDiffOp::Equal);
+            old_index += 1;
+            new_index += 1;
+        } else if old_index < old_len
+            && (new_index == new_len
+                || lcs[(old_index + 1) * width + new_index]
+                    >= lcs[old_index * width + new_index + 1])
+        {
+            ops.push(LineDiffOp::Remove(old_lines[old_index].clone()));
+            old_index += 1;
+        } else {
+            ops.push(LineDiffOp::Add(new_lines[new_index].clone()));
+            new_index += 1;
+        }
+    }
+
+    ops
+}
+
+fn collect_line_diff_hunks(ops: Vec<LineDiffOp>) -> Vec<LineDiffHunk> {
+    let mut old_offset = 0usize;
+    let mut new_offset = 0usize;
+    let mut current = None::<LineDiffHunk>;
+    let mut hunks = Vec::new();
+
+    for op in ops {
+        match op {
+            LineDiffOp::Equal => {
+                if let Some(hunk) = current.take() {
+                    hunks.push(hunk);
+                }
+                old_offset += 1;
+                new_offset += 1;
+            }
+            LineDiffOp::Remove(line) => {
+                let hunk = current.get_or_insert_with(|| LineDiffHunk {
+                    old_start_offset: old_offset,
+                    new_start_offset: new_offset,
+                    old_lines: Vec::new(),
+                    new_lines: Vec::new(),
+                });
+                hunk.old_lines.push(line);
+                old_offset += 1;
+            }
+            LineDiffOp::Add(line) => {
+                let hunk = current.get_or_insert_with(|| LineDiffHunk {
+                    old_start_offset: old_offset,
+                    new_start_offset: new_offset,
+                    old_lines: Vec::new(),
+                    new_lines: Vec::new(),
+                });
+                hunk.new_lines.push(line);
+                new_offset += 1;
+            }
+        }
+    }
+
+    if let Some(hunk) = current {
+        hunks.push(hunk);
+    }
+
+    hunks
 }
 
 fn line_number_at_byte(source: &str, span: Span) -> Result<usize, IdenteditError> {
@@ -237,7 +362,7 @@ fn should_color(color: ColorMode) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MinimalDiffHunk, diff_line_count, diff_lines, minimal_diff_hunk};
+    use super::{LineDiffHunk, diff_line_count, diff_lines, minimal_diff_hunks};
 
     #[test]
     fn diff_lines_do_not_emit_extra_line_for_trailing_newline() {
@@ -258,31 +383,168 @@ mod tests {
     }
 
     #[test]
-    fn minimal_diff_hunk_trims_common_prefix_and_suffix() {
+    fn minimal_diff_hunks_trim_common_prefix_and_suffix() {
         assert_eq!(
-            minimal_diff_hunk("a\nold\nz\n", "a\nnew\nz\n"),
-            Some(MinimalDiffHunk {
-                line_offset: 1,
+            minimal_diff_hunks("a\nold\nz\n", "a\nnew\nz\n"),
+            vec![LineDiffHunk {
+                old_start_offset: 1,
+                new_start_offset: 1,
                 old_lines: vec!["old".to_string()],
                 new_lines: vec!["new".to_string()],
-            })
+            }]
         );
     }
 
     #[test]
-    fn minimal_diff_hunk_returns_none_for_identical_text() {
-        assert_eq!(minimal_diff_hunk("a\nb\n", "a\nb\n"), None);
+    fn minimal_diff_hunks_return_empty_for_identical_text() {
+        assert_eq!(minimal_diff_hunks("a\nb\n", "a\nb\n"), Vec::new());
     }
 
     #[test]
-    fn minimal_diff_hunk_handles_pure_insertion_between_common_lines() {
+    fn minimal_diff_hunks_do_not_hide_trailing_newline_only_changes() {
         assert_eq!(
-            minimal_diff_hunk("a\nz\n", "a\nnew\nz\n"),
-            Some(MinimalDiffHunk {
-                line_offset: 1,
+            minimal_diff_hunks("a\n", "a"),
+            vec![LineDiffHunk {
+                old_start_offset: 0,
+                new_start_offset: 0,
+                old_lines: vec!["a".to_string()],
+                new_lines: vec!["a".to_string()],
+            }]
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_handle_pure_insertion_between_common_lines() {
+        assert_eq!(
+            minimal_diff_hunks("a\nz\n", "a\nnew\nz\n"),
+            vec![LineDiffHunk {
+                old_start_offset: 1,
+                new_start_offset: 1,
                 old_lines: Vec::new(),
                 new_lines: vec!["new".to_string()],
-            })
+            }]
         );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_split_separated_line_changes() {
+        assert_eq!(
+            minimal_diff_hunks("a\nold_a\nkeep\nold_b\nz\n", "a\nnew_a\nkeep\nnew_b\nz\n"),
+            vec![
+                LineDiffHunk {
+                    old_start_offset: 1,
+                    new_start_offset: 1,
+                    old_lines: vec!["old_a".to_string()],
+                    new_lines: vec!["new_a".to_string()],
+                },
+                LineDiffHunk {
+                    old_start_offset: 3,
+                    new_start_offset: 3,
+                    old_lines: vec!["old_b".to_string()],
+                    new_lines: vec!["new_b".to_string()],
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_split_repeated_line_changes_without_anchor_drift() {
+        assert_eq!(
+            minimal_diff_hunks(
+                "same\nold_a\nsame\nold_b\nsame\n",
+                "same\nnew_a\nsame\nnew_b\nsame\n"
+            ),
+            vec![
+                LineDiffHunk {
+                    old_start_offset: 1,
+                    new_start_offset: 1,
+                    old_lines: vec!["old_a".to_string()],
+                    new_lines: vec!["new_a".to_string()],
+                },
+                LineDiffHunk {
+                    old_start_offset: 3,
+                    new_start_offset: 3,
+                    old_lines: vec!["old_b".to_string()],
+                    new_lines: vec!["new_b".to_string()],
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_split_separated_pure_deletions() {
+        assert_eq!(
+            minimal_diff_hunks("a\ndrop_a\nkeep\ndrop_b\nz\n", "a\nkeep\nz\n"),
+            vec![
+                LineDiffHunk {
+                    old_start_offset: 1,
+                    new_start_offset: 1,
+                    old_lines: vec!["drop_a".to_string()],
+                    new_lines: Vec::new(),
+                },
+                LineDiffHunk {
+                    old_start_offset: 3,
+                    new_start_offset: 2,
+                    old_lines: vec!["drop_b".to_string()],
+                    new_lines: Vec::new(),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_split_separated_pure_insertions() {
+        assert_eq!(
+            minimal_diff_hunks("a\nkeep\nz\n", "a\nadd_a\nkeep\nadd_b\nz\n"),
+            vec![
+                LineDiffHunk {
+                    old_start_offset: 1,
+                    new_start_offset: 1,
+                    old_lines: Vec::new(),
+                    new_lines: vec!["add_a".to_string()],
+                },
+                LineDiffHunk {
+                    old_start_offset: 2,
+                    new_start_offset: 3,
+                    old_lines: Vec::new(),
+                    new_lines: vec!["add_b".to_string()],
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_keep_adjacent_changes_in_one_hunk() {
+        assert_eq!(
+            minimal_diff_hunks("a\nold_a\nold_b\nz\n", "a\nnew_a\nnew_b\nz\n"),
+            vec![LineDiffHunk {
+                old_start_offset: 1,
+                new_start_offset: 1,
+                old_lines: vec!["old_a".to_string(), "old_b".to_string()],
+                new_lines: vec!["new_a".to_string(), "new_b".to_string()],
+            }]
+        );
+    }
+
+    #[test]
+    fn minimal_diff_hunks_large_inputs_fall_back_to_single_trimmed_hunk() {
+        let old_middle = (0..500)
+            .map(|index| format!("old_{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let new_middle = (0..500)
+            .map(|index| format!("new_{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let old_text = format!("prefix\n{old_middle}\nsuffix\n");
+        let new_text = format!("prefix\n{new_middle}\nsuffix\n");
+
+        let hunks = minimal_diff_hunks(&old_text, &new_text);
+
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].old_start_offset, 1);
+        assert_eq!(hunks[0].new_start_offset, 1);
+        assert_eq!(hunks[0].old_lines.len(), 500);
+        assert_eq!(hunks[0].new_lines.len(), 500);
     }
 }

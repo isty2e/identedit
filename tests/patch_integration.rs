@@ -1811,6 +1811,175 @@ fn patch_kind_name_replace_dry_run_diff_omits_unchanged_suffix_context() {
 }
 
 #[test]
+fn patch_kind_name_replace_dry_run_diff_splits_separated_changes_into_hunks() {
+    let source = "\
+def sample(value):
+    keep_a()
+    old_a(value)
+    keep_b()
+    old_b(value)
+    keep_c()
+";
+    let mut temp_file = Builder::new()
+        .suffix(".py")
+        .tempfile()
+        .expect("temp python file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("temp python file write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "sample",
+        "--replace",
+        "def sample(value):\n    keep_a()\n    new_a(value)\n    keep_b()\n    new_b(value)\n    keep_c()",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "multi-hunk minimal diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("@@ -3,1 +3,1 @@"));
+    assert!(diff.contains("@@ -5,1 +5,1 @@"));
+    assert!(diff.contains("-    old_a(value)"));
+    assert!(diff.contains("+    new_a(value)"));
+    assert!(diff.contains("-    old_b(value)"));
+    assert!(diff.contains("+    new_b(value)"));
+    assert!(!diff.contains("keep_a"));
+    assert!(!diff.contains("keep_b"));
+    assert!(!diff.contains("keep_c"));
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_diff_splits_separated_deletions_into_hunks() {
+    let source = "\
+def sample():
+    keep_a()
+    drop_a()
+    keep_b()
+    drop_b()
+    keep_c()
+";
+    let file_path = create_temp_python_source(source);
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "sample",
+        "--replace",
+        "def sample():\n    keep_a()\n    keep_b()\n    keep_c()",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "multi-hunk deletion diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("@@ -3,1 +3,0 @@"));
+    assert!(diff.contains("@@ -5,1 +4,0 @@"));
+    assert!(diff.contains("-    drop_a()"));
+    assert!(diff.contains("-    drop_b()"));
+    assert!(!diff.contains("keep_a"));
+    assert!(!diff.contains("keep_b"));
+    assert!(!diff.contains("keep_c"));
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_diff_splits_separated_insertions_into_hunks() {
+    let source = "\
+def sample():
+    keep_a()
+    keep_b()
+    keep_c()
+";
+    let file_path = create_temp_python_source(source);
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "sample",
+        "--replace",
+        "def sample():\n    keep_a()\n    add_a()\n    keep_b()\n    add_b()\n    keep_c()",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "multi-hunk insertion diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(diff.contains("@@ -3,0 +3,1 @@"));
+    assert!(diff.contains("@@ -4,0 +5,1 @@"));
+    assert!(diff.contains("+    add_a()"));
+    assert!(diff.contains("+    add_b()"));
+    assert!(!diff.contains("keep_a"));
+    assert!(!diff.contains("keep_b"));
+    assert!(!diff.contains("keep_c"));
+}
+
+#[test]
+fn patch_kind_name_replace_dry_run_diff_does_not_hide_trailing_newline_only_change() {
+    let source = "def sample():\n    return 1";
+    let file_path = create_temp_python_source(source);
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "sample",
+        "--replace",
+        "def sample():\n    return 1\n",
+        "--dry-run",
+        "--diff",
+        "--color",
+        "never",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "trailing-newline-only diff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(
+        !diff.trim().is_empty(),
+        "raw text changes must not render as an empty diff"
+    );
+    assert!(diff.contains("@@ -1,2 +1,2 @@"));
+    assert!(diff.contains("-def sample():"));
+    assert!(diff.contains("+def sample():"));
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "dry-run diff must not modify the source file"
+    );
+}
+
+#[test]
 fn patch_kind_name_replace_dry_run_diff_is_empty_for_noop_replacement() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let output = run_identedit(&[
