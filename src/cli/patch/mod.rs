@@ -70,6 +70,12 @@ pub struct PatchArgs {
     pub name: Option<String>,
     #[arg(
         long,
+        value_name = "SYMBOL",
+        help = "Patch a unique named symbol directly; supports local names and containing-name paths like Class.method"
+    )]
+    pub symbol: Option<String>,
+    #[arg(
+        long,
         value_name = "TEXT",
         num_args = 0..=1,
         help = "Replace target node with text (node flag mode)"
@@ -256,6 +262,7 @@ mod tests {
             config_path: None,
             kind: None,
             name: None,
+            symbol: None,
             replace: None,
             text_file: None,
             stdin_text: false,
@@ -315,6 +322,34 @@ mod tests {
         );
         assert!(execution.dry_run);
         assert!(execution.verbose);
+    }
+
+    #[test]
+    fn parse_flag_patch_request_builds_node_request_for_symbol_selector() {
+        let mut args = base_args(PathBuf::from("fixture.py"));
+        args.symbol = Some("Processor.process_data".to_string());
+        args.replace = Some(Some("def process_data():\n    return 1\n".to_string()));
+
+        let request = parse_flag_patch_request(&args).expect("symbol request should parse");
+        let FlagPatchRequest::Node(NodeFlagPatchRequest {
+            selector,
+            operation,
+            ..
+        }) = request
+        else {
+            panic!("expected node request");
+        };
+
+        assert_eq!(
+            selector,
+            NodeTargetSelector::Symbol("Processor.process_data".to_string())
+        );
+        assert_eq!(
+            operation,
+            PreparedNodePatchOperation::Standard(OpKind::Replace {
+                new_text: "def process_data():\n    return 1\n".to_string(),
+            })
+        );
     }
 
     #[test]

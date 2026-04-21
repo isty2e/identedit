@@ -13,6 +13,7 @@ use super::PatchArgs;
 pub(super) enum PatchTargetIngress {
     NodeIdentity(String),
     NodeSelector { kind: String, name_pattern: String },
+    NodeSymbol(String),
     LineAnchor(String),
     FileStart,
     FileEnd,
@@ -23,6 +24,7 @@ pub(super) enum PatchTargetIngress {
 pub(super) enum NodeTargetSelector {
     Identity(String),
     Selector { kind: String, name_pattern: String },
+    Symbol(String),
 }
 
 impl NodeTargetSelector {
@@ -32,6 +34,7 @@ impl NodeTargetSelector {
             Self::Selector { kind, name_pattern } => {
                 resolve_unique_selector_handle_for_patch(file, &kind, &name_pattern)
             }
+            Self::Symbol(symbol) => resolve_unique_symbol_handle_for_patch(file, &symbol),
         }
     }
 }
@@ -40,22 +43,27 @@ pub(super) fn resolve_patch_target_ingress(
     args: &PatchArgs,
 ) -> Result<PatchTargetIngress, IdenteditError> {
     let selector_present = args.kind.is_some() || args.name.is_some();
+    let symbol_present = args.symbol.is_some();
 
     if let Some(path) = args.config_path.clone() {
-        if args.at.is_some() || args.identity.is_some() || args.anchor.is_some() || selector_present
+        if args.at.is_some()
+            || args.identity.is_some()
+            || args.anchor.is_some()
+            || selector_present
+            || symbol_present
         {
             return Err(IdenteditError::InvalidRequest {
-                message: "--config-path cannot be combined with --at, --identity, --anchor, --kind, or --name. Config path mode supports --set-value, --append-value, or --delete. Use --create-missing only with --set-value.".to_string(),
+                message: "--config-path cannot be combined with --at, --identity, --anchor, --kind, --name, or --symbol. Config path mode supports --set-value, --append-value, or --delete. Use --create-missing only with --set-value.".to_string(),
             });
         }
         return Ok(PatchTargetIngress::ConfigPath(path));
     }
 
     if let Some(at) = args.at.as_deref() {
-        if args.identity.is_some() || args.anchor.is_some() || selector_present {
+        if args.identity.is_some() || args.anchor.is_some() || selector_present || symbol_present {
             return Err(IdenteditError::InvalidRequest {
                 message:
-                    "Choose exactly one target selector. Use --at <target> by itself, or use --identity, --anchor, or --kind with --name."
+                    "Choose exactly one target selector. Use --at <target> by itself, or use --identity, --anchor, --symbol, or --kind with --name."
                         .to_string(),
             });
         }
@@ -67,13 +75,15 @@ pub(super) fn resolve_patch_target_ingress(
         args.anchor.clone(),
         args.kind.clone(),
         args.name.clone(),
+        args.symbol.clone(),
     ) {
-        (Some(identity), None, None, None) => Ok(PatchTargetIngress::NodeIdentity(identity)),
-        (None, Some(anchor), None, None) => Ok(PatchTargetIngress::LineAnchor(anchor)),
-        (None, None, Some(kind), Some(name_pattern)) => {
+        (Some(identity), None, None, None, None) => Ok(PatchTargetIngress::NodeIdentity(identity)),
+        (None, Some(anchor), None, None, None) => Ok(PatchTargetIngress::LineAnchor(anchor)),
+        (None, None, Some(kind), Some(name_pattern), None) => {
             Ok(PatchTargetIngress::NodeSelector { kind, name_pattern })
         }
-        (None, None, Some(_), None) | (None, None, None, Some(_)) => {
+        (None, None, None, None, Some(symbol)) => Ok(PatchTargetIngress::NodeSymbol(symbol)),
+        (None, None, Some(_), None, None) | (None, None, None, Some(_), None) => {
             Err(IdenteditError::InvalidRequest {
                 message:
                     "Direct symbol targeting requires both --kind and --name. Example: --kind function_definition --name process_*."
@@ -82,7 +92,7 @@ pub(super) fn resolve_patch_target_ingress(
         }
         _ => Err(IdenteditError::InvalidRequest {
             message:
-                "Choose exactly one target selector in flag mode: --at <target>, --identity <hex16>, --anchor <line:hash>, or --kind <kind> --name <glob>."
+                "Choose exactly one target selector in flag mode: --at <target>, --identity <hex16>, --anchor <line:hash>, --symbol <name>, or --kind <kind> --name <glob>."
                     .to_string(),
         }),
     }
@@ -185,4 +195,73 @@ fn resolve_unique_selector_handle_for_patch(
             candidates: candidates.len(),
         }),
     }
+}
+
+fn resolve_unique_symbol_handle_for_patch(
+    file: &Path,
+    symbol: &str,
+) -> Result<SelectionHandle, IdenteditError> {
+    let query = symbol.trim();
+    if query.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--symbol must not be empty".to_string(),
+        });
+    }
+
+    let handles = parse_handles_for_file(file)?;
+    let matches = handles
+        .iter()
+        .filter(|handle| symbol_matches(handle, &handles, query))
+        .cloned()
+        .collect::<Vec<_>>();
+    let selector_description = format!("symbol='{query}'");
+
+    match matches.as_slice() {
+        [] => Err(IdenteditError::TargetMissingSelector {
+            selector: selector_description,
+            file: file.display().to_string(),
+        }),
+        [single] => Ok(single.clone()),
+        candidates => Err(IdenteditError::AmbiguousTargetSelector {
+            selector: selector_description,
+            file: file.display().to_string(),
+            candidates: candidates.len(),
+        }),
+    }
+}
+
+fn symbol_matches(handle: &SelectionHandle, handles: &[SelectionHandle], query: &str) -> bool {
+    let Some(name) = handle.name.as_deref() else {
+        return false;
+    };
+
+    name == query
+        || qualified_symbol_name(handle, handles).is_some_and(|qualified| qualified == query)
+}
+
+fn qualified_symbol_name(handle: &SelectionHandle, handles: &[SelectionHandle]) -> Option<String> {
+    let name = handle.name.as_ref()?;
+    let mut parts = handles
+        .iter()
+        .filter(|candidate| is_named_ancestor(candidate, handle))
+        .collect::<Vec<_>>();
+    parts.sort_by_key(|candidate| (candidate.span.start, std::cmp::Reverse(candidate.span.end)));
+
+    let mut qualified = parts
+        .into_iter()
+        .filter_map(|candidate| candidate.name.as_deref())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    qualified.push(name.clone());
+    Some(qualified.join("."))
+}
+
+fn is_named_ancestor(candidate: &SelectionHandle, handle: &SelectionHandle) -> bool {
+    candidate.name.is_some()
+        && candidate.span.start <= handle.span.start
+        && handle.span.end <= candidate.span.end
+        && !(candidate.span.start == handle.span.start
+            && candidate.span.end == handle.span.end
+            && candidate.kind == handle.kind
+            && candidate.name == handle.name)
 }

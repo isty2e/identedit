@@ -74,6 +74,19 @@ fn top_level_version_reports_package_version() {
 }
 
 #[test]
+fn patch_help_exposes_symbol_selector() {
+    let output = run_identedit(&["patch", "--help"]);
+    assert!(
+        output.status.success(),
+        "patch help should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(text.contains("--symbol"));
+    assert!(text.contains("Class.method"));
+}
+
+#[test]
 fn read_line_mode_outputs_line_hash_anchors() {
     let file = copy_fixture_to_temp_python("example.py");
     let read_output = run_identedit(&[

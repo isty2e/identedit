@@ -25,13 +25,14 @@ If none match, default to `Edit`/`Write` for speed.
 
 | Task | Command |
 |---|---|
-| Replace a function by name | `identedit patch file --kind function_definition --name foo --replace 'new body'` |
+| Replace a unique function/symbol by name | `identedit patch file --symbol foo --replace 'new body'` |
+| Replace a method by containing path | `identedit patch file --symbol Class.method --replace 'new body'` |
 | Replace using identity hash | `identedit patch file --at <identity-hex16> --replace 'new body'` |
 | Insert at end of file | `identedit patch file --at file-end --insert 'new code'` |
 | Update a config key | `identedit patch file --config-path key.path --set-value 42` |
 | Append to a config array | `identedit patch file --config-path items --append-value '"x"'` |
 | Edit a specific line | `identedit patch file --at "LINE:HASH" --set-line 'new line'` |
-| Replace with large text (10+ lines) | `identedit patch file --kind ... --name ... --replace --text-file /tmp/body.py` |
+| Replace with large text (10+ lines) | `identedit patch file --symbol foo --replace --text-file /tmp/body.py` |
 | Preview without writing | Add `--dry-run` to any `patch` command |
 | Multiple ops or multi-file atomic | `identedit edit --json` + `identedit apply` (see [Reference](#structural-editing-pipeline)) |
 | Move/copy a structure | `identedit edit` with `move_before`/`copy_after` (see [Operations](#operations)) |
@@ -55,9 +56,14 @@ Most identedit use cases fit in one command:
 
 ```bash
 # Replace a function by name (no read step needed)
-identedit patch src/example.py --kind function_definition --name process_data \
+identedit patch src/example.py --symbol process_data \
   --replace 'def process_data(x, y):
     return x + y'
+
+# Replace a method by containing-name path
+identedit patch src/example.py --symbol Processor.process_data \
+  --replace 'def process_data(self, x, y):
+        return x + y'
 
 # Same thing using identity hash (when you already have read output)
 identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
@@ -78,11 +84,13 @@ identedit patch config.yaml --config-path server.port --set-value 8080
 identedit patch config.json --config-path items --append-value '"new_item"'
 
 # Preview without writing
-identedit patch src/example.py --kind function_definition --name process_data \
+identedit patch src/example.py --symbol process_data \
   --replace 'new body' --dry-run
 ```
 
-`--kind` + `--name` targets by symbol name directly — no `read` step needed. The name supports glob patterns (e.g., `process_*`). If the match is ambiguous (multiple candidates) or missing, patch fails with a clear error. Use `--name "*"` to match by kind only (e.g., the sole class in a file).
+`--symbol` targets a unique named node directly — no `read` step needed. It accepts a local name (`process_data`) or a containing-name path (`Processor.process_data`). If the match is ambiguous or missing, patch fails without writing.
+
+Use `--kind` + `--name` when you need kind-specific glob matching (e.g., `--kind function_definition --name "process_*"`). The name supports glob patterns. Use `--name "*"` to match by kind only (e.g., the sole class in a file).
 
 `patch` handles resolve + precondition validation + apply internally. Use `read → edit → apply` only when you need multi-file atomic or multiple operations in one request.
 
@@ -96,14 +104,14 @@ def target_fn(...):
     ...
 EOF
 
-identedit patch /abs/path/file.py --kind function_definition --name target_fn \
+identedit patch /abs/path/file.py --symbol target_fn \
   --replace --text-file /tmp/new_block.py
 ```
 
 Or pipe text via stdin:
 
 ```bash
-identedit patch /abs/path/file.py --kind function_definition --name target_fn \
+identedit patch /abs/path/file.py --symbol target_fn \
   --replace --stdin-text < /tmp/new_block.py
 ```
 

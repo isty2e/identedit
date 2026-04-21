@@ -18,7 +18,8 @@ Three entry points covering different editing needs:
 
 **`patch`** — one-shot verified edit (most common):
 ```bash
-identedit patch src/example.py --kind function_definition --name process_data --replace 'def f(): ...'
+identedit patch src/example.py --symbol process_data --replace 'def f(): ...'
+identedit patch src/example.py --symbol Processor.process_data --replace 'def f(): ...'
 identedit patch src/example.py --at abc123def4567890 --replace 'def f(): ...'
 identedit patch src/example.py --at "42:9e0f1a2b3c4d" --set-line "    return x + y"
 identedit patch config.yaml --config-path server.port --set-value 8080
@@ -82,9 +83,14 @@ cargo install --path .
 
 ```bash
 # Replace a function by name (no read step needed)
-identedit patch src/example.py --kind function_definition --name process_data \
+identedit patch src/example.py --symbol process_data \
   --replace 'def process_data(x, y):
     return x + y'
+
+# Replace a method by containing-name path
+identedit patch src/example.py --symbol Processor.process_data \
+  --replace 'def process_data(self, x, y):
+        return x + y'
 
 # Same thing using identity hash (when you already have read output)
 identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
@@ -126,6 +132,8 @@ EOF
 identedit patch src/example.py --kind function_definition --name process_data \
   --replace --text-file /tmp/new_block.py
 ```
+
+Use `--symbol` for a unique local name (`process_data`) or containing-name path (`Processor.process_data`). If a symbol is ambiguous or missing, patch fails without writing. Use `--kind` + `--name` when you need kind-specific glob matching such as `--name "process_*"`.
 
 Or via the `edit` pipeline with `jq --rawfile`:
 

@@ -54,6 +54,17 @@ fn create_scoped_regex_fixture() -> std::path::PathBuf {
     temp_file.keep().expect("temp file should persist").1
 }
 
+fn create_temp_python_source(content: &str) -> std::path::PathBuf {
+    let mut temp_file = Builder::new()
+        .suffix(".py")
+        .tempfile()
+        .expect("temp python file should be created");
+    temp_file
+        .write_all(content.as_bytes())
+        .expect("temp python fixture write should succeed");
+    temp_file.keep().expect("temp file should persist").1
+}
+
 fn create_temp_text_file(content: &str) -> std::path::PathBuf {
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -1452,6 +1463,206 @@ fn patch_config_set_value_stdin_json_string_with_leading_dash_applies() {
         serde_json::from_str(&fs::read_to_string(&file_path).expect("modified file should read"))
             .expect("modified JSON should parse");
     assert_eq!(modified["name"], "--help");
+}
+
+#[test]
+fn patch_symbol_replaces_unique_symbol_without_kind_name_flags() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "helper",
+        "--replace",
+        "def helper():\n    return \"patched\"",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "symbol patch should infer the unique helper node: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains("return \"patched\""));
+    assert!(modified.contains("def process_data(value):"));
+}
+
+#[test]
+fn patch_symbol_qualified_name_targets_nested_method() {
+    let source = "def process_data(value):\n    return value + 1\n\n\nclass Processor:\n    def process_data(self, value):\n        return value + 2\n\n\nclass Other:\n    def process_data(self, value):\n        return value + 3\n";
+    let file_path = create_temp_python_source(source);
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "Processor.process_data",
+        "--replace",
+        "def process_data(self, value):\n        return value * 7",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "qualified symbol patch should target exactly one method: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
+    assert!(modified.contains(
+        "class Processor:\n    def process_data(self, value):\n        return value * 7"
+    ));
+    assert!(modified.contains("def process_data(value):\n    return value + 1"));
+    assert!(
+        modified
+            .contains("class Other:\n    def process_data(self, value):\n        return value + 3")
+    );
+}
+
+#[test]
+fn patch_symbol_unqualified_duplicate_reports_ambiguous_target() {
+    let source = "def process_data(value):\n    return value + 1\n\n\nclass Processor:\n    def process_data(self, value):\n        return value + 2\n";
+    let file_path = create_temp_python_source(source);
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "process_data",
+        "--replace",
+        "def process_data(value):\n    return 0",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "unqualified duplicate symbol should fail instead of guessing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "ambiguous_target");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(message.contains("symbol='process_data'"));
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "ambiguous symbol patch must not mutate the source"
+    );
+}
+
+#[test]
+fn patch_symbol_duplicate_qualified_name_reports_ambiguous_target() {
+    let source = "class Processor:\n    def process_data(self, value):\n        return value + 2\n\n\nclass Processor:\n    def process_data(self, value):\n        return value + 3\n";
+    let file_path = create_temp_python_source(source);
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "Processor.process_data",
+        "--replace",
+        "def process_data(self, value):\n        return 0",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "duplicate qualified symbol should fail instead of choosing the first match"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "ambiguous_target");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(message.contains("symbol='Processor.process_data'"));
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        source,
+        "ambiguous qualified symbol patch must not mutate the source"
+    );
+}
+
+#[test]
+fn patch_symbol_missing_symbol_reports_target_missing_without_mutation() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read_to_string(&file_path).expect("file should be readable");
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "Processor.process_data",
+        "--replace",
+        "def process_data(self, value):\n        return 0",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "missing symbol should return target_missing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "target_missing");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(message.contains("symbol='Processor.process_data'"));
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should be readable"),
+        before,
+        "missing symbol patch must not mutate the source"
+    );
+}
+
+#[test]
+fn patch_symbol_rejects_mixed_kind_name_selector() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "helper",
+        "--kind",
+        "function_definition",
+        "--name",
+        "helper",
+        "--replace",
+        "def helper():\n    return \"patched\"",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "symbol selector should not mix with kind/name selector"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(message.contains("--symbol") && message.contains("--kind"));
+}
+
+#[test]
+fn patch_symbol_rejects_empty_symbol() {
+    let file_path = copy_fixture_to_temp_python("example.py");
+
+    let output = run_identedit(&[
+        "patch",
+        "--symbol",
+        "   ",
+        "--replace",
+        "def helper():\n    return \"patched\"",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "empty symbol selector should fail"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be present");
+    assert!(message.contains("--symbol") && message.contains("empty"));
 }
 
 #[test]

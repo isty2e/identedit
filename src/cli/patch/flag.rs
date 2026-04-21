@@ -29,7 +29,7 @@ fn node_mode_guidance() -> String {
 
 fn line_mode_guidance() -> String {
     format!(
-        "Line target mode supports {LINE_MODE_OPERATIONS}. For node edits use --identity, --kind with --name, or --at <hex16>."
+        "Line target mode supports {LINE_MODE_OPERATIONS}. For node edits use --identity, --symbol, --kind with --name, or --at <hex16>."
     )
 }
 
@@ -63,6 +63,9 @@ pub(super) fn parse_flag_patch_request(
             NodeTargetSelector::Selector { kind, name_pattern },
             args,
         ),
+        PatchTargetIngress::NodeSymbol(symbol) => {
+            parse_node_flag_patch_request(file, NodeTargetSelector::Symbol(symbol), args)
+        }
         PatchTargetIngress::LineAnchor(anchor) => parse_line_flag_patch_request(file, anchor, args),
         PatchTargetIngress::FileStart => parse_file_flag_patch_request(file, true, args),
         PatchTargetIngress::FileEnd => parse_file_flag_patch_request(file, false, args),
