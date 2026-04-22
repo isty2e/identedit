@@ -31,42 +31,6 @@ pub(super) fn render_json_with_create_missing(
     Ok(apply_source_line_ending_style(&rendered, source_text))
 }
 
-pub(super) fn render_yaml_with_create_missing(
-    source_text: &str,
-    path_tokens: &[PathToken],
-    raw_path: &str,
-    new_text: &str,
-) -> Result<String, IdenteditError> {
-    let mut root: serde_yaml::Value =
-        serde_yaml::from_str(source_text).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!("Config path create-missing could not parse YAML document: {error}"),
-        })?;
-    if matches!(root, serde_yaml::Value::Null)
-        && path_tokens
-            .first()
-            .is_some_and(|token| matches!(token, PathToken::Key(_)))
-    {
-        root = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
-    }
-    let parsed_new_value: serde_yaml::Value =
-        serde_yaml::from_str(new_text).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!("Config path set value is not valid YAML: {error}"),
-        })?;
-    apply_yaml_set_create_missing(&mut root, path_tokens, raw_path, &parsed_new_value)?;
-
-    let rendered =
-        serde_yaml::to_string(&root).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!(
-                "Config path create-missing could not serialize YAML document: {error}"
-            ),
-        })?;
-    let normalized = rendered
-        .strip_prefix("---\n")
-        .unwrap_or(&rendered)
-        .to_string();
-    Ok(apply_source_line_ending_style(&normalized, source_text))
-}
-
 pub(super) fn render_toml_with_create_missing(
     source_text: &str,
     path_tokens: &[PathToken],
@@ -229,72 +193,6 @@ fn apply_json_set_create_missing(
     }
 }
 
-fn apply_yaml_set_create_missing(
-    current: &mut serde_yaml::Value,
-    path_tokens: &[PathToken],
-    raw_path: &str,
-    new_value: &serde_yaml::Value,
-) -> Result<(), IdenteditError> {
-    let Some((head, tail)) = path_tokens.split_first() else {
-        *current = new_value.clone();
-        return Ok(());
-    };
-
-    match head {
-        PathToken::Key(key) => {
-            let mapping = match current {
-                serde_yaml::Value::Mapping(mapping) => mapping,
-                _ => {
-                    return Err(expected_path_container_error(
-                        raw_path,
-                        head,
-                        yaml_value_kind_name(current),
-                    ));
-                }
-            };
-            let key_value = serde_yaml::Value::String(key.clone());
-            if tail.is_empty() {
-                mapping.insert(key_value, new_value.clone());
-                return Ok(());
-            }
-            if !mapping.contains_key(&key_value) {
-                mapping.insert(key_value.clone(), empty_yaml_container_for_token(&tail[0]));
-            }
-            let child =
-                mapping
-                    .get_mut(&key_value)
-                    .ok_or_else(|| IdenteditError::InvalidRequest {
-                        message: format!("Config path '{raw_path}' segment '{key}' was not found"),
-                    })?;
-            apply_yaml_set_create_missing(child, tail, raw_path, new_value)
-        }
-        PathToken::Index(index) => {
-            let sequence = match current {
-                serde_yaml::Value::Sequence(sequence) => sequence,
-                _ => {
-                    return Err(expected_path_container_error(
-                        raw_path,
-                        head,
-                        yaml_value_kind_name(current),
-                    ));
-                }
-            };
-            if *index >= sequence.len() {
-                return Err(array_index_out_of_bounds_error(
-                    raw_path,
-                    *index,
-                    sequence.len(),
-                ));
-            }
-            if tail.is_empty() {
-                sequence[*index] = new_value.clone();
-                return Ok(());
-            }
-            apply_yaml_set_create_missing(&mut sequence[*index], tail, raw_path, new_value)
-        }
-    }
-}
-
 fn apply_toml_set_create_missing(
     current: &mut toml::Value,
     path_tokens: &[PathToken],
@@ -366,13 +264,6 @@ fn empty_json_container_for_token(next: &PathToken) -> serde_json::Value {
     }
 }
 
-fn empty_yaml_container_for_token(next: &PathToken) -> serde_yaml::Value {
-    match next {
-        PathToken::Key(_) => serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
-        PathToken::Index(_) => serde_yaml::Value::Sequence(Vec::new()),
-    }
-}
-
 fn empty_toml_container_for_token(next: &PathToken) -> toml::Value {
     match next {
         PathToken::Key(_) => toml::Value::Table(toml::Table::new()),
@@ -388,18 +279,6 @@ fn json_value_kind_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::String(_) => "string",
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
-    }
-}
-
-fn yaml_value_kind_name(value: &serde_yaml::Value) -> &'static str {
-    match value {
-        serde_yaml::Value::Null => "null",
-        serde_yaml::Value::Bool(_) => "boolean",
-        serde_yaml::Value::Number(_) => "number",
-        serde_yaml::Value::String(_) => "string",
-        serde_yaml::Value::Sequence(_) => "sequence",
-        serde_yaml::Value::Mapping(_) => "mapping",
-        serde_yaml::Value::Tagged(_) => "tagged",
     }
 }
 

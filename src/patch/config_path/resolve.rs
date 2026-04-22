@@ -178,11 +178,37 @@ pub(super) fn resolve_yaml_path(
     operation: &ConfigPathOperation,
     raw_path: &str,
 ) -> Result<ResolvedContainerEdit, IdenteditError> {
-    let mut current =
-        yaml_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
-            message: "YAML document has no root value".to_string(),
-        })?;
+    let mut matches = Vec::new();
+    let mut first_error = None;
+    for root in yaml_document_root_values(tree.root_node()) {
+        match resolve_yaml_path_from_root(root, source, path_tokens, operation, raw_path) {
+            Ok(resolved) => matches.push(resolved),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        };
+    }
 
+    match matches.as_slice() {
+        [single] => Ok(single.clone()),
+        [] => Err(
+            first_error.unwrap_or_else(|| IdenteditError::InvalidRequest {
+                message: "YAML document has no root value".to_string(),
+            }),
+        ),
+        _ => Err(IdenteditError::InvalidRequest {
+            message: format!("Config path '{raw_path}' is ambiguous across YAML documents"),
+        }),
+    }
+}
+
+fn resolve_yaml_path_from_root(
+    mut current: Node<'_>,
+    source: &[u8],
+    path_tokens: &[PathToken],
+    operation: &ConfigPathOperation,
+    raw_path: &str,
+) -> Result<ResolvedContainerEdit, IdenteditError> {
     for (index, token) in path_tokens.iter().enumerate() {
         let last = index + 1 == path_tokens.len();
         match token {
@@ -494,12 +520,6 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
     new_text: &str,
 ) -> Result<String, IdenteditError> {
     parse_yaml_value_fragment(new_text)?;
-    if new_text.contains('\n') || new_text.contains('\r') {
-        return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing for YAML comments supports only single-line value text; use line mode for multiline YAML values"
-                .to_string(),
-        });
-    }
 
     let root = yaml_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
         message: "YAML document has no root value".to_string(),
@@ -523,12 +543,14 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
     }
 
     let indent = yaml_child_indent(source_text, parent_mapping);
-    let entry = yaml_create_missing_entry_text(create_tokens, &indent, new_text, raw_path)?;
+    let line_ending = yaml_line_ending_literal(source_text);
+    let entry =
+        yaml_create_missing_entry_text(create_tokens, &indent, new_text, raw_path, line_ending)?;
     insert_yaml_entry_line(
         &source_text[root_span.start..root_span.end],
         insertion_offset - root_span.start,
         &entry,
-        yaml_line_ending_literal(source_text),
+        line_ending,
     )
 }
 
@@ -539,12 +561,6 @@ pub(super) fn render_yaml_comment_only_create_missing_insertion(
     new_text: &str,
 ) -> Result<String, IdenteditError> {
     parse_yaml_value_fragment(new_text)?;
-    if new_text.contains('\n') || new_text.contains('\r') {
-        return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing for YAML comments supports only single-line value text; use line mode for multiline YAML values"
-                .to_string(),
-        });
-    }
     if path_tokens
         .iter()
         .any(|token| matches!(token, PathToken::Index(_)))
@@ -557,7 +573,7 @@ pub(super) fn render_yaml_comment_only_create_missing_insertion(
     }
 
     let line_ending = yaml_line_ending_literal(source_text);
-    let entry = yaml_create_missing_entry_text(path_tokens, "", new_text, raw_path)?;
+    let entry = yaml_create_missing_entry_text(path_tokens, "", new_text, raw_path, line_ending)?;
     let mut insertion = String::new();
     if !source_text.is_empty() && !ends_with_line_ending(source_text) {
         insertion.push_str(line_ending);
@@ -587,6 +603,28 @@ pub(super) fn yaml_root_value(root: Node<'_>) -> Option<Node<'_>> {
         node = first_non_comment_named_child(node)?;
     }
     yaml_unwrap_node(node)
+}
+
+fn yaml_document_root_values(root: Node<'_>) -> Vec<Node<'_>> {
+    if root.kind() != "stream" {
+        return yaml_root_value(root).into_iter().collect();
+    }
+
+    let mut roots = Vec::new();
+    for child in named_children(root) {
+        if child.kind() != "document" {
+            continue;
+        }
+        if let Some(value) = yaml_root_value(child) {
+            roots.push(value);
+        }
+    }
+
+    if roots.is_empty() {
+        yaml_root_value(root).into_iter().collect()
+    } else {
+        roots
+    }
 }
 
 pub(super) fn span_from_node(node: Node<'_>) -> Span {
@@ -672,6 +710,128 @@ pub(super) fn rewrite_container_text(
     let relative_end = replace_span.end - container_span.start;
     container_text.replace_range(relative_start..relative_end, replacement);
     Ok(container_text)
+}
+
+pub(super) fn yaml_set_value_replacement_text(
+    source_text: &str,
+    replace_span: Span,
+    new_text: &str,
+    raw_path: &str,
+) -> Result<String, IdenteditError> {
+    reject_yaml_non_ascii_line_separators(new_text, raw_path)?;
+    if !new_text.contains('\n') && !new_text.contains('\r') {
+        reject_yaml_implicit_null_single_line_value(new_text, raw_path)?;
+        return Ok(new_text.to_string());
+    }
+    if let Some(single_line_value) = yaml_single_line_value_with_trailing_line_endings(new_text) {
+        reject_yaml_implicit_null_single_line_value(single_line_value, raw_path)?;
+        return Ok(single_line_value.to_string());
+    }
+
+    reject_yaml_block_scalar_before_trailing_line_content(source_text, replace_span, raw_path)?;
+
+    let line_start = line_start_before_offset(source_text, replace_span.start);
+    let line_prefix = &source_text[line_start..replace_span.start];
+    let value_indent = line_prefix
+        .chars()
+        .take_while(|character| *character == ' ')
+        .collect::<String>();
+    let line_ending = yaml_line_ending_literal(source_text);
+    let mut replacement =
+        yaml_multiline_value_text(new_text, &value_indent, raw_path, line_ending)?;
+    if yaml_existing_replacement_needs_block_scalar_terminator(new_text) {
+        replacement.push_str(line_ending);
+    }
+    Ok(replacement)
+}
+
+pub(super) fn yaml_set_value_replace_span(
+    source_text: &str,
+    replace_span: Span,
+    replacement: &str,
+    raw_path: &str,
+) -> Result<Span, IdenteditError> {
+    if !replacement.contains('\n') && !replacement.contains('\r') {
+        return Ok(replace_span);
+    }
+
+    let line_end = line_end_after_offset(source_text, replace_span.end);
+    let trailing = &source_text[replace_span.end..line_end];
+    if !trailing.trim().is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' cannot replace a YAML value with a block scalar while trailing content remains on the same line; use line mode to rewrite the full line"
+            ),
+        });
+    }
+
+    Ok(Span {
+        start: replace_span.start,
+        end: line_end,
+    })
+}
+
+pub(super) fn reject_yaml_implicit_null_single_line_value(
+    text: &str,
+    raw_path: &str,
+) -> Result<(), IdenteditError> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' YAML set value must be an explicit YAML value; quote empty or comment-like strings"
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+pub(super) fn yaml_single_line_value_with_trailing_line_endings(text: &str) -> Option<&str> {
+    let trimmed = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .or_else(|| text.strip_suffix('\r'))?;
+    if trimmed.contains('\n') || trimmed.contains('\r') {
+        return None;
+    }
+    if matches!(
+        trimmed.trim_end_matches(' ').chars().next(),
+        Some('|' | '>')
+    ) {
+        return None;
+    }
+    Some(trimmed)
+}
+
+fn yaml_existing_replacement_needs_block_scalar_terminator(text: &str) -> bool {
+    let normalized = normalize_yaml_fragment_line_endings(text);
+    if !normalized.ends_with('\n') {
+        return false;
+    }
+    let Some((header_line, _)) = normalized.split_once('\n') else {
+        return false;
+    };
+    let header = header_line.trim_end_matches(' ');
+    matches!(header, "|" | ">")
+}
+
+fn reject_yaml_block_scalar_before_trailing_line_content(
+    source_text: &str,
+    replace_span: Span,
+    raw_path: &str,
+) -> Result<(), IdenteditError> {
+    let line_end = line_end_after_offset(source_text, replace_span.end);
+    let trailing = &source_text[replace_span.end..line_end];
+    if trailing.trim().is_empty() {
+        return Ok(());
+    }
+
+    Err(IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path '{raw_path}' cannot replace a YAML value with a block scalar while trailing content remains on the same line; use line mode to rewrite the full line"
+        ),
+    })
 }
 
 pub(super) fn rewrite_full_source_text(
@@ -1019,6 +1179,7 @@ fn yaml_create_missing_entry_text(
     base_indent: &str,
     new_text: &str,
     raw_path: &str,
+    line_ending: &str,
 ) -> Result<String, IdenteditError> {
     if create_tokens.is_empty() {
         return Err(IdenteditError::InvalidRequest {
@@ -1031,21 +1192,212 @@ fn yaml_create_missing_entry_text(
         let PathToken::Key(key) = token else {
             unreachable!("index tokens were rejected before YAML entry rendering");
         };
-        entry.push_str(base_indent);
-        for _ in 0..index {
-            entry.push_str("  ");
-        }
-        entry.push_str(key);
+        let entry_indent = format!("{base_indent}{}", "  ".repeat(index));
+        entry.push_str(&entry_indent);
+        entry.push_str(&yaml_render_key_segment(key));
         entry.push(':');
         if index + 1 == create_tokens.len() {
-            entry.push(' ');
-            entry.push_str(new_text);
+            let value_text =
+                yaml_create_missing_value_text(new_text, &entry_indent, raw_path, line_ending)?;
+            entry.push_str(&value_text);
         }
         if index + 1 < create_tokens.len() {
-            entry.push('\n');
+            entry.push_str(line_ending);
         }
     }
     Ok(entry)
+}
+
+fn yaml_render_key_segment(key: &str) -> String {
+    if is_yaml_plain_key_safe(key) {
+        key.to_string()
+    } else {
+        serde_json::to_string(key)
+            .unwrap_or_else(|_| format!("\"{}\"", key.replace('\\', "\\\\").replace('"', "\\\"")))
+    }
+}
+
+fn is_yaml_plain_key_safe(key: &str) -> bool {
+    if key.is_empty() || key.trim() != key {
+        return false;
+    }
+
+    let mut chars = key.chars();
+    if let Some(first) = chars.next()
+        && (first.is_ascii_digit()
+            || matches!(
+                first,
+                '-' | '?'
+                    | ':'
+                    | '{'
+                    | '}'
+                    | '['
+                    | ']'
+                    | ','
+                    | '&'
+                    | '*'
+                    | '#'
+                    | '!'
+                    | '|'
+                    | '>'
+                    | '\''
+                    | '"'
+                    | '%'
+                    | '@'
+                    | '`'
+            ))
+    {
+        return false;
+    }
+
+    !key.chars()
+        .any(|character| character.is_control() || character == '\t')
+        && !key.contains(": ")
+        && !key.contains(" #")
+        && plain_yaml_scalar_round_trips_as_string(key)
+}
+
+fn plain_yaml_scalar_round_trips_as_string(key: &str) -> bool {
+    matches!(
+        serde_yaml::from_str::<serde_yaml::Value>(key),
+        Ok(serde_yaml::Value::String(value)) if value == key
+    )
+}
+
+fn yaml_create_missing_value_text(
+    new_text: &str,
+    leaf_indent: &str,
+    raw_path: &str,
+    line_ending: &str,
+) -> Result<String, IdenteditError> {
+    reject_yaml_non_ascii_line_separators(new_text, raw_path)?;
+    if !new_text.contains('\n') && !new_text.contains('\r') {
+        reject_yaml_implicit_null_single_line_value(new_text, raw_path)?;
+        return Ok(format!(" {new_text}"));
+    }
+    if let Some(single_line_value) = yaml_single_line_value_with_trailing_line_endings(new_text) {
+        reject_yaml_implicit_null_single_line_value(single_line_value, raw_path)?;
+        return Ok(format!(" {single_line_value}"));
+    }
+
+    Ok(format!(
+        " {}",
+        yaml_multiline_value_text(new_text, leaf_indent, raw_path, line_ending)?
+    ))
+}
+
+fn yaml_multiline_value_text(
+    new_text: &str,
+    leaf_indent: &str,
+    raw_path: &str,
+    line_ending: &str,
+) -> Result<String, IdenteditError> {
+    let normalized = normalize_yaml_fragment_line_endings(new_text);
+    let Some((header_line, body_text)) = normalized.split_once('\n') else {
+        return Err(yaml_multiline_value_policy_error(raw_path));
+    };
+    let header = yaml_block_scalar_header(header_line, raw_path)?;
+    let body_lines = yaml_block_scalar_body_lines(body_text);
+    let strip_indent = yaml_block_scalar_body_indent(&body_lines, raw_path)?;
+    let body_indent = format!("{leaf_indent}  ");
+
+    let mut rendered = header.to_string();
+    for line in body_lines {
+        rendered.push_str(line_ending);
+        rendered.push_str(&body_indent);
+        if !line.is_empty() {
+            rendered.push_str(
+                line.get(strip_indent..)
+                    .ok_or_else(|| yaml_block_scalar_indent_error(raw_path))?,
+            );
+        }
+    }
+    Ok(rendered)
+}
+
+fn normalize_yaml_fragment_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn yaml_block_scalar_header<'a>(
+    header_line: &'a str,
+    raw_path: &str,
+) -> Result<&'a str, IdenteditError> {
+    if header_line.trim_start() != header_line {
+        return Err(yaml_multiline_value_policy_error(raw_path));
+    }
+
+    let header = header_line.trim_end_matches(' ');
+    let mut chars = header.chars();
+    let Some(style @ ('|' | '>')) = chars.next() else {
+        return Err(yaml_multiline_value_policy_error(raw_path));
+    };
+    let suffix = chars.as_str();
+    if matches!(suffix, "" | "-" | "+") {
+        return Ok(header);
+    }
+    if suffix.chars().any(|character| character.is_ascii_digit()) {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing for YAML comments does not support explicit block scalar indent indicators for '{raw_path}'; use {style}, {style}- or {style}+ without a numeric indent"
+            ),
+        });
+    }
+    Err(yaml_multiline_value_policy_error(raw_path))
+}
+
+fn yaml_block_scalar_body_lines(body_text: &str) -> Vec<&str> {
+    let mut lines = body_text.split('\n').collect::<Vec<_>>();
+    if body_text.ends_with('\n') {
+        lines.pop();
+    }
+    lines
+}
+
+fn yaml_block_scalar_body_indent(lines: &[&str], raw_path: &str) -> Result<usize, IdenteditError> {
+    let mut min_indent: Option<usize> = None;
+    for line in lines.iter().copied().filter(|line| !line.is_empty()) {
+        let indent = line.bytes().take_while(|byte| *byte == b' ').count();
+        if indent == 0 {
+            return Err(yaml_block_scalar_indent_error(raw_path));
+        }
+        min_indent = Some(min_indent.map_or(indent, |current| current.min(indent)));
+    }
+    Ok(min_indent.unwrap_or(0))
+}
+
+fn yaml_multiline_value_policy_error(raw_path: &str) -> IdenteditError {
+    IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path create-missing for YAML comments supports multiline values only as explicit block scalar leaf values for '{raw_path}' (|, |-, |+, >, >-, or >+); use line mode for multiline mappings or sequences"
+        ),
+    }
+}
+
+fn reject_yaml_non_ascii_line_separators(text: &str, raw_path: &str) -> Result<(), IdenteditError> {
+    if text.contains('\0') {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' YAML set value must not contain raw NUL characters"
+            ),
+        });
+    }
+    if text.contains('\u{2028}') || text.contains('\u{2029}') {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' YAML set value must not contain raw Unicode line separator characters; use an escaped quoted scalar if the character is intentional"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn yaml_block_scalar_indent_error(raw_path: &str) -> IdenteditError {
+    IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path create-missing for YAML comments cannot safely reindent block scalar content for '{raw_path}'; indent every non-empty scalar content line in the value fragment"
+        ),
+    }
 }
 
 fn require_yaml_block_mapping<'a>(
@@ -1113,6 +1465,15 @@ fn line_start_before_offset(source_text: &str, offset: usize) -> usize {
     let mut cursor = offset.min(bytes.len());
     while cursor > 0 && bytes[cursor - 1] != b'\n' && bytes[cursor - 1] != b'\r' {
         cursor -= 1;
+    }
+    cursor
+}
+
+fn line_end_after_offset(source_text: &str, offset: usize) -> usize {
+    let bytes = source_text.as_bytes();
+    let mut cursor = offset.min(bytes.len());
+    while cursor < bytes.len() && bytes[cursor] != b'\n' && bytes[cursor] != b'\r' {
+        cursor += 1;
     }
     cursor
 }

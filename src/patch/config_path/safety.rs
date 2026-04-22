@@ -32,9 +32,9 @@ pub(super) fn validate_yaml_create_missing_safety(
         });
     }
 
-    if has_yaml_anchor_or_alias(tree.root_node(), source_text) {
+    if has_yaml_reference_or_tag_syntax(tree.root_node(), source_text) {
         return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing does not support YAML anchor/alias documents"
+            message: "Config path create-missing does not support YAML anchor/alias/tag documents"
                 .to_string(),
         });
     }
@@ -59,17 +59,46 @@ pub(super) fn has_toml_comments(root: Node<'_>) -> bool {
 
 pub(super) fn validate_rendered_config_document(
     format: &ConfigFormat,
+    original_source: &str,
     updated_source: &str,
 ) -> Result<(), IdenteditError> {
-    parse_tree_for_format(format, updated_source.as_bytes()).map_err(|error| match error {
-        IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
-            message: format!(
-                "Config path edit produced invalid {} syntax",
-                config_format_name(format)
-            ),
-        },
-        other => other,
-    })?;
+    let tree =
+        parse_tree_for_format(format, updated_source.as_bytes()).map_err(|error| match error {
+            IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
+                message: format!(
+                    "Config path edit produced invalid {} syntax",
+                    config_format_name(format)
+                ),
+            },
+            other => other,
+        })?;
+    if matches!(format, ConfigFormat::Yaml) {
+        let original_tree = parse_tree_for_format(format, original_source.as_bytes()).map_err(
+            |error| match error {
+                IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
+                    message: "Config path edit could not validate the original YAML document"
+                        .to_string(),
+                },
+                other => other,
+            },
+        )?;
+        let original_document_count = count_nodes_by_kind(original_tree.root_node(), "document");
+        let updated_document_count = count_nodes_by_kind(tree.root_node(), "document");
+        if updated_document_count > original_document_count {
+            return Err(IdenteditError::InvalidRequest {
+                message:
+                    "Config path edit introduced additional YAML documents, which is not supported"
+                        .to_string(),
+            });
+        }
+        if has_yaml_reference_or_tag_syntax(tree.root_node(), updated_source) {
+            return Err(IdenteditError::InvalidRequest {
+                message:
+                    "Config path edit produced YAML anchor/alias/tag syntax, which is not supported"
+                        .to_string(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -143,7 +172,7 @@ pub(super) fn parse_tree_for_format(
     Ok(tree)
 }
 
-fn has_yaml_anchor_or_alias(root: Node<'_>, source_text: &str) -> bool {
+fn has_yaml_reference_or_tag_syntax(root: Node<'_>, source_text: &str) -> bool {
     if source_text.contains("<<: *") {
         return true;
     }
@@ -151,7 +180,7 @@ fn has_yaml_anchor_or_alias(root: Node<'_>, source_text: &str) -> bool {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         let kind = node.kind();
-        if kind.contains("anchor") || kind.contains("alias") {
+        if kind.contains("anchor") || kind.contains("alias") || kind.contains("tag") {
             return true;
         }
         for index in 0..node.child_count() {

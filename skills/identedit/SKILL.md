@@ -102,7 +102,7 @@ Use `--kind` + `--name` when you need kind-specific glob matching (e.g., `--kind
 `patch` handles resolve + precondition validation + apply internally. Use `read → edit → apply` only when you need multi-file atomic or multiple operations in one request.
 
 For non-trivial replacements, prefer `--dry-run --diff` first.
-For config paths, `--create-missing` creates only missing map/table keys; arrays/sequences are never auto-expanded. TOML comment-preserving creation can insert missing standard table parents, but still rejects inline-table parents and table-array conflicts. YAML comment-preserving creation can insert missing mapping parents and missing keys under existing sequence-item mappings; it still rejects sequence creation, out-of-range sequence indices, and scalar/null parent promotion.
+For config paths, `--create-missing` creates only missing map/table keys; arrays/sequences are never auto-expanded. TOML comment-preserving creation can insert missing standard table parents, but still rejects inline-table parents and table-array conflicts. YAML comment-preserving creation can insert missing mapping parents and missing keys under existing sequence-item mappings. For multiline YAML, use explicit block scalar leaf values only (`|`, `|-`, `|+`, `>`, `>-`, `>+`); multiline mapping/sequence fragments are rejected.
 
 ## Large Text: `--text-file` / `--stdin-text`
 
@@ -587,6 +587,17 @@ identedit patch config.toml --config-path 'tool["weird.section"].port' --set-val
 identedit patch config.json --config-path 'jobs["build/test"].steps[0]["run:script"]' --set-value '"npm test"'
 ```
 
+YAML block scalar creation:
+
+```bash
+cat <<'EOF' | identedit patch .github/workflows/ci.yml \
+  --config-path jobs.build.steps[0].run --set-value --create-missing --stdin-text
+|
+  cargo test
+  cargo clippy --all-targets -- -D warnings
+EOF
+```
+
 Config path rules:
 - `set` updates an existing path; use `create_missing: true` (JSON mode) or `--create-missing` (flag mode) only when creating missing map/table keys.
 - `append` requires the resolved target path to be an existing array/sequence.
@@ -595,6 +606,8 @@ Config path rules:
 - Config path edits are validated against the target format before writing — syntax-breaking edits are rejected.
 - TOML `--create-missing` preserves comments and can create missing standard table parents such as `[server.sidecar]`; it still rejects inline-table parents, array indexes, and table-array parent conflicts.
 - YAML `--create-missing` preserves comments for block mappings and can create missing intermediate mapping keys. Existing in-range sequence items can be traversed when the selected item is a mapping, but missing sequences and out-of-range sequence indices are rejected; use append for sequence growth.
+- YAML multiline create-missing is an identedit-local policy: only explicit block scalar leaf values are accepted (`|`, `|-`, `|+`, `>`, `>-`, `>+`). Numeric indentation indicators such as `|2`, multiline mappings, and multiline sequences are rejected; use line/direct editing for those broader rewrites.
+- YAML create-missing quotes unsafe or implicit-scalar-looking string keys while rendering new entries. Use bracket-quoted path segments for literal keys such as `["true"]`, `["null"]`, `["123"]`, or `["app: conf"]`.
 
 ---
 

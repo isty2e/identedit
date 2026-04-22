@@ -14,14 +14,16 @@ mod syntax;
 
 use render::{
     render_append_array_replacement, render_json_with_create_missing,
-    render_toml_with_create_missing, render_yaml_with_create_missing,
+    render_toml_with_create_missing,
 };
 use resolve::{
     ResolvedContainerEdit, find_handle_for_span, json_root_value,
-    render_yaml_comment_only_create_missing_insertion, resolve_json_path, resolve_toml_path,
-    resolve_yaml_path, rewrite_container_text, rewrite_full_source_text,
-    rewrite_toml_with_comment_preserving_create_missing,
+    reject_yaml_implicit_null_single_line_value, render_yaml_comment_only_create_missing_insertion,
+    resolve_json_path, resolve_toml_path, resolve_yaml_path, rewrite_container_text,
+    rewrite_full_source_text, rewrite_toml_with_comment_preserving_create_missing,
     rewrite_yaml_with_comment_preserving_create_missing, span_from_node, yaml_root_value,
+    yaml_set_value_replace_span, yaml_set_value_replacement_text,
+    yaml_single_line_value_with_trailing_line_endings,
 };
 use safety::{
     ConfigFormat, detect_config_format, has_toml_comments, has_yaml_comments,
@@ -125,10 +127,23 @@ pub fn resolve_config_path_operation(
         missing_path: MissingPathPolicy::Create,
     } = &operation
         && matches!(format, ConfigFormat::Yaml)
+    {
+        reject_yaml_create_missing_value_text(new_text, raw_path)?;
+    }
+
+    if let ConfigPathOperation::Set {
+        new_text,
+        missing_path: MissingPathPolicy::Create,
+    } = &operation
+        && matches!(format, ConfigFormat::Yaml)
         && yaml_effectively_empty_source(source_text)
     {
-        let updated =
-            render_yaml_with_create_missing(source_text, &path_tokens, raw_path, new_text)?;
+        let updated = render_yaml_comment_only_create_missing_insertion(
+            source_text,
+            &path_tokens,
+            raw_path,
+            new_text,
+        )?;
         let target = if source.is_empty() {
             TransformTarget::FileStart {
                 expected_file_hash: hash_bytes(&source),
@@ -167,13 +182,21 @@ pub fn resolve_config_path_operation(
         };
         match strict_resolved {
             Ok(resolved) => {
+                let replacement = set_replacement_text(
+                    &format,
+                    source_text,
+                    resolved.replace_span,
+                    new_text,
+                    raw_path,
+                )?;
                 return build_resolved_patch_from_container_edit(
                     &format,
                     file,
                     &source,
                     source_text,
                     resolved,
-                    new_text,
+                    &replacement,
+                    raw_path,
                 );
             }
             Err(error) if !is_missing_config_path_error(&error) => return Err(error),
@@ -207,7 +230,13 @@ pub fn resolve_config_path_operation(
     };
 
     let replacement = match &operation {
-        ConfigPathOperation::Set { new_text, .. } => new_text.clone(),
+        ConfigPathOperation::Set { new_text, .. } => set_replacement_text(
+            &format,
+            source_text,
+            resolved.replace_span,
+            new_text,
+            raw_path,
+        )?,
         ConfigPathOperation::Append { new_text } => render_append_array_replacement(
             source_text,
             resolved.container_span,
@@ -224,7 +253,37 @@ pub fn resolve_config_path_operation(
         source_text,
         resolved,
         &replacement,
+        raw_path,
     )
+}
+
+fn reject_yaml_create_missing_value_text(
+    new_text: &str,
+    raw_path: &str,
+) -> Result<(), IdenteditError> {
+    if !new_text.contains('\n') && !new_text.contains('\r') {
+        reject_yaml_implicit_null_single_line_value(new_text, raw_path)?;
+    } else if let Some(single_line_value) =
+        yaml_single_line_value_with_trailing_line_endings(new_text)
+    {
+        reject_yaml_implicit_null_single_line_value(single_line_value, raw_path)?;
+    }
+    Ok(())
+}
+
+fn set_replacement_text(
+    format: &ConfigFormat,
+    source_text: &str,
+    replace_span: crate::handle::Span,
+    new_text: &str,
+    raw_path: &str,
+) -> Result<String, IdenteditError> {
+    match format {
+        ConfigFormat::Yaml => {
+            yaml_set_value_replacement_text(source_text, replace_span, new_text, raw_path)
+        }
+        ConfigFormat::Json | ConfigFormat::Toml => Ok(new_text.to_string()),
+    }
 }
 
 fn build_resolved_patch_from_container_edit(
@@ -234,6 +293,7 @@ fn build_resolved_patch_from_container_edit(
     source_text: &str,
     resolved: ResolvedContainerEdit,
     replacement: &str,
+    raw_path: &str,
 ) -> Result<ResolvedConfigPatch, IdenteditError> {
     let handles = parse_handles_for_source(file, source)?;
     let container_handle = find_handle_for_span(
@@ -242,10 +302,18 @@ fn build_resolved_patch_from_container_edit(
         resolved.container_span,
         &resolved.container_kind,
     )?;
+    let replace_span = set_replace_span(
+        format,
+        source_text,
+        resolved.replace_span,
+        replacement,
+        raw_path,
+    )?;
+    validate_replacement_for_container(format, &resolved.container_kind, replacement, raw_path)?;
     let updated_container_text = rewrite_container_text(
         source_text,
         resolved.container_span,
-        resolved.replace_span,
+        replace_span,
         replacement,
     )?;
     let updated_source = rewrite_full_source_text(
@@ -253,7 +321,7 @@ fn build_resolved_patch_from_container_edit(
         resolved.container_span,
         &updated_container_text,
     )?;
-    validate_rendered_config_document(format, &updated_source)?;
+    validate_rendered_config_document(format, source_text, &updated_source)?;
 
     let target = TransformTarget::node(
         container_handle.identity,
@@ -268,6 +336,61 @@ fn build_resolved_patch_from_container_edit(
             new_text: updated_container_text,
         },
     })
+}
+
+fn set_replace_span(
+    format: &ConfigFormat,
+    source_text: &str,
+    replace_span: crate::handle::Span,
+    replacement: &str,
+    raw_path: &str,
+) -> Result<crate::handle::Span, IdenteditError> {
+    match format {
+        ConfigFormat::Yaml => {
+            yaml_set_value_replace_span(source_text, replace_span, replacement, raw_path)
+        }
+        ConfigFormat::Json | ConfigFormat::Toml => Ok(replace_span),
+    }
+}
+
+fn validate_replacement_for_container(
+    format: &ConfigFormat,
+    container_kind: &str,
+    replacement: &str,
+    raw_path: &str,
+) -> Result<(), IdenteditError> {
+    if !matches!(format, ConfigFormat::Yaml)
+        || !matches!(container_kind, "flow_sequence" | "flow_mapping")
+    {
+        return Ok(());
+    }
+
+    let trimmed = replacement.trim_start();
+    let starts_with_explicit_yaml_collection_or_string =
+        matches!(trimmed.chars().next(), Some('"' | '\'' | '[' | '{'));
+    if !starts_with_explicit_yaml_collection_or_string && replacement.contains(',') {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' YAML flow-container replacements containing ',' must be quoted or expressed as an explicit flow collection"
+            ),
+        });
+    }
+    if !starts_with_explicit_yaml_collection_or_string
+        && contains_yaml_plain_mapping_indicator(replacement)
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path '{raw_path}' YAML flow-container replacements containing mapping-like ':' syntax must be quoted or expressed as an explicit flow mapping"
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn contains_yaml_plain_mapping_indicator(text: &str) -> bool {
+    let trimmed = text.trim_end_matches([' ', '\t']);
+    trimmed.ends_with(':') || text.contains(": ") || text.contains(":\t")
 }
 
 fn resolve_config_path_set_with_create_missing(
@@ -300,16 +423,8 @@ fn resolve_config_path_set_with_create_missing(
             request.raw_path,
             request.new_text,
         )?,
-        ConfigFormat::Yaml if has_yaml_comments(request.tree.root_node()) => {
-            rewrite_yaml_with_comment_preserving_create_missing(
-                request.tree,
-                request.source_text,
-                request.path_tokens,
-                request.raw_path,
-                request.new_text,
-            )?
-        }
-        ConfigFormat::Yaml => render_yaml_with_create_missing(
+        ConfigFormat::Yaml => rewrite_yaml_with_comment_preserving_create_missing(
+            request.tree,
             request.source_text,
             request.path_tokens,
             request.raw_path,
@@ -331,7 +446,7 @@ fn resolve_config_path_set_with_create_missing(
             request.new_text,
         )?,
     };
-    validate_rendered_config_document(request.format, &updated_root_text)?;
+    validate_rendered_config_document(request.format, request.source_text, &updated_root_text)?;
 
     if matches!(request.format, ConfigFormat::Json) && request.source.is_empty() {
         return Ok(ResolvedConfigPatch {
