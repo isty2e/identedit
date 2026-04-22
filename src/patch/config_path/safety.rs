@@ -14,7 +14,8 @@ pub(super) enum ConfigFormat {
 pub(super) fn is_missing_config_path_error(error: &IdenteditError) -> bool {
     matches!(
         error,
-        IdenteditError::InvalidRequest { message } if message.contains("was not found")
+        IdenteditError::InvalidRequest { message }
+            if message.contains("was not found") || message.contains("has no root value")
     )
 }
 
@@ -35,12 +36,6 @@ pub(super) fn validate_yaml_create_missing_safety(
         return Err(IdenteditError::InvalidRequest {
             message: "Config path create-missing does not support YAML anchor/alias documents"
                 .to_string(),
-        });
-    }
-
-    if has_yaml_comments(tree.root_node()) {
-        return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing does not support YAML comments yet".to_string(),
         });
     }
 
@@ -184,7 +179,7 @@ fn count_nodes_by_kind(root: Node<'_>, expected_kind: &str) -> usize {
     count
 }
 
-fn has_yaml_comments(root: Node<'_>) -> bool {
+pub(super) fn has_yaml_comments(root: Node<'_>) -> bool {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if node.kind().contains("comment") {

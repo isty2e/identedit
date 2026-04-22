@@ -464,6 +464,87 @@ pub(super) fn rewrite_toml_with_comment_preserving_create_missing(
     insert_toml_entry_line(source_text, insertion, &entry)
 }
 
+pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
+    tree: &Tree,
+    source_text: &str,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_text: &str,
+) -> Result<String, IdenteditError> {
+    parse_yaml_value_fragment(new_text)?;
+    if new_text.contains('\n') || new_text.contains('\r') {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing for YAML comments supports only single-line value text; use line mode for multiline YAML values"
+                .to_string(),
+        });
+    }
+
+    let root = yaml_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
+        message: "YAML document has no root value".to_string(),
+    })?;
+    let root_span = span_from_node(root);
+    let (parent_mapping, create_tokens) = find_yaml_create_missing_insertion_parent(
+        root,
+        source_text.as_bytes(),
+        path_tokens,
+        raw_path,
+    )?;
+
+    let insertion_offset = parent_mapping.end_byte();
+    if insertion_offset < root_span.start || insertion_offset > root_span.end {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing for YAML comments produced insertion offset {insertion_offset} outside root span [{}, {})",
+                root_span.start, root_span.end
+            ),
+        });
+    }
+
+    let indent = yaml_child_indent(source_text, parent_mapping);
+    let entry = yaml_create_missing_entry_text(create_tokens, indent, new_text, raw_path)?;
+    insert_yaml_entry_line(
+        &source_text[root_span.start..root_span.end],
+        insertion_offset - root_span.start,
+        &entry,
+        yaml_line_ending_literal(source_text),
+    )
+}
+
+pub(super) fn render_yaml_comment_only_create_missing_insertion(
+    source_text: &str,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_text: &str,
+) -> Result<String, IdenteditError> {
+    parse_yaml_value_fragment(new_text)?;
+    if new_text.contains('\n') || new_text.contains('\r') {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing for YAML comments supports only single-line value text; use line mode for multiline YAML values"
+                .to_string(),
+        });
+    }
+    if path_tokens
+        .iter()
+        .any(|token| matches!(token, PathToken::Index(_)))
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing for YAML comments supports only dotted key paths; array indexes are not auto-created for '{raw_path}'. Use a dedicated append operation if needed."
+            ),
+        });
+    }
+
+    let line_ending = yaml_line_ending_literal(source_text);
+    let entry = yaml_create_missing_entry_text(path_tokens, "", new_text, raw_path)?;
+    let mut insertion = String::new();
+    if !source_text.is_empty() && !ends_with_line_ending(source_text) {
+        insertion.push_str(line_ending);
+    }
+    insertion.push_str(&entry);
+    insertion.push_str(line_ending);
+    Ok(insertion)
+}
+
 pub(super) fn json_root_value(root: Node<'_>) -> Option<Node<'_>> {
     let node = root;
     if node.kind() == "document" {
@@ -478,10 +559,10 @@ pub(super) fn json_root_value(root: Node<'_>) -> Option<Node<'_>> {
 pub(super) fn yaml_root_value(root: Node<'_>) -> Option<Node<'_>> {
     let mut node = root;
     if node.kind() == "stream" {
-        node = first_named_child(node)?;
+        node = first_non_comment_named_child(node)?;
     }
     if node.kind() == "document" {
-        node = first_named_child(node)?;
+        node = first_non_comment_named_child(node)?;
     }
     yaml_unwrap_node(node)
 }
@@ -666,6 +747,150 @@ fn find_toml_table_for_path<'a>(
         .find(|child| child.kind() == "table" && toml_table_prefix(*child, source) == parent_path)
 }
 
+fn parse_yaml_value_fragment(fragment: &str) -> Result<serde_yaml::Value, IdenteditError> {
+    serde_yaml::from_str(fragment).map_err(|error| IdenteditError::InvalidRequest {
+        message: format!("Config path set value is not valid YAML value text: {error}"),
+    })
+}
+
+fn find_yaml_create_missing_insertion_parent<'a>(
+    root: Node<'a>,
+    source: &[u8],
+    path_tokens: &'a [PathToken],
+    raw_path: &str,
+) -> Result<(Node<'a>, &'a [PathToken]), IdenteditError> {
+    if path_tokens.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!("Config path '{raw_path}' did not resolve to a YAML key"),
+        });
+    }
+
+    if path_tokens
+        .iter()
+        .any(|token| matches!(token, PathToken::Index(_)))
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing for YAML comments supports only dotted key paths; array indexes are not auto-created for '{raw_path}'. Use a dedicated append operation if needed."
+            ),
+        });
+    }
+
+    let mut current = require_yaml_block_mapping(root, raw_path)?;
+    let mut consumed = 0usize;
+
+    for token in &path_tokens[..path_tokens.len() - 1] {
+        let PathToken::Key(expected_key) = token else {
+            unreachable!("index tokens were rejected before YAML path traversal");
+        };
+        let mut matches = Vec::new();
+        for pair in named_children(current) {
+            if pair.kind() != "block_mapping_pair" {
+                continue;
+            }
+            let Some(key_node) = pair.child_by_field_name("key") else {
+                continue;
+            };
+            let Some(key_text) = yaml_key_text(key_node, source) else {
+                continue;
+            };
+            if key_text == *expected_key {
+                matches.push(pair);
+            }
+        }
+
+        let matched_pair = match matches.as_slice() {
+            [] => break,
+            [single] => *single,
+            many => {
+                return Err(IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Config path '{raw_path}' segment {} is ambiguous ({})",
+                        token_display(token),
+                        many.len()
+                    ),
+                });
+            }
+        };
+        current = matched_pair
+            .child_by_field_name("value")
+            .and_then(yaml_unwrap_node)
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: format!(
+                    "Config path '{raw_path}' matched key '{expected_key}' without a value node"
+                ),
+            })?;
+        current = require_yaml_block_mapping(current, raw_path)?;
+        consumed += 1;
+    }
+
+    Ok((current, &path_tokens[consumed..]))
+}
+
+fn yaml_create_missing_entry_text(
+    create_tokens: &[PathToken],
+    base_indent: &str,
+    new_text: &str,
+    raw_path: &str,
+) -> Result<String, IdenteditError> {
+    if create_tokens.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!("Config path '{raw_path}' was not found in YAML document"),
+        });
+    }
+
+    let mut entry = String::new();
+    for (index, token) in create_tokens.iter().enumerate() {
+        let PathToken::Key(key) = token else {
+            unreachable!("index tokens were rejected before YAML entry rendering");
+        };
+        entry.push_str(base_indent);
+        for _ in 0..index {
+            entry.push_str("  ");
+        }
+        entry.push_str(key);
+        entry.push(':');
+        if index + 1 == create_tokens.len() {
+            entry.push(' ');
+            entry.push_str(new_text);
+        }
+        if index + 1 < create_tokens.len() {
+            entry.push('\n');
+        }
+    }
+    Ok(entry)
+}
+
+fn require_yaml_block_mapping<'a>(
+    node: Node<'a>,
+    raw_path: &str,
+) -> Result<Node<'a>, IdenteditError> {
+    if node.kind() == "block_mapping" {
+        return Ok(node);
+    }
+
+    Err(IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path create-missing for YAML comments supports only existing block mappings; path '{raw_path}' resolved through node kind '{}'",
+            node.kind()
+        ),
+    })
+}
+
+fn yaml_child_indent<'a>(source_text: &'a str, mapping: Node<'_>) -> &'a str {
+    let line_start = line_start_before_offset(source_text, mapping.start_byte());
+    &source_text[line_start..mapping.start_byte()]
+}
+
+fn line_start_before_offset(source_text: &str, offset: usize) -> usize {
+    let bytes = source_text.as_bytes();
+    let mut cursor = offset.min(bytes.len());
+    while cursor > 0 && bytes[cursor - 1] != b'\n' && bytes[cursor - 1] != b'\r' {
+        cursor -= 1;
+    }
+    cursor
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TomlInsertion {
     offset: usize,
@@ -755,6 +980,39 @@ fn insert_toml_entry_line(
     Ok(updated)
 }
 
+fn insert_yaml_entry_line(
+    root_text: &str,
+    offset: usize,
+    entry: &str,
+    line_ending: &str,
+) -> Result<String, IdenteditError> {
+    if offset > root_text.len() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid YAML insertion offset {offset} for root length {}",
+                root_text.len()
+            ),
+        });
+    }
+
+    let before = &root_text[..offset];
+    let after = &root_text[offset..];
+    let needs_prefix = !before.is_empty() && !ends_with_line_ending(before);
+    let needs_suffix = after.is_empty() || !starts_with_line_ending(after);
+
+    let mut updated = root_text.to_string();
+    let mut text = String::new();
+    if needs_prefix {
+        text.push_str(line_ending);
+    }
+    text.push_str(entry);
+    if needs_suffix {
+        text.push_str(line_ending);
+    }
+    updated.insert_str(offset, &text);
+    Ok(updated)
+}
+
 fn starts_with_line_ending(value: &str) -> bool {
     value.starts_with('\n') || value.starts_with('\r')
 }
@@ -764,6 +1022,10 @@ fn ends_with_line_ending(value: &str) -> bool {
 }
 
 fn toml_line_ending_literal(source_text: &str) -> &'static str {
+    yaml_line_ending_literal(source_text)
+}
+
+fn yaml_line_ending_literal(source_text: &str) -> &'static str {
     let bytes = source_text.as_bytes();
     let mut index = 0usize;
     while index < bytes.len() {
@@ -1060,4 +1322,10 @@ fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
 
 fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
     named_children(node).into_iter().next()
+}
+
+fn first_non_comment_named_child(node: Node<'_>) -> Option<Node<'_>> {
+    named_children(node)
+        .into_iter()
+        .find(|child| child.kind() != "comment")
 }

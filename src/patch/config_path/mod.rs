@@ -17,13 +17,16 @@ use render::{
     render_toml_with_create_missing, render_yaml_with_create_missing,
 };
 use resolve::{
-    ResolvedContainerEdit, find_handle_for_span, json_root_value, resolve_json_path,
-    resolve_toml_path, resolve_yaml_path, rewrite_container_text, rewrite_full_source_text,
-    rewrite_toml_with_comment_preserving_create_missing, span_from_node, yaml_root_value,
+    ResolvedContainerEdit, find_handle_for_span, json_root_value,
+    render_yaml_comment_only_create_missing_insertion, resolve_json_path, resolve_toml_path,
+    resolve_yaml_path, rewrite_container_text, rewrite_full_source_text,
+    rewrite_toml_with_comment_preserving_create_missing,
+    rewrite_yaml_with_comment_preserving_create_missing, span_from_node, yaml_root_value,
 };
 use safety::{
-    ConfigFormat, detect_config_format, has_toml_comments, is_missing_config_path_error,
-    parse_tree_for_format, validate_rendered_config_document, validate_yaml_create_missing_safety,
+    ConfigFormat, detect_config_format, has_toml_comments, has_yaml_comments,
+    is_missing_config_path_error, parse_tree_for_format, validate_rendered_config_document,
+    validate_yaml_create_missing_safety,
 };
 use syntax::{PathToken, parse_config_path};
 
@@ -230,6 +233,22 @@ fn resolve_config_path_set_with_create_missing(
 ) -> Result<ResolvedConfigPatch, IdenteditError> {
     if matches!(request.format, ConfigFormat::Yaml) {
         validate_yaml_create_missing_safety(request.tree, request.source_text)?;
+        if has_yaml_comments(request.tree.root_node())
+            && yaml_root_value(request.tree.root_node()).is_none()
+        {
+            let new_text = render_yaml_comment_only_create_missing_insertion(
+                request.source_text,
+                request.path_tokens,
+                request.raw_path,
+                request.new_text,
+            )?;
+            return Ok(ResolvedConfigPatch {
+                target: TransformTarget::FileEnd {
+                    expected_file_hash: hash_bytes(request.source),
+                },
+                op: OpKind::Insert { new_text },
+            });
+        }
     }
     let updated_root_text = match request.format {
         ConfigFormat::Json => render_json_with_create_missing(
@@ -238,6 +257,15 @@ fn resolve_config_path_set_with_create_missing(
             request.raw_path,
             request.new_text,
         )?,
+        ConfigFormat::Yaml if has_yaml_comments(request.tree.root_node()) => {
+            rewrite_yaml_with_comment_preserving_create_missing(
+                request.tree,
+                request.source_text,
+                request.path_tokens,
+                request.raw_path,
+                request.new_text,
+            )?
+        }
         ConfigFormat::Yaml => render_yaml_with_create_missing(
             request.source_text,
             request.path_tokens,
