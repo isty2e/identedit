@@ -355,6 +355,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_path_supports_quoted_key_segments() {
+        let parsed = parse_config_path(r#"["on"].jobs["build/test"].steps[0]["run:script"]"#)
+            .expect("quoted key path should parse");
+        assert_eq!(
+            parsed,
+            vec![
+                PathToken::Key("on".to_string()),
+                PathToken::Key("jobs".to_string()),
+                PathToken::Key("build/test".to_string()),
+                PathToken::Key("steps".to_string()),
+                PathToken::Index(0),
+                PathToken::Key("run:script".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_config_path_supports_json_string_escapes_in_quoted_key_segments() {
+        let parsed = parse_config_path(r#"root["quote\"key"]["backslash\\key"]["unicode-\uD55C"]"#)
+            .expect("escaped quoted key path should parse");
+        assert_eq!(
+            parsed,
+            vec![
+                PathToken::Key("root".to_string()),
+                PathToken::Key("quote\"key".to_string()),
+                PathToken::Key("backslash\\key".to_string()),
+                PathToken::Key("unicode-한".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn parse_config_path_rejects_invalid_sequences() {
         let error = parse_config_path("service..name").expect_err("double dot must fail");
         assert!(
@@ -366,6 +398,20 @@ mod tests {
         assert!(
             matches!(error, crate::error::IdenteditError::InvalidRequest { .. }),
             "expected invalid request for malformed index"
+        );
+
+        let error = parse_config_path(r#"service["unterminated]"#)
+            .expect_err("unterminated quoted key must fail");
+        assert!(
+            matches!(error, crate::error::IdenteditError::InvalidRequest { .. }),
+            "expected invalid request for unterminated quoted key"
+        );
+
+        let error = parse_config_path(r#"service["key"]trailing"#)
+            .expect_err("trailing characters after quoted key segment must fail");
+        assert!(
+            matches!(error, crate::error::IdenteditError::InvalidRequest { .. }),
+            "expected invalid request for trailing characters after quoted key"
         );
     }
 
@@ -393,6 +439,20 @@ mod tests {
             PathToken::Index(3),
         ];
         assert_eq!(path_tokens_display(&tokens), "a.b[3]");
+    }
+
+    #[test]
+    fn path_tokens_display_quotes_non_bare_key_segments() {
+        let tokens = vec![
+            PathToken::Key("x.y".to_string()),
+            PathToken::Key("quote\"key".to_string()),
+            PathToken::Index(2),
+            PathToken::Key("run:script".to_string()),
+        ];
+        assert_eq!(
+            path_tokens_display(&tokens),
+            r#"["x.y"]["quote\"key"][2]["run:script"]"#
+        );
     }
 
     #[test]

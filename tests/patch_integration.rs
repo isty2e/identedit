@@ -6279,6 +6279,126 @@ fn patch_json_config_path_set_create_missing_preserves_cr_only_toml_newlines() {
 }
 
 #[test]
+fn patch_json_config_path_set_supports_json_quoted_key_segments() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(br#"{"x.y":{"a:b":1},"regular":true}"#)
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"["x.y"]["a:b"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "2"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted JSON path should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["x.y"]["a:b"].as_i64(), Some(2));
+    assert_eq!(parsed["regular"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_supports_yaml_quoted_key_segments_with_comments() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"\"x.y\":\n  # keep-this-comment\n  existing: 1\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"["x.y"]["build/test"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"ok\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted YAML path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("# keep-this-comment"));
+    assert!(updated.contains("build/test: \"ok\""));
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(
+        parsed["x.y"]["build/test"].as_str(),
+        Some("ok"),
+        "quoted path segment should address the literal YAML key"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_supports_toml_quoted_table_segments() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"\"x.y\" = 1\n\n[tool.\"weird.section\"]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["weird.section"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted TOML table path create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("[tool.\"weird.section\"]\nname = \"identedit\"\nport = 9090"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["x.y"].as_integer(), Some(1));
+    assert_eq!(
+        parsed["tool"]["weird.section"]["port"].as_integer(),
+        Some(9090)
+    );
+}
+
+#[test]
 fn patch_json_config_path_set_create_missing_still_rejects_invalid_path_characters() {
     let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
 
