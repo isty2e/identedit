@@ -41,6 +41,13 @@ pub(super) fn render_yaml_with_create_missing(
         serde_yaml::from_str(source_text).map_err(|error| IdenteditError::InvalidRequest {
             message: format!("Config path create-missing could not parse YAML document: {error}"),
         })?;
+    if matches!(root, serde_yaml::Value::Null)
+        && path_tokens
+            .first()
+            .is_some_and(|token| matches!(token, PathToken::Key(_)))
+    {
+        root = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    }
     let parsed_new_value: serde_yaml::Value =
         serde_yaml::from_str(new_text).map_err(|error| IdenteditError::InvalidRequest {
             message: format!("Config path set value is not valid YAML: {error}"),
@@ -93,11 +100,19 @@ pub(super) fn parse_toml_value_fragment(fragment: &str) -> Result<toml::Value, I
         toml::from_str(&wrapped).map_err(|error| IdenteditError::InvalidRequest {
             message: format!("Config path set value is not valid TOML value text: {error}"),
         })?;
-    table
-        .remove("__identedit_tmp__")
-        .ok_or_else(|| IdenteditError::InvalidRequest {
-            message: "Config path set value parsing produced no value".to_string(),
-        })
+    let value =
+        table
+            .remove("__identedit_tmp__")
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: "Config path set value parsing produced no value".to_string(),
+            })?;
+    if !table.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path set value must be a single TOML value, not additional TOML items"
+                .to_string(),
+        });
+    }
+    Ok(value)
 }
 
 pub(super) fn array_index_out_of_bounds_error(

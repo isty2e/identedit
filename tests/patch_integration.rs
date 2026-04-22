@@ -4817,13 +4817,197 @@ fn patch_json_config_path_set_create_missing_inserts_toml_root_leaf_with_comment
 }
 
 #[test]
-fn patch_json_config_path_set_create_missing_rejects_toml_intermediate_table_with_comments() {
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_with_comments() {
     let mut temp_file = Builder::new()
         .suffix(".toml")
         .tempfile()
         .expect("temp toml file should be created");
     temp_file
         .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n\n[server.sidecar]\nport = 9090\n"
+        ),
+        "new intermediate table should be inserted after the existing parent table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["host"].as_str(), Some("127.0.0.1"));
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_quoted_intermediate_table_with_comments()
+{
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["weird.section"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.\"weird.section\"]\nport = 9090"),
+        "new quoted intermediate table should use TOML quoted-key syntax, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["tool"]["weird.section"]["port"].as_integer(),
+        Some(9090)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_places_toml_intermediate_table_after_nearest_prefix_before_siblings()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n\n[server.logging]\nlevel = \"info\"\n\n[server.sidecar.db]\nhost = \"db\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "intermediate table placement among siblings should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    let parent = updated
+        .find("[server]\nhost = \"127.0.0.1\"")
+        .expect("parent table should remain");
+    let new_table = updated
+        .find("[server.sidecar]\nport = 9090")
+        .expect("new intermediate table should be inserted");
+    let sibling = updated
+        .find("[server.logging]\nlevel = \"info\"")
+        .expect("sibling table should remain");
+    assert!(
+        parent < new_table && new_table < sibling,
+        "new table should be inserted right after nearest prefix table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+    assert_eq!(parsed["server"]["logging"]["level"].as_str(), Some("info"));
+    assert_eq!(
+        parsed["server"]["sidecar"]["db"]["host"].as_str(),
+        Some("db")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_keeps_toml_literal_dotted_table_distinct_from_dotted_path()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[\"server.sidecar\"]\nhost = \"literal\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "literal dotted table and dotted path should coexist: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("[\"server.sidecar\"]\nhost = \"literal\""));
+    assert!(updated.contains("[server.sidecar]\nport = 9090"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server.sidecar"]["host"].as_str(), Some("literal"));
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_inline_table_intermediate_parent_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver = { host = \"127.0.0.1\" }\n")
         .expect("toml fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
@@ -4845,16 +5029,3009 @@ fn patch_json_config_path_set_create_missing_rejects_toml_intermediate_table_wit
     let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
     assert!(
         !output.status.success(),
-        "intermediate TOML table creation should stay rejected"
+        "inline-table intermediate parent should stay rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_quoted_parent_before_quoted_descendant_table_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool.\"a.b\".child]\nname = \"leaf\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["a.b"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted parent before quoted descendant should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    let parent = updated
+        .find("[tool.\"a.b\"]\nport = 9090")
+        .expect("created quoted parent table should exist");
+    let child = updated
+        .find("[tool.\"a.b\".child]\nname = \"leaf\"")
+        .expect("existing quoted descendant table should remain");
+    assert!(
+        parent < child,
+        "created quoted parent should precede descendant, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"]["a.b"]["port"].as_integer(), Some(9090));
+    assert_eq!(
+        parsed["tool"]["a.b"]["child"]["name"].as_str(),
+        Some("leaf")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_after_tail_comment_before_next_table()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n# keep-server-tail\n\n[database]\nurl = \"sqlite://db\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "intermediate table after tail comment should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("# keep-server-tail\n\n[server.sidecar]\nport = 9090\n\n[database]"),
+        "new intermediate table should follow tail comment and precede next table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+    assert_eq!(parsed["database"]["url"].as_str(), Some("sqlite://db"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_preserving_mixed_newlines()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\r\n[server]\nhost = \"127.0.0.1\"\n\n[database]\nurl = \"sqlite://db\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "mixed-newline intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[server.sidecar]\r\nport = 9090\r\n"),
+        "new intermediate table should use detected CRLF line endings, got:\n{updated:?}"
+    );
+    assert!(
+        updated.contains("host = \"127.0.0.1\"\n"),
+        "existing LF line should remain unchanged, got:\n{updated:?}"
+    );
+    let normalized = updated.replace("\r\n", "\n");
+    let parsed: toml::Value =
+        toml::from_str(&normalized).expect("normalized TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_parent_before_deep_descendant_table_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server.sidecar.db]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "parent TOML table creation before descendant should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    let parent_position = updated
+        .find("[server.sidecar]\nport = 9090")
+        .expect("updated TOML should contain the created parent table");
+    let descendant_position = updated
+        .find("[server.sidecar.db]\nhost = \"127.0.0.1\"")
+        .expect("updated TOML should keep the existing descendant table");
+    assert!(
+        parent_position < descendant_position,
+        "created parent table should precede its existing descendant, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+    assert_eq!(
+        parsed["server"]["sidecar"]["db"]["host"].as_str(),
+        Some("127.0.0.1")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_allows_toml_dotted_sibling_then_child_table_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver.host = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "dotted sibling plus child table creation should be valid TOML: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("server.host = \"127.0.0.1\""),
+        "existing dotted sibling key should be preserved, got:\n{updated}"
+    );
+    assert!(
+        updated.contains("[server.sidecar]\nport = 9090"),
+        "new child table should be appended without rewriting dotted sibling, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["host"].as_str(), Some("127.0.0.1"));
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_dotted_key_root_table_redeclaration_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver.host = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "dotted-key root table redeclaration must be rejected"
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
     assert!(
-        response["error"]["message"].as_str().is_some_and(
-            |message| message.contains("create intermediate table 'server.sidecar' first")
-        ),
-        "error should explain the intermediate-table limitation"
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("already resolves to a TOML value")),
+        "error should explain existing value conflict"
     );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_quotes_toml_leaf_key_with_comments() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["listen.port"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted TOML leaf key create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"listen.port\" = 9090"),
+        "new leaf key should preserve literal key segment with TOML quotes, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["listen.port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_escaped_quoted_intermediate_table_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["quote\"slash\\segment"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped quoted intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(r#"[tool."quote\"slash\\segment"]"#),
+        "new quoted intermediate table should escape TOML key segment, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["tool"]["quote\"slash\\segment"]["port"].as_integer(),
+        Some(9090)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_after_bom_comment_only_file()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}# keep-root-comment\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM comment-only intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with("\u{feff}# keep-root-comment\n"),
+        "BOM and root comment should be preserved, got:\n{updated:?}"
+    );
+    assert!(
+        updated.contains("[server.sidecar]\nport = 9090\n"),
+        "new intermediate table should be inserted after comment-only root, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_after_bom_parent_table()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM parent-table intermediate TOML creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "intermediate table insertion must not duplicate the BOM, got:\n{updated:?}"
+    );
+    assert!(updated.starts_with("\u{feff}# keep-this-comment\n"));
+    assert!(updated.contains("[server.sidecar]\nport = 9090\n"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_with_cr_only_comments()
+{
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\r[server]\rhost = \"127.0.0.1\"\r")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CR-only intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[server.sidecar]\rport = 9090\r"),
+        "new intermediate table should use CR-only line endings, got:\n{updated:?}"
+    );
+    assert!(
+        !updated.contains('\n'),
+        "CR-only TOML update must not introduce LF separators, got:\n{updated:?}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_without_final_newline()
+{
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "EOF intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.ends_with("host = \"127.0.0.1\"\n\n[server.sidecar]\nport = 9090\n"),
+        "new intermediate table should be separated from unterminated parent table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_deep_dotted_key_parent_redeclaration_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver.sidecar.db.host = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "deep dotted-key parent table redeclaration must be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_unicode_quoted_intermediate_table_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["한 점"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unicode quoted intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.\"한 점\"]\nport = 9090"),
+        "new intermediate table should preserve unicode quoted segment, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"]["한 점"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_quotes_toml_escaped_leaf_key_with_comments() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["quote\"leaf\\key"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped quoted TOML leaf key create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(r#""quote\"leaf\\key" = 9090"#),
+        "new escaped leaf key should use TOML quoted-key syntax, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["server"]["quote\"leaf\\key"].as_integer(),
+        Some(9090)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_single_quoted_intermediate_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool.'a.b']\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["a.b"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "single-quoted TOML table segment should resolve as an existing table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.'a.b']\nhost = \"127.0.0.1\"\nport = 9090\n"),
+        "new key should be inserted into the existing single-quoted table, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("[tool.\"a.b\"]"),
+        "create-missing must not create a duplicate double-quoted equivalent table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"]["a.b"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_updates_existing_toml_single_quoted_leaf_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\n'listen.port' = 8080\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["listen.port"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "single-quoted TOML leaf key should resolve as an existing path: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("'listen.port' = 9090"),
+        "existing single-quoted key should be updated in place, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("\"listen.port\" = 9090"),
+        "create-missing must not create a duplicate double-quoted equivalent key, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["listen.port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_basic_unicode_escape_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            "# keep-this-comment\n[tool.\"emoji \\U0001F600\"]\nhost = \"127.0.0.1\"\n".as_bytes(),
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "tool[\"emoji 😀\"].port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML basic string \\U escape in table key should resolve as an existing table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.\"emoji \\U0001F600\"]\nhost = \"127.0.0.1\"\nport = 9090\n"),
+        "new key should be inserted into the existing escaped-key table, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("[tool.\"emoji 😀\"]"),
+        "create-missing must not create a duplicate literal-unicode equivalent table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"]["emoji 😀"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_updates_existing_toml_basic_unicode_escape_leaf_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("# keep-this-comment\n[server]\n\"emoji \\U0001F600\" = 8080\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server[\"emoji 😀\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML basic string \\U escape in leaf key should resolve as an existing key: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"emoji \\U0001F600\" = 9090"),
+        "existing escaped key should be updated in place, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("\"emoji 😀\" = 9090"),
+        "create-missing must not create a duplicate literal-unicode equivalent key, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["emoji 😀"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_single_quoted_unicode_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("# keep-this-comment\n[tool.'한.점']\nhost = \"127.0.0.1\"\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["한.점"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "single-quoted unicode TOML table segment should resolve as an existing table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("[tool.'한.점']\nhost = \"127.0.0.1\"\nport = 9090\n"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"]["한.점"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_parent_before_toml_descendant_table_array() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# root-comment\n\n# descendant table-array comment\n[[server.sidecar.db]]\nhost = \"db\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "parent TOML table before descendant table-array should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "# root-comment\n\n[server.sidecar]\nport = 9090\n\n# descendant table-array comment\n[[server.sidecar.db]]"
+        ),
+        "created parent table should precede the descendant table-array comment block, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+    assert_eq!(
+        parsed["server"]["sidecar"]["db"][0]["host"].as_str(),
+        Some("db")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_deep_array_value_parent_conflict() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver.sidecar = [{ host = \"127.0.0.1\" }]\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "array-valued deep TOML parent must not be promoted into a standard table"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_root_key_after_bom_whitespace_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}  # root-comment-with-leading-space\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM+leading-space comment-only TOML root key creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with("\u{feff}  # root-comment-with-leading-space\n"),
+        "BOM and leading-space comment should be preserved, got:\n{updated:?}"
+    );
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "root key create-missing must not duplicate the BOM, got:\n{updated:?}"
+    );
+    assert!(updated.contains("enabled = true\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_bom_without_comments_updates_existing_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}[server]\nhost = \"127.0.0.1\"\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM-prefixed TOML without comments should support create-missing: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM-prefixed TOML without comments must not duplicate the BOM, got:\n{updated:?}"
+    );
+    assert!(updated.starts_with('\u{feff}'));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_bom_without_comments_creates_intermediate_table()
+{
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}[server]\nhost = \"127.0.0.1\"\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM-prefixed TOML without comments should create intermediate table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM-prefixed TOML intermediate create must not duplicate the BOM, got:\n{updated:?}"
+    );
+    assert!(updated.starts_with('\u{feff}'));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_keeps_file_header_comment_at_top_before_descendant() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# file header\n[server.sidecar.db]\nhost = \"db\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "parent creation after file header comment should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with("# file header\n\n[server.sidecar]\nport = 9090\n"),
+        "file header comment should remain at the top, separated from the new parent table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_moves_multiple_descendant_comment_lines_together() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# root-comment\n\n# first descendant comment\n# second descendant comment\n[server.sidecar.db]\nhost = \"db\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "parent TOML table creation before multi-line descendant comment should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[server.sidecar]\nport = 9090\n\n# first descendant comment\n# second descendant comment\n[server.sidecar.db]"
+        ),
+        "multi-line descendant comment block should stay attached to descendant table, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_empty_single_quoted_toml_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool.'']\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool[""].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "empty single-quoted TOML table segment should resolve as an existing table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.'']\nhost = \"127.0.0.1\"\nport = 9090\n"),
+        "new key should be inserted into the existing empty single-quoted table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"][""]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_empty_double_quoted_toml_leaf_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\n\"\" = 8080\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server[""]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "empty double-quoted TOML leaf key should resolve as an existing key: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"\" = 9090"),
+        "existing empty key should be updated in place, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"][""].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_escaped_newline_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server[\"line\\nkey\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped newline TOML key segment should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"line\\nkey\" = true"),
+        "escaped newline key should be rendered as a quoted TOML key, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["line\nkey"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_leaf_key_with_escaped_newline() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\n\"line\\nkey\" = false\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server[\"line\\nkey\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing escaped newline TOML key should be updated in place: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"line\\nkey\" = true"),
+        "existing escaped newline key should be updated in place, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["line\nkey"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_escaped_tab_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server[\"tab\\tkey\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped tab TOML key segment should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"tab\\tkey\" = true"),
+        "escaped tab key should be rendered as a quoted TOML key, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["tab\tkey"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_leaf_key_with_escaped_tab() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\n\"tab\\tkey\" = false\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server[\"tab\\tkey\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing escaped tab TOML key should be updated in place: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"tab\\tkey\" = true"),
+        "existing escaped tab key should be updated in place, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["tab\tkey"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_single_quoted_backslash_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool.'path\\literal']\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["path\\literal"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "single-quoted TOML table with literal backslash should resolve as existing: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.'path\\literal']\nhost = \"127.0.0.1\"\nport = 9090\n"),
+        "new key should be inserted into existing literal-backslash table, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["tool"]["path\\literal"]["port"].as_integer(),
+        Some(9090)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_escaped_backslash_segment()
+{
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["path\\literal"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped backslash TOML key segment should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(r#""path\\literal" = true"#),
+        "escaped backslash key should be rendered as a quoted TOML key, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["path\\literal"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_basic_backslash_leaf_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\n\"path\\\\literal\" = false\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["path\\literal"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing TOML basic-string key with escaped backslash should update in place: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(r#""path\\literal" = true"#),
+        "existing escaped backslash key should be updated in place, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["path\\literal"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_quoted_table_array_parent_conflict() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[[server.\"side.car\"]]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["side.car"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "quoted table-array parent must not be promoted into a standard table"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("array of tables")),
+        "error should explain table-array conflict"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_trailing_dotted_key_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\nevil.path = 1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragments must reject trailing dotted-key injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_combining_mark_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let decomposed = "e\u{301}";
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": format!("server[\"{decomposed}\"]")
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "combining-mark TOML key segment should be creatable without normalization: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(&format!("\"{decomposed}\" = true")),
+        "combining-mark key should be preserved byte-for-byte, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"][decomposed].as_bool(), Some(true));
+    assert!(parsed["server"].get("é").is_none());
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_bom_only_file_preserves_hash_precondition() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled",
+            "expected_file_hash": identedit::hash::hash_text(&before)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM-only TOML create-missing should honor exact file hash precondition: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.starts_with('\u{feff}'));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_uses_existing_toml_single_quoted_backslash_leaf_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\n'path\\literal' = false\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["path\\literal"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "existing TOML single-quoted key with literal backslash should update in place: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("'path\\literal' = true"),
+        "existing literal-backslash key should be updated in place, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["path\\literal"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_with_escaped_backslash_segment()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool["path\\literal"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped backslash TOML table segment should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(r#"[tool."path\\literal"]"#),
+        "escaped backslash table segment should be rendered as quoted TOML, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["tool"]["path\\literal"]["port"].as_integer(),
+        Some(9090)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_ancestor_table_array_conflict() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[[server]]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "ancestor table-array must block descendant standard table creation"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("array of tables")),
+        "error should explain ancestor table-array conflict"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_toml_file_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b" \t\n \n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with(" \t\n \n"),
+        "whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    assert!(updated.contains("enabled = true"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_whitespace_only_toml_file_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff} \t\n \n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM+whitespace-only TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with("\u{feff} \t\n \n"),
+        "BOM and whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM+whitespace-only TOML create-missing must preserve exactly one BOM, got:\n{updated:?}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_toml_with_stale_hash_fails_without_mutation()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b" \t\n \n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled",
+            "expected_file_hash": "0000000000000000"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash must reject whitespace-only TOML create-missing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "stale precondition failure must not mutate whitespace-only TOML"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_crlf_whitespace_only_toml_file_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b" \t\r\n \r\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CRLF whitespace-only TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with(" \t\r\n \r\n"),
+        "CRLF whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_cr_only_whitespace_only_toml_file_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b" \t\r \r")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CR-only whitespace-only TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with(" \t\r \r"),
+        "CR-only whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    let normalized = updated.replace('\r', "\n");
+    let parsed: toml::Value =
+        toml::from_str(&normalized).expect("normalized TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_whitespace_only_toml_creates_intermediate_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff} \n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM+whitespace-only TOML intermediate create should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.starts_with("\u{feff} \n"));
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM+whitespace-only TOML intermediate create must preserve one BOM"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_value_fragment_with_inline_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090 # keep-port-comment",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML value fragment with inline comment should remain a single value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("port = 9090 # keep-port-comment"),
+        "inline value comment should be preserved, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_inline_table_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "{ port = 9090, enabled = true }",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML inline table value fragment should be accepted as a single value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("sidecar = { port = 9090, enabled = true }"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+    assert_eq!(parsed["server"]["sidecar"]["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_comment_only_without_final_newline_creates_intermediate()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-root-comment")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unterminated comment-only TOML should create intermediate table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with("# keep-root-comment\n"),
+        "unterminated root comment should get a separator before new table, got:\n{updated:?}"
+    );
+    assert!(updated.contains("[server]\nport = 9090"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_trailing_quoted_key_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\n\"evil.key\" = 1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragments must reject trailing quoted-key injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_with_escaped_tab_segment()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "tool[\"tab\\tkey\"].port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "escaped tab TOML table segment should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.\"tab\\tkey\"]\nport = 9090"),
+        "escaped tab table segment should be rendered as quoted TOML, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"]["tab\tkey"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_trailing_array_table_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\n[[evil]]\nx = 1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragments must reject trailing array-table injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_bom_only_file_creates_intermediate_table_once() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM-only TOML intermediate create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM-only TOML intermediate create-missing must preserve exactly one BOM, got:\n{updated:?}"
+    );
+    assert!(updated.contains("[server]\nport = 9090"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_keeps_indented_descendant_comment_with_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# root-comment\n\n  # indented descendant comment\n[server.sidecar.db]\nhost = \"db\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "parent creation before indented descendant comment should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[server.sidecar]\nport = 9090\n\n  # indented descendant comment\n[server.sidecar.db]"
+        ),
+        "indented descendant comment block should stay attached to descendant table, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_datetime_parent_conflict() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver = 1979-05-27T07:32:00Z\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "datetime-valued TOML parent must not be promoted into a standard table"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_bom_only_file_creates_root_key_once() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM-only TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM-only TOML create-missing must preserve exactly one BOM, got:\n{updated:?}"
+    );
+    assert!(updated.contains("enabled = true"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_empty_toml_file_creates_root_key() {
+    let temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "empty TOML create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(updated, "enabled = true");
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_value_fragment_with_duplicate_temp_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\n__identedit_tmp__ = 1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragments must reject duplicate wrapped temp key injection"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_keeps_descendant_toml_comment_with_descendant_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# root-comment\n\n# sidecar db table comment\n[server.sidecar.db]\nhost = \"db\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "parent TOML table creation before descendant comment should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "# root-comment\n\n[server.sidecar]\nport = 9090\n\n# sidecar db table comment\n[server.sidecar.db]"
+        ),
+        "created parent table should not steal the descendant table comment, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+    assert_eq!(
+        parsed["server"]["sidecar"]["db"]["host"].as_str(),
+        Some("db")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_empty_quoted_toml_intermediate_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[tool]\nname = \"identedit\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"tool[""].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "empty quoted TOML table segment should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[tool.\"\"]\nport = 9090"),
+        "empty TOML key segment should be rendered as a quoted table segment, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["tool"][""]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_after_bom_crlf_comment_only_file()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all("\u{feff}# keep-root-comment\r\n".as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM+CRLF comment-only TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM+CRLF create-missing must not duplicate the BOM, got:\n{updated:?}"
+    );
+    assert!(
+        updated.starts_with("\u{feff}# keep-root-comment\r\n"),
+        "BOM+CRLF root comment should be preserved, got:\n{updated:?}"
+    );
+    assert!(
+        updated.contains("[server.sidecar]\r\nport = 9090\r\n"),
+        "new block should use CRLF separators, got:\n{updated:?}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_array_value_parent_conflict() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver = [{ host = \"127.0.0.1\" }]\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "array-valued TOML parent must not be promoted into a standard table"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_trailing_table_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\n[evil]\nx = 1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragments must reject trailing table injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("single TOML value")),
+        "error should explain that only a single TOML value is accepted"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_trailing_key_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\nevil = 1",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragments must reject trailing key injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("single TOML value")),
+        "error should explain that only a single TOML value is accepted"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_intermediate_table_with_crlf_comments() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\r\n[server]\r\nhost = \"127.0.0.1\"\r\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CRLF intermediate TOML table creation should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[server.sidecar]\r\nport = 9090\r\n"),
+        "new intermediate table should use CRLF line endings, got:\n{updated:?}"
+    );
+    assert!(
+        !updated.contains("[server.sidecar]\nport"),
+        "new intermediate table must not introduce LF-only separators, got:\n{updated:?}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_table_array_parent_conflict_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[[servers]]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "servers.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "standard table creation must reject existing table-array parents"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("array of tables")),
+        "error should explain the table-array conflict"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected operation must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_dotted_key_table_redeclaration_with_comments()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\nserver.sidecar.host = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "dotted-key implicit table redeclaration must be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(
         before, after,
@@ -4898,8 +8075,8 @@ fn patch_json_config_path_set_create_missing_rejects_toml_inline_table_with_comm
     assert!(
         response["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("existing standard tables")),
-        "error should explain standard table requirement"
+            .is_some_and(|message| message.contains("already resolves to a TOML value")),
+        "error should explain existing value conflict"
     );
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(
@@ -5411,6 +8588,14 @@ fn patch_json_config_path_set_create_missing_toml_bom_prefixed_comments() {
     );
     let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
     assert!(updated.starts_with('\u{feff}'));
+    assert_eq!(
+        updated
+            .chars()
+            .filter(|character| *character == '\u{feff}')
+            .count(),
+        1,
+        "BOM-prefixed TOML create-missing must not duplicate the BOM, got:\n{updated:?}"
+    );
     assert!(updated.contains("# keep-this-comment"));
     assert!(updated.contains("port = 9090"));
 }
@@ -5458,7 +8643,7 @@ fn patch_json_config_path_set_create_missing_preserves_mixed_toml_line_endings()
 }
 
 #[test]
-fn patch_json_config_path_set_create_missing_rejects_toml_implicit_parent_table_with_comments() {
+fn patch_json_config_path_set_create_missing_creates_toml_implicit_parent_table_with_comments() {
     let mut temp_file = Builder::new()
         .suffix(".toml")
         .tempfile()
@@ -5467,8 +8652,6 @@ fn patch_json_config_path_set_create_missing_rejects_toml_implicit_parent_table_
         .write_all(b"# keep-this-comment\n[server.sidecar]\nhost = \"127.0.0.1\"\n")
         .expect("toml fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
-    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-
     let request = json!({
         "command": "patch",
         "file": file_path.to_string_lossy().to_string(),
@@ -5485,21 +8668,26 @@ fn patch_json_config_path_set_create_missing_rejects_toml_implicit_parent_table_
 
     let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
     assert!(
-        !output.status.success(),
-        "implicit parent TOML table insertion should stay rejected"
+        output.status.success(),
+        "implicit parent TOML table insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    let parent_position = updated
+        .find("[server]\nport = 9090")
+        .expect("updated TOML should contain the created parent table");
+    let child_position = updated
+        .find("[server.sidecar]\nhost = \"127.0.0.1\"")
+        .expect("updated TOML should keep the existing child table");
     assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("existing standard tables")),
-        "error should explain explicit table requirement"
+        parent_position < child_position,
+        "new explicit parent table should be inserted before the existing child table, got:\n{updated}"
     );
-    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
     assert_eq!(
-        before, after,
-        "rejected operation must not mutate TOML source"
+        parsed["server"]["sidecar"]["host"].as_str(),
+        Some("127.0.0.1")
     );
 }
 
@@ -8133,4 +11321,1876 @@ fn patch_json_config_path_append_rejects_index_targeting_scalar() {
     );
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(before, after, "failed scalar append must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_whitespace_toml_with_exact_hash_succeeds() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    let source = "\u{feff}\r\n \t\r\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": identedit::hash::hash_text(source)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM+whitespace TOML with exact hash should create missing path: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.starts_with(source),
+        "BOM+whitespace prefix should remain hash-guarded, got:\n{updated:?}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_whitespace_toml_with_stale_hash_fails() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    let source = "\u{feff}\r\n \t\r\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": "0000000000000000"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash should reject BOM+whitespace TOML create-missing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let updated = fs::read_to_string(&file_path).expect("TOML fixture should be readable");
+    assert_eq!(
+        updated, source,
+        "stale hash failure must not mutate BOM+whitespace TOML"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_value_fragment_with_standalone_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\n# generated port",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML value fragment plus standalone comment should stay a single value fragment: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("port = 9090\n# generated port"),
+        "standalone comment following value should be preserved, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_leading_table_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "[evil]\nx = 1\n9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragment must reject leading table injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected leading-table value fragment must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_keeps_crlf_descendant_comment_with_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"# root-comment\r\n\r\n# sidecar db table comment\r\n[server.sidecar.db]\r\nhost = \"db\"\r\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CRLF descendant table comment should stay attached when parent is created: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[server.sidecar]\r\nport = 9090\r\n\r\n# sidecar db table comment\r\n[server.sidecar.db]"
+        ),
+        "CRLF descendant comment block should remain with descendant table, got:\n{updated:?}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_array_of_inline_tables_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.backends"
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#"[{ name = "primary" }, { name = "replica", enabled = true }]"#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML array-of-inline-tables value fragment should be accepted as one value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "backends = [{ name = \"primary\" }, { name = \"replica\", enabled = true }]"
+        )
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    let backends = parsed["server"]["backends"]
+        .as_array()
+        .expect("backends should be an array");
+    assert_eq!(backends.len(), 2);
+    assert_eq!(backends[1]["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_json_bootstraps_object() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = " \n\t";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only JSON create-missing should bootstrap an object: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    assert!(
+        updated.starts_with(source),
+        "whitespace prefix should be preserved before bootstrapped JSON object, got:\n{updated:?}"
+    );
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["server"]["port"], json!(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_json_with_stale_hash_fails() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = " \n\t";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": "0000000000000000"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash must reject whitespace-only JSON bootstrap"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let updated = fs::read_to_string(&file_path).expect("JSON fixture should be readable");
+    assert_eq!(
+        updated, source,
+        "stale hash failure must not mutate whitespace-only JSON"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_yaml_comment_only_root_adds_key_after_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all("\u{feff}# keep-root-comment\n".as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM-prefixed YAML comment-only create-missing should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.starts_with("\u{feff}# keep-root-comment\n"),
+        "BOM and root comment should stay at top, got:\n{updated:?}"
+    );
+    assert!(updated.contains("server:\n  port: 9090"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_literal_dotted_root_table_path() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"["server.config"].port"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "literal dotted root table path should create quoted TOML table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[\"server.config\"]\nport = 9090"),
+        "literal dotted root key should be quoted, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server.config"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_literal_string_value_with_comment_chars()
+{
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.note"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "'# not a comment = value'",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML literal string containing comment-like chars should be a single value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("note = '# not a comment = value'"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["server"]["note"].as_str(),
+        Some("# not a comment = value")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_toml_leading_dotted_key_in_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "evil.key = 1\n9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "TOML value fragment must reject leading dotted-key injection"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected leading dotted-key fragment must not mutate TOML source"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_json_with_exact_hash_succeeds() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = "\n  \n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.enabled",
+            "expected_file_hash": identedit::hash::hash_text(source)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only JSON exact-hash bootstrap should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    assert!(updated.starts_with(source));
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["server"]["enabled"], json!(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_json_rejects_array_auto_create() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = " \n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[0].name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#""primary""#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create-missing must not auto-create JSON array indexes"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "array auto-create rejection should point to append operation"
+    );
+    let updated = fs::read_to_string(&file_path).expect("JSON fixture should be readable");
+    assert_eq!(
+        updated, source,
+        "rejected array auto-create must not mutate whitespace-only JSON"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_yaml_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = " \n\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only YAML create-missing should bootstrap a mapping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.starts_with(source),
+        "YAML whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    assert!(updated.contains("server:\n  port: 9090"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_yaml_with_stale_hash_fails() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = " \n\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": "0000000000000000"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash must reject whitespace-only YAML create-missing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let updated = fs::read_to_string(&file_path).expect("YAML fixture should be readable");
+    assert_eq!(
+        updated, source,
+        "stale hash failure must not mutate whitespace-only YAML"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_date_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[release]\nname = \"v1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "release.date"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "1979-05-27",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML date value fragment should be accepted as one value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("date = 1979-05-27"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert!(parsed["release"]["date"].is_datetime());
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_space_padded_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["  padded key  "]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML quoted key segment with edge spaces should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("\"  padded key  \" = true"),
+        "space-padded key should stay quoted, got:\n{updated}"
+    );
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["  padded key  "].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_empty_yaml_with_exact_hash_succeeds() {
+    let temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.enabled",
+            "expected_file_hash": identedit::hash::hash_text("")
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "empty YAML exact-hash create-missing should bootstrap mapping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("server:\n  enabled: true"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_empty_yaml_rejects_array_auto_create() {
+    let temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[0].name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "primary",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create-missing must not auto-create YAML array indexes"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "YAML array auto-create rejection should point to append operation"
+    );
+    let updated = fs::read_to_string(&file_path).expect("YAML fixture should be readable");
+    assert_eq!(
+        updated, "",
+        "rejected YAML array auto-create must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_whitespace_only_yaml_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = "\u{feff} \n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "BOM+whitespace-only YAML create-missing should bootstrap mapping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.starts_with(source),
+        "BOM+whitespace YAML prefix should be preserved, got:\n{updated:?}"
+    );
+    assert!(updated.contains("server:\n  port: 9090"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_crlf_whitespace_json_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = " \r\n\t\r\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CRLF whitespace-only JSON should bootstrap object: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    assert!(updated.starts_with(source));
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["server"]["port"], json!(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_value_fragment_with_crlf_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\r\n[server]\r\nhost = \"127.0.0.1\"\r\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090\r\n# generated port",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CRLF TOML value fragment comment should be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("port = 9090\r\n# generated port"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_slash_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["path/like/key"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#""value""#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML slash-containing quoted key should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("\"path/like/key\" = \"value\""));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["path/like/key"].as_str(), Some("value"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_crlf_whitespace_only_yaml_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = " \r\n\r\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CRLF whitespace-only YAML create-missing should bootstrap mapping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.starts_with(source),
+        "CRLF YAML whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    assert!(updated.contains("server:\r\n  port: 9090"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_bom_whitespace_yaml_with_stale_hash_fails() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = "\u{feff} \n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port",
+            "expected_file_hash": "0000000000000000"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash must reject BOM+whitespace-only YAML create-missing"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let updated = fs::read_to_string(&file_path).expect("YAML fixture should be readable");
+    assert_eq!(updated, source, "stale hash failure must not mutate YAML");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_explicit_yaml_null_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"null\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit YAML null must not be silently promoted into a mapping"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected explicit null must not mutate YAML");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_explicit_json_null_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"null")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit JSON null must not be silently promoted into an object"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected explicit null must not mutate JSON");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_emoji_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server[\"emoji😀key\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML emoji-containing key should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("\"emoji😀key\" = true"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["emoji😀key"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_array_value_with_inline_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.ports"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "[8000, 9000] # generated ports",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML array value with inline comment should be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("ports = [8000, 9000] # generated ports"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["ports"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_json_root_leaf_with_exact_hash() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = "\t\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled",
+            "expected_file_hash": identedit::hash::hash_text(source)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only JSON root leaf exact-hash create should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    assert!(updated.starts_with(source));
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["enabled"], json!(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_cr_only_whitespace_json_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = " \r\r";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CR-only whitespace JSON should bootstrap object: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    assert!(updated.starts_with(source));
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["server"]["port"], json!(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_cr_only_whitespace_yaml_preserves_prefix() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = " \r\r";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "CR-only whitespace YAML should bootstrap mapping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.starts_with(source),
+        "CR-only YAML whitespace prefix should be preserved, got:\n{updated:?}"
+    );
+    assert!(updated.contains("server:\r  port: 9090"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_yaml_root_leaf() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = "\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only YAML root leaf create should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.starts_with(source));
+    assert!(updated.contains("enabled: true"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_special_float_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[metrics]\nname = \"latency\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metrics.baseline"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "+inf",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML special float value fragment should be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("baseline = +inf"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert!(
+        parsed["metrics"]["baseline"]
+            .as_float()
+            .is_some_and(f64::is_infinite)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_basic_string_escape_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.note"
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#""line\nbreak""#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML basic string escape value fragment should be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains(r#"note = "line\nbreak""#));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["note"].as_str(), Some("line\nbreak"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_explicit_json_bool_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"false")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit JSON bool must not be silently promoted into an object"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected explicit bool must not mutate JSON");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_explicit_yaml_bool_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"false\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit YAML bool must not be silently promoted into a mapping"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected explicit bool must not mutate YAML");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_yaml_with_exact_hash_succeeds() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = " \n\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.enabled",
+            "expected_file_hash": identedit::hash::hash_text(source)
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only YAML exact-hash create should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.starts_with(source));
+    assert!(updated.contains("server:\n  enabled: true"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_empty_yaml_root_leaf_with_stale_hash_fails() {
+    let temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "enabled",
+            "expected_file_hash": "0000000000000000"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "stale hash must reject empty YAML root-leaf create"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    let updated = fs::read_to_string(&file_path).expect("YAML fixture should be readable");
+    assert_eq!(updated, "", "stale hash failure must not mutate empty YAML");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_colon_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["host:port"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#""127.0.0.1:9090""#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML colon-containing key should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("\"host:port\" = \"127.0.0.1:9090\""));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(
+        parsed["server"]["host:port"].as_str(),
+        Some("127.0.0.1:9090")
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_nested_array_value_fragment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.matrix"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "[[1, 2], [3, 4]]",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML nested array value fragment should be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("matrix = [[1, 2], [3, 4]]"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["matrix"][1][1].as_integer(), Some(4));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_json_sets_object_value() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    let source = "\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.sidecar"
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#"{"port": 9090, "enabled": true}"#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only JSON should accept object-valued create-missing leaf: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated JSON should be readable");
+    assert!(updated.starts_with(source));
+    let parsed: Value = serde_json::from_str(&updated).expect("updated JSON should stay valid");
+    assert_eq!(parsed["server"]["sidecar"]["enabled"], json!(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_whitespace_only_yaml_sets_sequence_value() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    let source = "\n";
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.ports"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "[8000, 9000]",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "whitespace-only YAML should accept sequence-valued create-missing leaf: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.starts_with(source));
+    assert!(updated.contains("ports:\n  - 8000\n  - 9000"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_explicit_json_array_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp json file should be created");
+    temp_file
+        .write_all(b"[]")
+        .expect("json fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit JSON array root must not be silently promoted into an object"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected JSON array parent must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_explicit_yaml_sequence_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"[]\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9090",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit YAML sequence root must not be silently promoted into a mapping"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected YAML sequence parent must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_creates_toml_leaf_key_with_equals_segment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"server["env=prod"]"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML equals-containing key should be creatable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("\"env=prod\" = true"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["env=prod"].as_bool(), Some(true));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_accepts_toml_string_value_with_hash_and_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"# keep-this-comment\n[server]\nhost = \"127.0.0.1\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.note"
+        },
+        "op": {
+            "type": "set",
+            "new_text": r#""literal # inside" # trailing comment"#,
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML string value with hash and trailing comment should be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(updated.contains("note = \"literal # inside\" # trailing comment"));
+    let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
+    assert_eq!(parsed["server"]["note"].as_str(), Some("literal # inside"));
 }

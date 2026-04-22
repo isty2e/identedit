@@ -102,13 +102,44 @@ pub fn resolve_config_path_operation(
         missing_path: MissingPathPolicy::Create,
     } = &operation
         && matches!(format, ConfigFormat::Json)
-        && source.is_empty()
+        && json_effectively_empty_source(source_text)
     {
         let updated = render_json_with_create_missing("", &path_tokens, raw_path, new_text)?;
-        return Ok(ResolvedConfigPatch {
-            target: TransformTarget::FileStart {
+        let target = if source.is_empty() {
+            TransformTarget::FileStart {
                 expected_file_hash: hash_bytes(&source),
-            },
+            }
+        } else {
+            TransformTarget::FileEnd {
+                expected_file_hash: hash_bytes(&source),
+            }
+        };
+        return Ok(ResolvedConfigPatch {
+            target,
+            op: OpKind::Insert { new_text: updated },
+        });
+    }
+
+    if let ConfigPathOperation::Set {
+        new_text,
+        missing_path: MissingPathPolicy::Create,
+    } = &operation
+        && matches!(format, ConfigFormat::Yaml)
+        && yaml_effectively_empty_source(source_text)
+    {
+        let updated =
+            render_yaml_with_create_missing(source_text, &path_tokens, raw_path, new_text)?;
+        let target = if source.is_empty() {
+            TransformTarget::FileStart {
+                expected_file_hash: hash_bytes(&source),
+            }
+        } else {
+            TransformTarget::FileEnd {
+                expected_file_hash: hash_bytes(&source),
+            }
+        };
+        return Ok(ResolvedConfigPatch {
+            target,
             op: OpKind::Insert { new_text: updated },
         });
     }
@@ -300,10 +331,24 @@ fn resolve_config_path_set_with_create_missing(
             request.new_text,
         )?,
     };
+    validate_rendered_config_document(request.format, &updated_root_text)?;
 
     if matches!(request.format, ConfigFormat::Json) && request.source.is_empty() {
         return Ok(ResolvedConfigPatch {
             target: TransformTarget::FileStart {
+                expected_file_hash: hash_bytes(request.source),
+            },
+            op: OpKind::Insert {
+                new_text: updated_root_text,
+            },
+        });
+    }
+
+    if matches!(request.format, ConfigFormat::Toml)
+        && toml_effectively_empty_source(request.source_text)
+    {
+        return Ok(ResolvedConfigPatch {
+            target: TransformTarget::FileEnd {
                 expected_file_hash: hash_bytes(request.source),
             },
             op: OpKind::Insert {
@@ -328,8 +373,25 @@ fn resolve_config_path_set_with_create_missing(
 
     let root_span = span_from_node(root_node);
     let root_kind = root_node.kind().to_string();
+    if matches!(request.format, ConfigFormat::Toml) && root_span.start == root_span.end {
+        return Ok(ResolvedConfigPatch {
+            target: TransformTarget::FileEnd {
+                expected_file_hash: hash_bytes(request.source),
+            },
+            op: OpKind::Insert {
+                new_text: updated_root_text,
+            },
+        });
+    }
+
     let handles = parse_handles_for_source(file, request.source)?;
     let container_handle = find_handle_for_span(file, &handles, root_span, &root_kind)?;
+    let replacement_text = replacement_text_for_root_span(
+        request.format,
+        request.source_text,
+        root_span,
+        updated_root_text,
+    )?;
     let target = TransformTarget::node(
         container_handle.identity,
         container_handle.kind,
@@ -340,9 +402,55 @@ fn resolve_config_path_set_with_create_missing(
     Ok(ResolvedConfigPatch {
         target,
         op: OpKind::Replace {
-            new_text: updated_root_text,
+            new_text: replacement_text,
         },
     })
+}
+
+fn toml_effectively_empty_source(source_text: &str) -> bool {
+    source_text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(source_text)
+        .trim()
+        .is_empty()
+}
+
+fn json_effectively_empty_source(source_text: &str) -> bool {
+    source_text.trim().is_empty()
+}
+
+fn yaml_effectively_empty_source(source_text: &str) -> bool {
+    source_text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(source_text)
+        .trim()
+        .is_empty()
+}
+
+fn replacement_text_for_root_span(
+    format: &ConfigFormat,
+    source_text: &str,
+    root_span: crate::handle::Span,
+    updated_source_text: String,
+) -> Result<String, IdenteditError> {
+    if !matches!(format, ConfigFormat::Toml) || root_span.start == 0 {
+        return Ok(updated_source_text);
+    }
+
+    let prefix = &source_text[..root_span.start];
+    if prefix == "\u{feff}" && !updated_source_text.starts_with(prefix) {
+        return Ok(updated_source_text);
+    }
+
+    if !updated_source_text.starts_with(prefix) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path create-missing produced root replacement that does not preserve the source prefix"
+                .to_string(),
+        });
+    }
+
+    let replacement_start = prefix.len();
+    Ok(updated_source_text[replacement_start..].to_string())
 }
 
 #[cfg(test)]
