@@ -8,7 +8,9 @@ use crate::handle::{SelectionHandle, Span};
 use crate::provider::node_text;
 
 use super::ConfigPathOperation;
-use super::render::{append_requires_array_error, array_index_out_of_bounds_error};
+use super::render::{
+    append_requires_array_error, array_index_out_of_bounds_error, parse_toml_value_fragment,
+};
 use super::syntax::{PathToken, expected_path_container_error, path_tokens_display, token_display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -428,6 +430,40 @@ pub(super) fn resolve_toml_path(
     })
 }
 
+pub(super) fn rewrite_toml_with_comment_preserving_create_missing(
+    tree: &Tree,
+    source_text: &str,
+    path_tokens: &[PathToken],
+    raw_path: &str,
+    new_text: &str,
+) -> Result<String, IdenteditError> {
+    parse_toml_value_fragment(new_text)?;
+
+    let (leaf_key, parent_path) = toml_create_missing_leaf_and_parent(path_tokens, raw_path)?;
+    let entry = format!("{leaf_key} = {new_text}");
+
+    let insertion = if parent_path.is_empty() {
+        TomlInsertion {
+            offset: root_toml_insertion_offset(tree.root_node(), source_text),
+            preserve_following_separator: true,
+        }
+    } else {
+        let table = find_toml_table_for_path(tree.root_node(), source_text.as_bytes(), parent_path)
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: format!(
+                    "Config path create-missing for TOML comments supports only root keys or leaf keys inside existing standard tables; create intermediate table '{}' first or use line mode",
+                    path_tokens_display(parent_path)
+                ),
+            })?;
+        TomlInsertion {
+            offset: move_offset_before_preceding_blank_lines(source_text, table.end_byte()),
+            preserve_following_separator: true,
+        }
+    };
+
+    insert_toml_entry_line(source_text, insertion, &entry)
+}
+
 pub(super) fn json_root_value(root: Node<'_>) -> Option<Node<'_>> {
     let node = root;
     if node.kind() == "document" {
@@ -591,6 +627,154 @@ fn collect_toml_candidates(root: Node<'_>, source: &[u8], out: &mut Vec<TomlCand
             _ => {}
         }
     }
+}
+
+fn toml_create_missing_leaf_and_parent<'a>(
+    path_tokens: &'a [PathToken],
+    raw_path: &str,
+) -> Result<(&'a str, &'a [PathToken]), IdenteditError> {
+    let Some((last, parent_path)) = path_tokens.split_last() else {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!("Config path '{raw_path}' did not resolve to a TOML key"),
+        });
+    };
+
+    if path_tokens
+        .iter()
+        .any(|token| matches!(token, PathToken::Index(_)))
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing for TOML comments supports only dotted key paths; array indexes are not auto-created for '{raw_path}'. Use a dedicated append operation if needed."
+            ),
+        });
+    }
+
+    let PathToken::Key(leaf_key) = last else {
+        unreachable!("index tokens were rejected above");
+    };
+    Ok((leaf_key, parent_path))
+}
+
+fn find_toml_table_for_path<'a>(
+    root: Node<'a>,
+    source: &[u8],
+    parent_path: &[PathToken],
+) -> Option<Node<'a>> {
+    named_children(root)
+        .into_iter()
+        .find(|child| child.kind() == "table" && toml_table_prefix(*child, source) == parent_path)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TomlInsertion {
+    offset: usize,
+    preserve_following_separator: bool,
+}
+
+fn root_toml_insertion_offset(root: Node<'_>, source_text: &str) -> usize {
+    let first_table_start = named_children(root)
+        .into_iter()
+        .filter(|child| child.kind() == "table" || child.kind() == "table_array_element")
+        .map(|child| child.start_byte())
+        .min()
+        .unwrap_or(source_text.len());
+    move_offset_before_preceding_blank_lines(source_text, first_table_start)
+}
+
+fn move_offset_before_preceding_blank_lines(source_text: &str, offset: usize) -> usize {
+    let mut cursor = offset;
+    loop {
+        let Some((line_start, line_end)) = previous_line_bounds(source_text, cursor) else {
+            return cursor;
+        };
+        if source_text[line_start..line_end].trim().is_empty() {
+            cursor = line_start;
+        } else {
+            return cursor;
+        }
+    }
+}
+
+fn previous_line_bounds(source_text: &str, cursor: usize) -> Option<(usize, usize)> {
+    if cursor == 0 {
+        return None;
+    }
+
+    let bytes = source_text.as_bytes();
+    let mut end = cursor;
+    if end > 0 && bytes[end - 1] == b'\n' {
+        end -= 1;
+        if end > 0 && bytes[end - 1] == b'\r' {
+            end -= 1;
+        }
+    } else if end > 0 && bytes[end - 1] == b'\r' {
+        end -= 1;
+    }
+
+    let mut start = end;
+    while start > 0 && bytes[start - 1] != b'\n' && bytes[start - 1] != b'\r' {
+        start -= 1;
+    }
+    Some((start, end))
+}
+
+fn insert_toml_entry_line(
+    source_text: &str,
+    insertion: TomlInsertion,
+    entry: &str,
+) -> Result<String, IdenteditError> {
+    if insertion.offset > source_text.len() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Invalid TOML insertion offset {} for source length {}",
+                insertion.offset,
+                source_text.len()
+            ),
+        });
+    }
+
+    let line_ending = toml_line_ending_literal(source_text);
+    let before = &source_text[..insertion.offset];
+    let after = &source_text[insertion.offset..];
+    let needs_prefix = !before.is_empty() && !ends_with_line_ending(before);
+    let needs_suffix = after.is_empty()
+        || !starts_with_line_ending(after)
+        || insertion.preserve_following_separator;
+
+    let mut updated = source_text.to_string();
+    let mut text = String::new();
+    if needs_prefix {
+        text.push_str(line_ending);
+    }
+    text.push_str(entry);
+    if needs_suffix {
+        text.push_str(line_ending);
+    }
+    updated.insert_str(insertion.offset, &text);
+    Ok(updated)
+}
+
+fn starts_with_line_ending(value: &str) -> bool {
+    value.starts_with('\n') || value.starts_with('\r')
+}
+
+fn ends_with_line_ending(value: &str) -> bool {
+    value.ends_with('\n') || value.ends_with('\r')
+}
+
+fn toml_line_ending_literal(source_text: &str) -> &'static str {
+    let bytes = source_text.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' if index + 1 < bytes.len() && bytes[index + 1] == b'\n' => return "\r\n",
+            b'\r' => return "\r",
+            b'\n' => return "\n",
+            _ => index += 1,
+        }
+    }
+    "\n"
 }
 
 fn collect_toml_pair_candidates(

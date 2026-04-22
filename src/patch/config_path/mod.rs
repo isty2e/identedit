@@ -19,7 +19,7 @@ use render::{
 use resolve::{
     ResolvedContainerEdit, find_handle_for_span, json_root_value, resolve_json_path,
     resolve_toml_path, resolve_yaml_path, rewrite_container_text, rewrite_full_source_text,
-    span_from_node, yaml_root_value,
+    rewrite_toml_with_comment_preserving_create_missing, span_from_node, yaml_root_value,
 };
 use safety::{
     ConfigFormat, detect_config_format, has_toml_comments, is_missing_config_path_error,
@@ -231,12 +231,6 @@ fn resolve_config_path_set_with_create_missing(
     if matches!(request.format, ConfigFormat::Yaml) {
         validate_yaml_create_missing_safety(request.tree, request.source_text)?;
     }
-    if matches!(request.format, ConfigFormat::Toml) && has_toml_comments(request.tree.root_node()) {
-        return Err(IdenteditError::InvalidRequest {
-            message: "Config path create-missing does not support TOML comments yet".to_string(),
-        });
-    }
-
     let updated_root_text = match request.format {
         ConfigFormat::Json => render_json_with_create_missing(
             request.source_text,
@@ -250,6 +244,15 @@ fn resolve_config_path_set_with_create_missing(
             request.raw_path,
             request.new_text,
         )?,
+        ConfigFormat::Toml if has_toml_comments(request.tree.root_node()) => {
+            rewrite_toml_with_comment_preserving_create_missing(
+                request.tree,
+                request.source_text,
+                request.path_tokens,
+                request.raw_path,
+                request.new_text,
+            )?
+        }
         ConfigFormat::Toml => render_toml_with_create_missing(
             request.source_text,
             request.path_tokens,
