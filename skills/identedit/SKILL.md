@@ -84,6 +84,9 @@ identedit patch src/example.py --at file-end --insert 'def new_helper():
 # Config key update (no read needed)
 identedit patch config.yaml --config-path server.port --set-value 8080
 
+# Config key with a literal dot in the key name
+identedit patch config.yaml --config-path 'services["sidecar.port"].enabled' --set-value true
+
 # Append to a config array
 identedit patch config.json --config-path items --append-value '"new_item"'
 
@@ -530,6 +533,7 @@ Use config-aware path targeting when you need to update nested keys without larg
 identedit patch --config-path service.retries --set-value 5 example.yaml
 identedit patch --config-path items --append-value 4 example.json
 identedit patch --config-path database.settings.enabled --delete example.toml
+identedit patch --config-path 'services["sidecar.port"].enabled' --set-value true example.yaml
 ```
 
 JSON mode:
@@ -567,7 +571,21 @@ Append JSON variant:
 }
 ```
 
-Path syntax is dot/bracket only (for example `a.b[1].c`).
+Path syntax:
+
+- Bare key segments are dot-separated: `service.retries`.
+- Array/sequence indices use numeric brackets: `items[0].name`.
+- Keys containing dots, spaces, slashes, colons, brackets, quotes, or other non-bare characters must use bracket-quoted JSON string segments.
+- Quoted key segments are key names, not array indices: `services["sidecar.port"]` means key `services`, then literal key `sidecar.port`.
+- Quoted segments use JSON string escaping: `root["quote\"key"]`, `root["unicode-\uD55C"]`.
+
+Examples:
+
+```bash
+identedit patch config.yaml --config-path '["on"].push.branches[0]' --set-value '"main"'
+identedit patch config.toml --config-path 'tool["weird.section"].port' --set-value 9090
+identedit patch config.json --config-path 'jobs["build/test"].steps[0]["run:script"]' --set-value '"npm test"'
+```
 
 Config path rules:
 - `set` updates an existing path; use `create_missing: true` (JSON mode) or `--create-missing` (flag mode) only when creating missing map/table keys.

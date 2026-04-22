@@ -103,6 +103,9 @@ identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + 
 # Update a config key
 identedit patch config.yaml --config-path server.port --set-value 8080
 
+# Keys containing dots or other non-bare characters use bracket-quoted JSON string segments
+identedit patch config.yaml --config-path 'services["sidecar.port"].enabled' --set-value true
+
 # Append to an array-valued config path
 identedit patch config.json --config-path items --append-value 4
 ```
@@ -154,6 +157,7 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 - Line-anchored patch defaults to strict mode. `--auto-repair` is explicit opt-in.
 - `apply --dry-run` validates and returns a summary without writing.
 - Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
+- Config paths use dot-separated bare keys by default (`service.port`). For literal keys containing dots, spaces, slashes, colons, brackets, or quotes, use bracket-quoted JSON string segments: `services["sidecar.port"]`, `jobs["build/test"].steps[0]["run:script"]`, `root["quote\"key"]`.
 - Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
 - Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests/lints after non-trivial edits.
 
