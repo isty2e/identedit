@@ -523,7 +523,7 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
     }
 
     let indent = yaml_child_indent(source_text, parent_mapping);
-    let entry = yaml_create_missing_entry_text(create_tokens, indent, new_text, raw_path)?;
+    let entry = yaml_create_missing_entry_text(create_tokens, &indent, new_text, raw_path)?;
     insert_yaml_entry_line(
         &source_text[root_span.start..root_span.end],
         insertion_offset - root_span.start,
@@ -941,66 +941,77 @@ fn find_yaml_create_missing_insertion_parent<'a>(
         });
     }
 
-    if path_tokens
-        .iter()
-        .any(|token| matches!(token, PathToken::Index(_)))
-    {
-        return Err(IdenteditError::InvalidRequest {
-            message: format!(
-                "Config path create-missing for YAML comments supports only dotted key paths; array indexes are not auto-created for '{raw_path}'. Use a dedicated append operation if needed."
-            ),
-        });
-    }
-
-    let mut current = require_yaml_block_mapping(root, raw_path)?;
+    let mut current = root;
     let mut consumed = 0usize;
 
-    for token in &path_tokens[..path_tokens.len() - 1] {
-        let PathToken::Key(expected_key) = token else {
-            unreachable!("index tokens were rejected before YAML path traversal");
-        };
-        let mut matches = Vec::new();
-        for pair in named_children(current) {
-            if pair.kind() != "block_mapping_pair" {
-                continue;
+    while consumed + 1 < path_tokens.len() {
+        let token = &path_tokens[consumed];
+        match token {
+            PathToken::Key(expected_key) => {
+                let mapping = require_yaml_block_mapping(current, raw_path)?;
+                let mut matches = Vec::new();
+                for pair in named_children(mapping) {
+                    if pair.kind() != "block_mapping_pair" {
+                        continue;
+                    }
+                    let Some(key_node) = pair.child_by_field_name("key") else {
+                        continue;
+                    };
+                    let Some(key_text) = yaml_key_text(key_node, source) else {
+                        continue;
+                    };
+                    if key_text == *expected_key {
+                        matches.push(pair);
+                    }
+                }
+
+                let matched_pair = match matches.as_slice() {
+                    [] => {
+                        reject_yaml_create_missing_sequence_auto_create(
+                            &path_tokens[consumed..],
+                            raw_path,
+                        )?;
+                        return Ok((mapping, &path_tokens[consumed..]));
+                    }
+                    [single] => *single,
+                    many => {
+                        return Err(IdenteditError::InvalidRequest {
+                            message: format!(
+                                "Config path '{raw_path}' segment {} is ambiguous ({})",
+                                token_display(token),
+                                many.len()
+                            ),
+                        });
+                    }
+                };
+                current = matched_pair
+                    .child_by_field_name("value")
+                    .and_then(yaml_unwrap_node)
+                    .ok_or_else(|| IdenteditError::InvalidRequest {
+                        message: format!(
+                            "Config path '{raw_path}' matched key '{expected_key}' without a value node"
+                        ),
+                    })?;
             }
-            let Some(key_node) = pair.child_by_field_name("key") else {
-                continue;
-            };
-            let Some(key_text) = yaml_key_text(key_node, source) else {
-                continue;
-            };
-            if key_text == *expected_key {
-                matches.push(pair);
+            PathToken::Index(expected_index) => {
+                let sequence = require_yaml_block_sequence(current, raw_path)?;
+                let items = named_children(sequence);
+                let item = items.get(*expected_index).ok_or_else(|| {
+                    array_index_out_of_bounds_error(raw_path, *expected_index, items.len())
+                })?;
+                current = yaml_unwrap_node(*item).ok_or_else(|| IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Config path '{raw_path}' index [{expected_index}] has no YAML value node"
+                    ),
+                })?;
             }
         }
-
-        let matched_pair = match matches.as_slice() {
-            [] => break,
-            [single] => *single,
-            many => {
-                return Err(IdenteditError::InvalidRequest {
-                    message: format!(
-                        "Config path '{raw_path}' segment {} is ambiguous ({})",
-                        token_display(token),
-                        many.len()
-                    ),
-                });
-            }
-        };
-        current = matched_pair
-            .child_by_field_name("value")
-            .and_then(yaml_unwrap_node)
-            .ok_or_else(|| IdenteditError::InvalidRequest {
-                message: format!(
-                    "Config path '{raw_path}' matched key '{expected_key}' without a value node"
-                ),
-            })?;
-        current = require_yaml_block_mapping(current, raw_path)?;
         consumed += 1;
     }
 
-    Ok((current, &path_tokens[consumed..]))
+    let parent_mapping = require_yaml_block_mapping(current, raw_path)?;
+    reject_yaml_create_missing_sequence_auto_create(&path_tokens[consumed..], raw_path)?;
+    Ok((parent_mapping, &path_tokens[consumed..]))
 }
 
 fn yaml_create_missing_entry_text(
@@ -1053,9 +1064,48 @@ fn require_yaml_block_mapping<'a>(
     })
 }
 
-fn yaml_child_indent<'a>(source_text: &'a str, mapping: Node<'_>) -> &'a str {
+fn require_yaml_block_sequence<'a>(
+    node: Node<'a>,
+    raw_path: &str,
+) -> Result<Node<'a>, IdenteditError> {
+    if node.kind() == "block_sequence" {
+        return Ok(node);
+    }
+
+    Err(IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path create-missing for YAML comments supports only existing block sequences when traversing array indexes; path '{raw_path}' resolved through node kind '{}'",
+            node.kind()
+        ),
+    })
+}
+
+fn reject_yaml_create_missing_sequence_auto_create(
+    create_tokens: &[PathToken],
+    raw_path: &str,
+) -> Result<(), IdenteditError> {
+    if create_tokens
+        .iter()
+        .any(|token| matches!(token, PathToken::Index(_)))
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Config path create-missing for YAML comments creates only mapping keys; array indexes are not auto-created for '{raw_path}'. Use a dedicated append operation if needed."
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn yaml_child_indent(source_text: &str, mapping: Node<'_>) -> String {
     let line_start = line_start_before_offset(source_text, mapping.start_byte());
-    &source_text[line_start..mapping.start_byte()]
+    let prefix = &source_text[line_start..mapping.start_byte()];
+    let trimmed = prefix.trim_start();
+    if trimmed.starts_with('-') && trimmed[1..].trim().is_empty() {
+        return prefix.replacen('-', " ", 1);
+    }
+    prefix.to_string()
 }
 
 fn line_start_before_offset(source_text: &str, offset: usize) -> usize {

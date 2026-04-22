@@ -9185,6 +9185,268 @@ fn patch_json_config_path_set_create_missing_yaml_comment_inserts_before_next_ro
 }
 
 #[test]
+fn patch_json_config_path_set_create_missing_yaml_comment_creates_nested_intermediate_mappings() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"# root comment\nservice:\n  # keep service config\n  name: identedit\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.http.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "nested YAML create-missing with comments should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "# root comment\nservice:\n  # keep service config\n  name: identedit\n  sidecar:\n    http:\n      port: 9000\n"
+        ),
+        "inserted nested mapping should stay under service with stable indentation: {updated}"
+    );
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(
+        parsed["service"]["sidecar"]["http"]["port"].as_i64(),
+        Some(9000)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_comment_creates_key_inside_sequence_mapping() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"# services\nservices:\n  - name: api\n    # keep item comment\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "services[0].port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML create-missing should traverse existing sequence item mapping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains("services:\n  - name: api\n    # keep item comment\n    port: 9000\n"),
+        "sequence item insertion should align with the compact mapping keys: {updated}"
+    );
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(parsed["services"][0]["port"].as_i64(), Some(9000));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_comment_creates_nested_key_inside_sequence_mapping()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"# services\nservices:\n  - name: api\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "services[0].sidecar.http.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML create-missing should render nested mappings under existing sequence item: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated
+            .contains("services:\n  - name: api\n    sidecar:\n      http:\n        port: 9000\n"),
+        "nested sequence item insertion should avoid '- sidecar' misindentation: {updated}"
+    );
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should stay valid");
+    assert_eq!(
+        parsed["services"][0]["sidecar"]["http"]["port"].as_i64(),
+        Some(9000)
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_comment_rejects_missing_sequence_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"# intentionally sparse config\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "services[0].name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"api\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "YAML create-missing must not auto-create sequences"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "missing sequence creation error should point to append operations"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected sequence auto-create must not mutate YAML"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_comment_rejects_sequence_index_out_of_bounds() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"# services\nservices:\n  - name: api\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "services[1].name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"worker\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "YAML create-missing must reject out-of-bounds sequence indexes"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("append operation")),
+        "OOB sequence error should point to append operations"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected sequence OOB must not mutate YAML");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_comment_rejects_explicit_null_mapping_parent() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"# server config\nserver:\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "server.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "explicit YAML null mapping value must not be promoted into a mapping"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected null parent must not mutate YAML");
+}
+
+#[test]
 fn patch_json_config_path_set_create_missing_yaml_comment_handles_no_final_newline() {
     let mut temp_file = Builder::new()
         .suffix(".yaml")

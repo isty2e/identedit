@@ -102,7 +102,7 @@ Use `--kind` + `--name` when you need kind-specific glob matching (e.g., `--kind
 `patch` handles resolve + precondition validation + apply internally. Use `read → edit → apply` only when you need multi-file atomic or multiple operations in one request.
 
 For non-trivial replacements, prefer `--dry-run --diff` first.
-For config paths, `--create-missing` creates only missing map/table keys; arrays are never auto-expanded. TOML comment-preserving creation can insert missing standard table parents, but still rejects inline-table parents and table-array conflicts. YAML creation can reject comment-preserving cases, in which case fall back to direct editing.
+For config paths, `--create-missing` creates only missing map/table keys; arrays/sequences are never auto-expanded. TOML comment-preserving creation can insert missing standard table parents, but still rejects inline-table parents and table-array conflicts. YAML comment-preserving creation can insert missing mapping parents and missing keys under existing sequence-item mappings; it still rejects sequence creation, out-of-range sequence indices, and scalar/null parent promotion.
 
 ## Large Text: `--text-file` / `--stdin-text`
 
@@ -594,6 +594,7 @@ Config path rules:
 - Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 - Config path edits are validated against the target format before writing — syntax-breaking edits are rejected.
 - TOML `--create-missing` preserves comments and can create missing standard table parents such as `[server.sidecar]`; it still rejects inline-table parents, array indexes, and table-array parent conflicts.
+- YAML `--create-missing` preserves comments for block mappings and can create missing intermediate mapping keys. Existing in-range sequence items can be traversed when the selected item is a mapping, but missing sequences and out-of-range sequence indices are rejected; use append for sequence growth.
 
 ---
 
