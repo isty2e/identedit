@@ -4,7 +4,9 @@ use crate::changeset::{OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_bytes;
 use crate::hashline::{HashlineEdit, InsertAfterEdit, ReplaceLinesEdit, SetLineEdit};
-use crate::patch::config_path::{ConfigPathOperation, resolve_config_path_operation};
+use crate::patch::config_path::{
+    ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
+};
 
 use super::PatchArgs;
 use super::execute::{
@@ -367,7 +369,7 @@ fn parse_config_flag_patch_request(
             None,
             ConfigPathOperation::Set {
                 new_text,
-                create_missing: args.create_missing,
+                missing_path: MissingPathPolicy::from_create_missing(args.create_missing),
             },
         )?
     } else if let Some(new_text) = resolve_patch_text_payload(

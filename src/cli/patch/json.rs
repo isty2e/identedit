@@ -8,7 +8,9 @@ use crate::changeset::{OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::Span;
 use crate::hashline::{HashlineEdit, InsertAfterEdit, ReplaceLinesEdit, SetLineEdit};
-use crate::patch::config_path::{ConfigPathOperation, resolve_config_path_operation};
+use crate::patch::config_path::{
+    ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
+};
 
 use super::super::line_patch::execute_hashline_patch;
 use super::execute::{
@@ -337,7 +339,7 @@ fn run_patch_json_config(
             expected_file_hash.as_deref(),
             ConfigPathOperation::Set {
                 new_text,
-                create_missing,
+                missing_path: MissingPathPolicy::from_create_missing(create_missing),
             },
         )?,
         ConfigPatchOp::Append { new_text } => resolve_config_path_operation(

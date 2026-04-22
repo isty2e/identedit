@@ -34,12 +34,24 @@ use syntax::{PathToken, parse_config_path};
 pub enum ConfigPathOperation {
     Set {
         new_text: String,
-        create_missing: bool,
+        missing_path: MissingPathPolicy,
     },
     Append {
         new_text: String,
     },
     Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingPathPolicy {
+    Reject,
+    Create,
+}
+
+impl MissingPathPolicy {
+    pub fn from_create_missing(value: bool) -> Self {
+        if value { Self::Create } else { Self::Reject }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +99,7 @@ pub fn resolve_config_path_operation(
 
     if let ConfigPathOperation::Set {
         new_text,
-        create_missing: true,
+        missing_path: MissingPathPolicy::Create,
     } = &operation
         && matches!(format, ConfigFormat::Json)
         && source.is_empty()
@@ -104,12 +116,12 @@ pub fn resolve_config_path_operation(
     let tree = parse_tree_for_format(&format, &source)?;
     if let ConfigPathOperation::Set {
         new_text,
-        create_missing: true,
+        missing_path: MissingPathPolicy::Create,
     } = &operation
     {
         let strict_probe = ConfigPathOperation::Set {
             new_text: String::new(),
-            create_missing: false,
+            missing_path: MissingPathPolicy::Reject,
         };
         let strict_resolved = match format {
             ConfigFormat::Json => {
@@ -338,7 +350,7 @@ mod tests {
     use std::path::Path;
 
     use super::syntax::{PathToken, parse_config_path, path_tokens_display};
-    use super::{ConfigPathOperation, detect_config_format};
+    use super::{ConfigPathOperation, MissingPathPolicy, detect_config_format};
 
     #[test]
     fn parse_config_path_supports_dot_and_index_tokens() {
@@ -459,14 +471,31 @@ mod tests {
     fn config_path_operation_set_and_delete_are_distinct() {
         let set = ConfigPathOperation::Set {
             new_text: "42".to_string(),
-            create_missing: false,
+            missing_path: MissingPathPolicy::Reject,
+        };
+        let create_missing_set = ConfigPathOperation::Set {
+            new_text: "42".to_string(),
+            missing_path: MissingPathPolicy::Create,
         };
         let append = ConfigPathOperation::Append {
             new_text: "42".to_string(),
         };
         let delete = ConfigPathOperation::Delete;
         assert_ne!(set, delete);
+        assert_ne!(set, create_missing_set);
         assert_ne!(set, append);
         assert_ne!(append, delete);
+    }
+
+    #[test]
+    fn missing_path_policy_normalizes_legacy_create_missing_bool() {
+        assert_eq!(
+            MissingPathPolicy::from_create_missing(false),
+            MissingPathPolicy::Reject
+        );
+        assert_eq!(
+            MissingPathPolicy::from_create_missing(true),
+            MissingPathPolicy::Create
+        );
     }
 }
