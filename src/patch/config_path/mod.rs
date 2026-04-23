@@ -21,9 +21,9 @@ use resolve::{
     reject_yaml_implicit_null_single_line_value, render_yaml_comment_only_create_missing_insertion,
     resolve_json_path, resolve_toml_path, resolve_yaml_path, rewrite_container_text,
     rewrite_full_source_text, rewrite_toml_with_comment_preserving_create_missing,
-    rewrite_yaml_with_comment_preserving_create_missing, span_from_node, yaml_root_value,
-    yaml_set_value_replace_span, yaml_set_value_replacement_text,
-    yaml_single_line_value_with_trailing_line_endings,
+    rewrite_yaml_with_comment_preserving_create_missing, span_from_node,
+    yaml_document_root_value_at, yaml_root_value, yaml_set_value_replace_span,
+    yaml_set_value_replacement_text, yaml_single_line_value_with_trailing_line_endings,
 };
 use safety::{
     ConfigFormat, detect_config_format, has_toml_comments, has_yaml_comments,
@@ -70,12 +70,14 @@ struct CreateMissingSetRequest<'a> {
     path_tokens: &'a [PathToken],
     raw_path: &'a str,
     new_text: &'a str,
+    document_index: Option<usize>,
 }
 
 pub fn resolve_config_path_operation(
     file: &Path,
     raw_path: &str,
     expected_file_hash: Option<&str>,
+    document_index: Option<usize>,
     operation: ConfigPathOperation,
 ) -> Result<ResolvedConfigPatch, IdenteditError> {
     let source = std::fs::read(file).map_err(|error| IdenteditError::io(file, error))?;
@@ -97,6 +99,11 @@ pub fn resolve_config_path_operation(
     }
 
     let format = detect_config_format(file)?;
+    if document_index.is_some() && !matches!(format, ConfigFormat::Yaml) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path document_index is supported only for YAML files".to_string(),
+        });
+    }
     let path_tokens = parse_config_path(raw_path)?;
 
     if let ConfigPathOperation::Set {
@@ -173,9 +180,14 @@ pub fn resolve_config_path_operation(
             ConfigFormat::Json => {
                 resolve_json_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
             }
-            ConfigFormat::Yaml => {
-                resolve_yaml_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
-            }
+            ConfigFormat::Yaml => resolve_yaml_path(
+                &tree,
+                &source,
+                &path_tokens,
+                &strict_probe,
+                raw_path,
+                document_index,
+            ),
             ConfigFormat::Toml => {
                 resolve_toml_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
             }
@@ -213,6 +225,7 @@ pub fn resolve_config_path_operation(
                 path_tokens: &path_tokens,
                 raw_path,
                 new_text,
+                document_index,
             },
         );
     }
@@ -221,9 +234,14 @@ pub fn resolve_config_path_operation(
         ConfigFormat::Json => {
             resolve_json_path(&tree, &source, &path_tokens, &operation, raw_path)?
         }
-        ConfigFormat::Yaml => {
-            resolve_yaml_path(&tree, &source, &path_tokens, &operation, raw_path)?
-        }
+        ConfigFormat::Yaml => resolve_yaml_path(
+            &tree,
+            &source,
+            &path_tokens,
+            &operation,
+            raw_path,
+            document_index,
+        )?,
         ConfigFormat::Toml => {
             resolve_toml_path(&tree, &source, &path_tokens, &operation, raw_path)?
         }
@@ -398,7 +416,11 @@ fn resolve_config_path_set_with_create_missing(
     request: CreateMissingSetRequest<'_>,
 ) -> Result<ResolvedConfigPatch, IdenteditError> {
     if matches!(request.format, ConfigFormat::Yaml) {
-        validate_yaml_create_missing_safety(request.tree, request.source_text)?;
+        validate_yaml_create_missing_safety(
+            request.tree,
+            request.source_text,
+            request.document_index,
+        )?;
         if has_yaml_comments(request.tree.root_node())
             && yaml_root_value(request.tree.root_node()).is_none()
         {
@@ -429,6 +451,7 @@ fn resolve_config_path_set_with_create_missing(
             request.path_tokens,
             request.raw_path,
             request.new_text,
+            request.document_index,
         )?,
         ConfigFormat::Toml if has_toml_comments(request.tree.root_node()) => {
             rewrite_toml_with_comment_preserving_create_missing(
@@ -478,11 +501,17 @@ fn resolve_config_path_set_with_create_missing(
                 message: "JSON document has no root value".to_string(),
             }
         })?,
-        ConfigFormat::Yaml => yaml_root_value(request.tree.root_node()).ok_or_else(|| {
-            IdenteditError::InvalidRequest {
-                message: "YAML document has no root value".to_string(),
+        ConfigFormat::Yaml => {
+            if let Some(index) = request.document_index {
+                yaml_document_root_value_at(request.tree.root_node(), index)?
+            } else {
+                yaml_root_value(request.tree.root_node()).ok_or_else(|| {
+                    IdenteditError::InvalidRequest {
+                        message: "YAML document has no root value".to_string(),
+                    }
+                })?
             }
-        })?,
+        }
         ConfigFormat::Toml => request.tree.root_node(),
     };
 

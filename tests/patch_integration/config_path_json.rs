@@ -24,6 +24,41 @@ fn patch_config_set_value_text_file_invalid_json_does_not_mutate_file() {
 }
 
 #[test]
+fn patch_json_config_path_document_index_rejects_non_yaml_file() {
+    let file_path = copy_fixture_to_temp_json("example.json");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "config.retries",
+            "document_index": 0
+        },
+        "op": {
+            "type": "set",
+            "new_text": "7"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "document_index should be YAML-only"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("document_index"))
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should remain readable");
+    assert_eq!(before, after, "rejected edit must not mutate JSON file");
+}
+
+#[test]
 fn patch_config_set_value_stdin_invalid_json_does_not_mutate_file() {
     let file_path = copy_fixture_to_temp_json("example.json");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");

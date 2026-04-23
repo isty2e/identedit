@@ -42,7 +42,7 @@ fn file_mode_guidance() -> String {
 
 fn config_mode_guidance() -> String {
     format!(
-        "Config path mode supports {CONFIG_MODE_OPERATIONS}. Use --create-missing only with --set-value."
+        "Config path mode supports {CONFIG_MODE_OPERATIONS}. Use --create-missing only with --set-value; use --document-index <N> only for YAML multi-document streams."
     )
 }
 
@@ -100,6 +100,7 @@ fn prepare_patch_flag_node_operation(
         || args.set_value.is_some()
         || args.append_value.is_some()
         || args.create_missing
+        || args.document_index.is_some()
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
@@ -197,6 +198,7 @@ fn parse_file_flag_patch_request(
         || args.insert_before.is_some()
         || args.insert_after.is_some()
         || args.create_missing
+        || args.document_index.is_some()
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
@@ -248,6 +250,7 @@ fn parse_line_flag_patch_request(
         || args.insert_before.is_some()
         || args.insert_after.is_some()
         || args.create_missing
+        || args.document_index.is_some()
         || args.verbose
     {
         return Err(IdenteditError::InvalidRequest {
@@ -367,6 +370,7 @@ fn parse_config_flag_patch_request(
             file.as_path(),
             &path,
             None,
+            args.document_index,
             ConfigPathOperation::Set {
                 new_text,
                 missing_path: MissingPathPolicy::from_create_missing(args.create_missing),
@@ -381,11 +385,18 @@ fn parse_config_flag_patch_request(
             file.as_path(),
             &path,
             None,
+            args.document_index,
             ConfigPathOperation::Append { new_text },
         )?
     } else {
         reject_unused_text_source(text_source, CONFIG_MODE_OPERATIONS)?;
-        resolve_config_path_operation(file.as_path(), &path, None, ConfigPathOperation::Delete)?
+        resolve_config_path_operation(
+            file.as_path(),
+            &path,
+            None,
+            args.document_index,
+            ConfigPathOperation::Delete,
+        )?
     };
 
     Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {

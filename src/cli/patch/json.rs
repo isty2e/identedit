@@ -65,6 +65,8 @@ enum StdinPatchTarget {
         path: String,
         #[serde(default)]
         expected_file_hash: Option<String>,
+        #[serde(default)]
+        document_index: Option<usize>,
     },
 }
 
@@ -180,10 +182,12 @@ pub(super) fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditE
         StdinPatchTarget::ConfigPath {
             path,
             expected_file_hash,
+            document_index,
         } => run_patch_json_config(
             request.file,
             path,
             expected_file_hash,
+            document_index,
             request.op,
             dry_run,
             request.options.verbose,
@@ -307,6 +311,7 @@ fn run_patch_json_config(
     file: PathBuf,
     path: String,
     expected_file_hash: Option<String>,
+    document_index: Option<usize>,
     op: Value,
     dry_run: bool,
     verbose: bool,
@@ -337,6 +342,7 @@ fn run_patch_json_config(
             file.as_path(),
             &path,
             expected_file_hash.as_deref(),
+            document_index,
             ConfigPathOperation::Set {
                 new_text,
                 missing_path: MissingPathPolicy::from_create_missing(create_missing),
@@ -346,12 +352,14 @@ fn run_patch_json_config(
             file.as_path(),
             &path,
             expected_file_hash.as_deref(),
+            document_index,
             ConfigPathOperation::Append { new_text },
         )?,
         ConfigPatchOp::Delete => resolve_config_path_operation(
             file.as_path(),
             &path,
             expected_file_hash.as_deref(),
+            document_index,
             ConfigPathOperation::Delete,
         )?,
     };

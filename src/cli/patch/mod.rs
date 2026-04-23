@@ -57,6 +57,12 @@ pub struct PatchArgs {
     )]
     pub config_path: Option<String>,
     #[arg(
+        long = "document-index",
+        value_name = "INDEX",
+        help = "0-based YAML document index for config path targets in multi-document YAML streams"
+    )]
+    pub document_index: Option<usize>,
+    #[arg(
         long,
         value_name = "KIND",
         help = "Node kind for direct symbol-targeted patching (requires --name, node flag mode)"
@@ -260,6 +266,7 @@ mod tests {
             anchor: None,
             end_anchor: None,
             config_path: None,
+            document_index: None,
             kind: None,
             name: None,
             symbol: None,

@@ -177,7 +177,13 @@ pub(super) fn resolve_yaml_path(
     path_tokens: &[PathToken],
     operation: &ConfigPathOperation,
     raw_path: &str,
+    document_index: Option<usize>,
 ) -> Result<ResolvedContainerEdit, IdenteditError> {
+    if let Some(index) = document_index {
+        let root = yaml_document_root_value_at(tree.root_node(), index)?;
+        return resolve_yaml_path_from_root(root, source, path_tokens, operation, raw_path);
+    }
+
     let mut matches = Vec::new();
     let mut first_error = None;
     for root in yaml_document_root_values(tree.root_node()) {
@@ -518,12 +524,17 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
     path_tokens: &[PathToken],
     raw_path: &str,
     new_text: &str,
+    document_index: Option<usize>,
 ) -> Result<String, IdenteditError> {
     parse_yaml_value_fragment(new_text)?;
 
-    let root = yaml_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
-        message: "YAML document has no root value".to_string(),
-    })?;
+    let root = if let Some(index) = document_index {
+        yaml_document_root_value_at(tree.root_node(), index)?
+    } else {
+        yaml_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "YAML document has no root value".to_string(),
+        })?
+    };
     let root_span = span_from_node(root);
     let (parent_mapping, create_tokens) = find_yaml_create_missing_insertion_parent(
         root,
@@ -532,7 +543,9 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
         raw_path,
     )?;
 
-    let insertion_offset = parent_mapping.end_byte();
+    let indent = yaml_child_indent(source_text, parent_mapping);
+    let insertion_offset =
+        yaml_create_missing_insertion_offset(source_text, parent_mapping.end_byte(), indent.len());
     if insertion_offset < root_span.start || insertion_offset > root_span.end {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
@@ -542,7 +555,6 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
         });
     }
 
-    let indent = yaml_child_indent(source_text, parent_mapping);
     let line_ending = yaml_line_ending_literal(source_text);
     let entry =
         yaml_create_missing_entry_text(create_tokens, &indent, new_text, raw_path, line_ending)?;
@@ -551,6 +563,7 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
         insertion_offset - root_span.start,
         &entry,
         line_ending,
+        &source_text[root_span.end..],
     )
 }
 
@@ -625,6 +638,54 @@ fn yaml_document_root_values(root: Node<'_>) -> Vec<Node<'_>> {
     } else {
         roots
     }
+}
+
+pub(super) fn yaml_document_root_value_at(
+    root: Node<'_>,
+    document_index: usize,
+) -> Result<Node<'_>, IdenteditError> {
+    if root.kind() != "stream" {
+        if document_index == 0 {
+            return yaml_root_value(root).ok_or_else(|| IdenteditError::InvalidRequest {
+                message: "YAML document_index 0 has no root value".to_string(),
+            });
+        }
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "YAML document_index {document_index} is out of range; file has 1 document"
+            ),
+        });
+    }
+
+    let documents = named_children(root)
+        .into_iter()
+        .filter(|child| child.kind() == "document")
+        .collect::<Vec<_>>();
+    if documents.is_empty() {
+        if document_index == 0 {
+            return yaml_root_value(root).ok_or_else(|| IdenteditError::InvalidRequest {
+                message: "YAML document_index 0 has no root value".to_string(),
+            });
+        }
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "YAML document_index {document_index} is out of range; file has 1 document"
+            ),
+        });
+    }
+
+    let Some(document) = documents.get(document_index) else {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "YAML document_index {document_index} is out of range; file has {} documents",
+                documents.len()
+            ),
+        });
+    };
+
+    yaml_root_value(*document).ok_or_else(|| IdenteditError::InvalidRequest {
+        message: format!("YAML document_index {document_index} has no root value"),
+    })
 }
 
 pub(super) fn span_from_node(node: Node<'_>) -> Span {
@@ -1460,6 +1521,28 @@ fn yaml_child_indent(source_text: &str, mapping: Node<'_>) -> String {
     prefix.to_string()
 }
 
+fn yaml_create_missing_insertion_offset(
+    source_text: &str,
+    initial_offset: usize,
+    child_indent_len: usize,
+) -> usize {
+    let mut cursor = initial_offset.min(source_text.len());
+    let mut insertion_offset = cursor;
+    while let Some((line_start, line_end)) = previous_line_bounds(source_text, cursor) {
+        let line = &source_text[line_start..line_end];
+        let trimmed = line.trim_start_matches(' ');
+        if line.trim().is_empty()
+            || (line.len() - trimmed.len() < child_indent_len && trimmed.starts_with('#'))
+        {
+            insertion_offset = line_start;
+            cursor = line_start;
+            continue;
+        }
+        break;
+    }
+    insertion_offset
+}
+
 fn line_start_before_offset(source_text: &str, offset: usize) -> usize {
     let bytes = source_text.as_bytes();
     let mut cursor = offset.min(bytes.len());
@@ -1647,6 +1730,7 @@ fn insert_yaml_entry_line(
     offset: usize,
     entry: &str,
     line_ending: &str,
+    following_source_text: &str,
 ) -> Result<String, IdenteditError> {
     if offset > root_text.len() {
         return Err(IdenteditError::InvalidRequest {
@@ -1660,7 +1744,13 @@ fn insert_yaml_entry_line(
     let before = &root_text[..offset];
     let after = &root_text[offset..];
     let needs_prefix = !before.is_empty() && !ends_with_line_ending(before);
-    let needs_suffix = after.is_empty() || !starts_with_line_ending(after);
+    let needs_suffix = if after.is_empty() {
+        !starts_with_line_ending(following_source_text)
+    } else if starts_with_line_ending(after) {
+        ends_with_line_ending(before)
+    } else {
+        true
+    };
 
     let mut updated = root_text.to_string();
     let mut text = String::new();

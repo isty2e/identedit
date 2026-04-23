@@ -22,13 +22,24 @@ pub(super) fn is_missing_config_path_error(error: &IdenteditError) -> bool {
 pub(super) fn validate_yaml_create_missing_safety(
     tree: &Tree,
     source_text: &str,
+    document_index: Option<usize>,
 ) -> Result<(), IdenteditError> {
-    let document_count = count_nodes_by_kind(tree.root_node(), "document");
-    if document_count > 1 {
+    let parsed_document_count = count_nodes_by_kind(tree.root_node(), "document");
+    let document_count = parsed_document_count.max(1);
+    if parsed_document_count > 1 && document_index.is_none() {
         return Err(IdenteditError::InvalidRequest {
             message:
-                "Config path create-missing does not support multiple YAML documents in one file"
+                "Config path create-missing on multiple YAML documents requires document_index"
                     .to_string(),
+        });
+    }
+    if let Some(index) = document_index
+        && index >= document_count
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "YAML document_index {index} is out of range; file has {document_count} documents"
+            ),
         });
     }
 

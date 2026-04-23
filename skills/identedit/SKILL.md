@@ -534,6 +534,8 @@ identedit patch --config-path service.retries --set-value 5 example.yaml
 identedit patch --config-path items --append-value 4 example.json
 identedit patch --config-path database.settings.enabled --delete example.toml
 identedit patch --config-path 'services["sidecar.port"].enabled' --set-value true example.yaml
+identedit patch manifests.yaml --config-path spec.replicas \
+  --document-index 1 --set-value 3 --create-missing
 ```
 
 JSON mode:
@@ -578,6 +580,7 @@ Path syntax:
 - Keys containing dots, spaces, slashes, colons, brackets, quotes, or other non-bare characters must use bracket-quoted JSON string segments.
 - Quoted key segments are key names, not array indices: `services["sidecar.port"]` means key `services`, then literal key `sidecar.port`.
 - Quoted segments use JSON string escaping: `root["quote\"key"]`, `root["unicode-\uD55C"]`.
+- For multi-document YAML streams, use `--document-index <N>` or JSON target field `"document_index": N` when `--create-missing` needs to choose a document. Indices are 0-based. Existing-path edits may omit it only when the path resolves uniquely across documents.
 
 Examples:
 
@@ -605,6 +608,7 @@ Config path rules:
 - Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 - Config path edits are validated against the target format before writing — syntax-breaking edits are rejected.
 - TOML `--create-missing` preserves comments and can create missing standard table parents such as `[server.sidecar]`; it still rejects inline-table parents, array indexes, and table-array parent conflicts.
+- YAML multi-document `--create-missing` is never implicit. Add `--document-index <N>` for the target document; do not rely on document order unless the manifest format makes that order meaningful.
 - YAML `--create-missing` preserves comments for block mappings and can create missing intermediate mapping keys. Existing in-range sequence items can be traversed when the selected item is a mapping, but missing sequences and out-of-range sequence indices are rejected; use append for sequence growth.
 - YAML multiline create-missing is an identedit-local policy: only explicit block scalar leaf values are accepted (`|`, `|-`, `|+`, `>`, `>-`, `>+`). Numeric indentation indicators such as `|2`, multiline mappings, and multiline sequences are rejected; use line/direct editing for those broader rewrites.
 - YAML create-missing quotes unsafe or implicit-scalar-looking string keys while rendering new entries. Use bracket-quoted path segments for literal keys such as `["true"]`, `["null"]`, `["123"]`, or `["app: conf"]`.
