@@ -18,9 +18,9 @@ Three entry points covering different editing needs:
 
 **`patch`** — one-shot verified edit (most common):
 ```bash
-identedit patch src/example.py --symbol process_data --replace 'def f(): ...'
-identedit patch src/example.py --symbol Processor.process_data --replace 'def f(): ...'
-identedit patch src/example.py --at abc123def4567890 --replace 'def f(): ...'
+identedit patch src/example.py --symbol process_data --replace 'def process_data(...): ...'
+identedit patch src/example.py --symbol Processor.process_data --replace 'def process_data(...): ...'
+identedit patch src/example.py --at abc123def4567890 --replace 'def process_data(...): ...'
 identedit patch src/example.py --at "42:9e0f1a2b3c4d" --set-line "    return x + y"
 identedit patch config.yaml --config-path server.port --set-value 8080
 identedit patch config.json --config-path items --append-value 4
