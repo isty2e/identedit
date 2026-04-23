@@ -171,8 +171,10 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 - Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
 - Config paths use dot-separated bare keys by default (`service.port`). For literal keys containing dots, spaces, slashes, colons, brackets, or quotes, use bracket-quoted JSON string segments: `services["sidecar.port"]`, `jobs["build/test"].steps[0]["run:script"]`, `root["quote\"key"]`.
 - Multi-document YAML requires an explicit `--document-index <N>` for `--create-missing`; indices are 0-based. Existing-path edits may still omit it only when the path resolves uniquely across documents.
+- YAML/TOML `--create-missing` preserves existing key order and blank-line groups. It inserts into clearly sorted groups or same-prefix runs, and otherwise appends conservatively without reordering existing keys.
 - YAML `--create-missing` can create explicit block scalar leaf values (`|`, `|-`, `|+`, `>`, `>-`, `>+`) under existing block mappings. It does not auto-create sequences or accept multiline mapping/sequence fragments.
 - YAML create-missing quotes unsafe or implicit-scalar-looking string keys when rendering new entries, so `["true"]`, `["null"]`, `["123"]`, and `["app: conf"]` stay string mapping keys.
+- Use line mode or direct editing when the desired placement depends on project-specific comment semantics, cross-section moves, array/table-array restructuring, YAML anchors/aliases/tags, or multiline YAML mappings/sequences.
 - Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
 - Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests/lints after non-trivial edits.
 

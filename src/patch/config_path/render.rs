@@ -31,33 +31,6 @@ pub(super) fn render_json_with_create_missing(
     Ok(apply_source_line_ending_style(&rendered, source_text))
 }
 
-pub(super) fn render_toml_with_create_missing(
-    source_text: &str,
-    path_tokens: &[PathToken],
-    raw_path: &str,
-    new_text: &str,
-) -> Result<String, IdenteditError> {
-    let parse_input = if source_text.contains('\r') && !source_text.contains('\n') {
-        source_text.replace('\r', "\n")
-    } else {
-        source_text.to_string()
-    };
-    let mut root: toml::Value =
-        toml::from_str(&parse_input).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!("Config path create-missing could not parse TOML document: {error}"),
-        })?;
-    let parsed_new_value = parse_toml_value_fragment(new_text)?;
-    apply_toml_set_create_missing(&mut root, path_tokens, raw_path, &parsed_new_value)?;
-
-    let rendered =
-        toml::to_string_pretty(&root).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!(
-                "Config path create-missing could not serialize TOML document: {error}"
-            ),
-        })?;
-    Ok(apply_source_line_ending_style(&rendered, source_text))
-}
-
 pub(super) fn parse_toml_value_fragment(fragment: &str) -> Result<toml::Value, IdenteditError> {
     let wrapped = format!("__identedit_tmp__ = {fragment}");
     let mut table: toml::Table =
@@ -193,81 +166,10 @@ fn apply_json_set_create_missing(
     }
 }
 
-fn apply_toml_set_create_missing(
-    current: &mut toml::Value,
-    path_tokens: &[PathToken],
-    raw_path: &str,
-    new_value: &toml::Value,
-) -> Result<(), IdenteditError> {
-    let Some((head, tail)) = path_tokens.split_first() else {
-        *current = new_value.clone();
-        return Ok(());
-    };
-
-    match head {
-        PathToken::Key(key) => {
-            let table = match current {
-                toml::Value::Table(table) => table,
-                _ => {
-                    return Err(expected_path_container_error(
-                        raw_path,
-                        head,
-                        toml_value_kind_name(current),
-                    ));
-                }
-            };
-            if tail.is_empty() {
-                table.insert(key.clone(), new_value.clone());
-                return Ok(());
-            }
-            if !table.contains_key(key) {
-                table.insert(key.clone(), empty_toml_container_for_token(&tail[0]));
-            }
-            let child = table
-                .get_mut(key)
-                .ok_or_else(|| IdenteditError::InvalidRequest {
-                    message: format!("Config path '{raw_path}' segment '{key}' was not found"),
-                })?;
-            apply_toml_set_create_missing(child, tail, raw_path, new_value)
-        }
-        PathToken::Index(index) => {
-            let array = match current {
-                toml::Value::Array(array) => array,
-                _ => {
-                    return Err(expected_path_container_error(
-                        raw_path,
-                        head,
-                        toml_value_kind_name(current),
-                    ));
-                }
-            };
-            if *index >= array.len() {
-                return Err(array_index_out_of_bounds_error(
-                    raw_path,
-                    *index,
-                    array.len(),
-                ));
-            }
-            if tail.is_empty() {
-                array[*index] = new_value.clone();
-                return Ok(());
-            }
-            apply_toml_set_create_missing(&mut array[*index], tail, raw_path, new_value)
-        }
-    }
-}
-
 fn empty_json_container_for_token(next: &PathToken) -> serde_json::Value {
     match next {
         PathToken::Key(_) => serde_json::Value::Object(serde_json::Map::new()),
         PathToken::Index(_) => serde_json::Value::Array(Vec::new()),
-    }
-}
-
-fn empty_toml_container_for_token(next: &PathToken) -> toml::Value {
-    match next {
-        PathToken::Key(_) => toml::Value::Table(toml::Table::new()),
-        PathToken::Index(_) => toml::Value::Array(Vec::new()),
     }
 }
 
@@ -279,18 +181,6 @@ fn json_value_kind_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::String(_) => "string",
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
-    }
-}
-
-fn toml_value_kind_name(value: &toml::Value) -> &'static str {
-    match value {
-        toml::Value::String(_) => "string",
-        toml::Value::Integer(_) => "integer",
-        toml::Value::Float(_) => "float",
-        toml::Value::Boolean(_) => "boolean",
-        toml::Value::Datetime(_) => "datetime",
-        toml::Value::Array(_) => "array",
-        toml::Value::Table(_) => "table",
     }
 }
 

@@ -134,6 +134,484 @@ fn patch_json_config_path_set_create_missing_inserts_toml_leaf_before_next_table
 }
 
 #[test]
+fn patch_json_config_path_set_create_missing_toml_sorted_group_inserts_in_order() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nalpha = 1\nbeta = 2\ndelta = 4\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "sorted TOML group insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[metadata]\nalpha = 1\nbeta = 2\ncharlie = 3\ndelta = 4\n"),
+        "new key should preserve sorted TOML group order, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_unsorted_group_appends() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nbuild = \"fast\"\ntest = \"strict\"\ndeploy = \"manual\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.cache"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unsorted TOML group insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[metadata]\nbuild = \"fast\"\ntest = \"strict\"\ndeploy = \"manual\"\ncache = true\n"
+        ),
+        "new key should append to unsorted TOML group, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_sorted_insert_preserves_following_key_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nalpha = 1\nbeta = 2\n# delta setting\ndelta = 4\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "comment-owned sorted TOML insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated
+            .contains("[metadata]\nalpha = 1\nbeta = 2\ncharlie = 3\n# delta setting\ndelta = 4\n"),
+        "new key should be inserted before the following key's leading comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_blank_line_group_boundary_is_preserved() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nalpha = 1\nbeta = 2\n\n# delta setting\ndelta = 4\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML insertion should preserve blank-line group boundaries: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[metadata]\nalpha = 1\nbeta = 2\ncharlie = 3\n\n# delta setting\ndelta = 4\n"
+        ),
+        "new key should stay in the first group and preserve the following group comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_prefix_family_inserts_near_run() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"[service]\nsidecar_api_host = \"localhost\"\nsidecar_api_tls = false\nretries = 3\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML prefix family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[service]\nsidecar_api_host = \"localhost\"\nsidecar_api_port = 9000\nsidecar_api_tls = false\nretries = 3\n"
+        ),
+        "new key should be inserted within the sidecar_api prefix family, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_unsorted_prefix_family_appends_to_run_end() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"[service]\nsidecar_api_tls = false\nsidecar_api_host = \"localhost\"\nretries = 3\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML unsorted prefix-family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[service]\nsidecar_api_tls = false\nsidecar_api_host = \"localhost\"\nsidecar_api_port = 9000\nretries = 3\n"
+        ),
+        "new key should append to an unsorted prefix run instead of sorting it, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_root_sorted_group_before_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"alpha = 1\nbeta = 2\ndelta = 4\n\n[server]\nhost = \"localhost\"\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML root sorted insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("alpha = 1\nbeta = 2\ncharlie = 3\ndelta = 4\n\n[server]"),
+        "root key should stay in the root sorted group before the first table, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_crlf_comment_owned_sorted_insert() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\r\nalpha = 1\r\nbeta = 2\r\n# delta setting\r\ndelta = 4\r\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML CRLF sorted insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[metadata]\r\nalpha = 1\r\nbeta = 2\r\ncharlie = 3\r\n# delta setting\r\ndelta = 4\r\n"
+        ),
+        "new key should preserve CRLF and stay before the owned comment block, got:\n{updated:?}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_blank_line_separated_prefixes_do_not_merge() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"[service]\nsidecar_api_host = \"localhost\"\n\nsidecar_api_tls = false\nretries = 3\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML separated prefix-family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[service]\nsidecar_api_host = \"localhost\"\n\nsidecar_api_tls = false\nretries = 3\nsidecar_api_port = 9000\n"
+        ),
+        "blank-line separated prefix keys should not be merged into one inferred run, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_cr_only_blank_line_group_boundary() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\ralpha = 1\rbeta = 2\r\r# delta setting\rdelta = 4\r")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML CR-only blank-line group insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[metadata]\ralpha = 1\rbeta = 2\rcharlie = 3\r\r# delta setting\rdelta = 4\r"
+        ),
+        "new key should preserve CR-only blank-line group boundary, got:\n{updated:?}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_dotted_sibling_keeps_conservative_append() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nalpha = 1\nbeta.inner = 2\ndelta = 4\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML dotted sibling conservative insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[metadata]\nalpha = 1\nbeta.inner = 2\ndelta = 4\ncharlie = 3\n"),
+        "dotted sibling should disable sorted inference and append conservatively, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_quoted_keys_participate_in_sorted_group() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nalpha = 1\n\"beta key\" = 2\ndelta = 4\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata[\"charlie key\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML quoted-key sorted insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated
+            .contains("[metadata]\nalpha = 1\n\"beta key\" = 2\n\"charlie key\" = 3\ndelta = 4\n"),
+        "decoded quoted keys should participate in sorted placement, got:\n{updated}"
+    );
+}
+
+#[test]
 fn patch_json_config_path_set_create_missing_inserts_toml_root_leaf_with_comments() {
     let mut temp_file = Builder::new()
         .suffix(".toml")
@@ -412,6 +890,212 @@ fn patch_json_config_path_set_create_missing_allows_toml_dotted_sibling_then_chi
     let parsed: toml::Value = toml::from_str(&updated).expect("updated TOML should stay valid");
     assert_eq!(parsed["server"]["host"].as_str(), Some("127.0.0.1"));
     assert_eq!(parsed["server"]["sidecar"]["port"].as_integer(), Some(9090));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_hyphen_prefix_family_preserves_comment_owner() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"[service]\nsidecar-api-host = \"localhost\"\n# TLS setting\nsidecar-api-tls = false\nretries = 3\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service[\"sidecar-api-port\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML hyphen-prefix family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[service]\nsidecar-api-host = \"localhost\"\nsidecar-api-port = 9000\n# TLS setting\nsidecar-api-tls = false\nretries = 3\n"
+        ),
+        "new hyphen-family key should insert before the following key's owned comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_root_prefix_family_before_table() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"sidecar_api_host = \"localhost\"\nsidecar_api_tls = false\n\n[service]\nretries = 3\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML root prefix-family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "sidecar_api_host = \"localhost\"\nsidecar_api_port = 9000\nsidecar_api_tls = false\n\n[service]\n"
+        ),
+        "root prefix-family insertion should stay before the table boundary, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_prefix_family_before_first_owned_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"[service]\n# host setting\nsidecar_api_host = \"localhost\"\nsidecar_api_tls = false\nretries = 3\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML prefix-family insertion before first entry should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[service]\nsidecar_api_enabled = true\n# host setting\nsidecar_api_host = \"localhost\"\nsidecar_api_tls = false\nretries = 3\n"
+        ),
+        "insertion before the first prefix-family entry should preserve that entry's owned comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_prefix_family_after_run_before_unrelated_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(
+            b"[service]\nsidecar_api_host = \"localhost\"\nsidecar_api_tls = false\nsidecar_cache_host = \"localhost\"\n",
+        )
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_url"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"http://localhost\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML prefix-family insertion after run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains(
+            "[service]\nsidecar_api_host = \"localhost\"\nsidecar_api_tls = false\nsidecar_api_url = \"http://localhost\"\nsidecar_cache_host = \"localhost\"\n"
+        ),
+        "prefix-family insertion after the run should not drift past the next family, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_toml_selects_later_sorted_group() {
+    let mut temp_file = Builder::new()
+        .suffix(".toml")
+        .tempfile()
+        .expect("temp toml file should be created");
+    temp_file
+        .write_all(b"[metadata]\nalpha = 1\nbeta = 2\n\nomega = 24\nzeta = 26\n")
+        .expect("toml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.sigma"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "25",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "TOML insertion into later sorted group should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated TOML should be readable");
+    assert!(
+        updated.contains("[metadata]\nalpha = 1\nbeta = 2\n\nomega = 24\nsigma = 25\nzeta = 26\n"),
+        "new key should choose the sorted group whose bounds contain it, got:\n{updated}"
+    );
 }
 
 #[test]

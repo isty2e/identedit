@@ -12,10 +12,7 @@ mod resolve;
 mod safety;
 mod syntax;
 
-use render::{
-    render_append_array_replacement, render_json_with_create_missing,
-    render_toml_with_create_missing,
-};
+use render::{render_append_array_replacement, render_json_with_create_missing};
 use resolve::{
     ResolvedContainerEdit, find_handle_for_span, json_root_value,
     reject_yaml_implicit_null_single_line_value, render_yaml_comment_only_create_missing_insertion,
@@ -26,9 +23,8 @@ use resolve::{
     yaml_set_value_replacement_text, yaml_single_line_value_with_trailing_line_endings,
 };
 use safety::{
-    ConfigFormat, detect_config_format, has_toml_comments, has_yaml_comments,
-    is_missing_config_path_error, parse_tree_for_format, validate_rendered_config_document,
-    validate_yaml_create_missing_safety,
+    ConfigFormat, detect_config_format, has_yaml_comments, is_missing_config_path_error,
+    parse_tree_for_format, validate_rendered_config_document, validate_yaml_create_missing_safety,
 };
 use syntax::{PathToken, parse_config_path};
 
@@ -453,16 +449,8 @@ fn resolve_config_path_set_with_create_missing(
             request.new_text,
             request.document_index,
         )?,
-        ConfigFormat::Toml if has_toml_comments(request.tree.root_node()) => {
-            rewrite_toml_with_comment_preserving_create_missing(
-                request.tree,
-                request.source_text,
-                request.path_tokens,
-                request.raw_path,
-                request.new_text,
-            )?
-        }
-        ConfigFormat::Toml => render_toml_with_create_missing(
+        ConfigFormat::Toml => rewrite_toml_with_comment_preserving_create_missing(
+            request.tree,
             request.source_text,
             request.path_tokens,
             request.raw_path,
@@ -490,7 +478,10 @@ fn resolve_config_path_set_with_create_missing(
                 expected_file_hash: hash_bytes(request.source),
             },
             op: OpKind::Insert {
-                new_text: updated_root_text,
+                new_text: insertion_text_after_existing_empty_source(
+                    request.source_text,
+                    updated_root_text,
+                ),
             },
         });
     }
@@ -549,6 +540,16 @@ fn resolve_config_path_set_with_create_missing(
             new_text: replacement_text,
         },
     })
+}
+
+fn insertion_text_after_existing_empty_source(
+    _source_text: &str,
+    updated_source_text: String,
+) -> String {
+    updated_source_text
+        .trim_start_matches('\u{feff}')
+        .trim()
+        .to_string()
 }
 
 fn toml_effectively_empty_source(source_text: &str) -> bool {

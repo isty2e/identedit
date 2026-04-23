@@ -477,17 +477,18 @@ pub(super) fn rewrite_toml_with_comment_preserving_create_missing(
 
     let insertion = if parent_path.is_empty() {
         TomlInsertion {
-            offset: root_toml_insertion_offset(tree.root_node(), source_text),
+            offset: toml_root_leaf_insertion_offset(tree.root_node(), source_text, leaf_key),
             preserve_following_separator: true,
         }
     } else {
         if let Some(table) =
             find_toml_table_for_path(tree.root_node(), source_text.as_bytes(), parent_path)
         {
+            let offset = toml_table_leaf_insertion_offset(table, source_text, leaf_key);
             return insert_toml_entry_line(
                 source_text,
                 TomlInsertion {
-                    offset: move_offset_before_preceding_blank_lines(source_text, table.end_byte()),
+                    offset,
                     preserve_following_separator: true,
                 },
                 &entry,
@@ -544,8 +545,9 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
     )?;
 
     let indent = yaml_child_indent(source_text, parent_mapping);
+    let leaf_key = yaml_create_missing_leaf_key(create_tokens, raw_path)?;
     let insertion_offset =
-        yaml_create_missing_insertion_offset(source_text, parent_mapping.end_byte(), indent.len());
+        yaml_create_missing_insertion_offset(source_text, parent_mapping, indent.len(), leaf_key);
     if insertion_offset < root_span.start || insertion_offset > root_span.end {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
@@ -1269,6 +1271,18 @@ fn yaml_create_missing_entry_text(
     Ok(entry)
 }
 
+fn yaml_create_missing_leaf_key<'a>(
+    create_tokens: &'a [PathToken],
+    raw_path: &str,
+) -> Result<&'a str, IdenteditError> {
+    let Some(PathToken::Key(key)) = create_tokens.last() else {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!("Config path '{raw_path}' did not resolve to a YAML key"),
+        });
+    };
+    Ok(key)
+}
+
 fn yaml_render_key_segment(key: &str) -> String {
     if is_yaml_plain_key_safe(key) {
         key.to_string()
@@ -1523,6 +1537,23 @@ fn yaml_child_indent(source_text: &str, mapping: Node<'_>) -> String {
 
 fn yaml_create_missing_insertion_offset(
     source_text: &str,
+    parent_mapping: Node<'_>,
+    child_indent_len: usize,
+    leaf_key: &str,
+) -> usize {
+    let fallback = yaml_create_missing_fallback_insertion_offset(
+        source_text,
+        parent_mapping.end_byte(),
+        child_indent_len,
+    );
+    let Some(entries) = yaml_sibling_entries(source_text, parent_mapping, child_indent_len) else {
+        return fallback;
+    };
+    group_aware_insertion_offset(source_text, entries, fallback, leaf_key)
+}
+
+fn yaml_create_missing_fallback_insertion_offset(
+    source_text: &str,
     initial_offset: usize,
     child_indent_len: usize,
 ) -> usize {
@@ -1543,11 +1574,51 @@ fn yaml_create_missing_insertion_offset(
     insertion_offset
 }
 
+fn yaml_sibling_entries(
+    source_text: &str,
+    mapping: Node<'_>,
+    child_indent_len: usize,
+) -> Option<Vec<SiblingEntry>> {
+    let source = source_text.as_bytes();
+    let mut entries = Vec::new();
+    for pair in named_children(mapping) {
+        if pair.kind() != "block_mapping_pair" {
+            continue;
+        }
+        let key_node = pair.child_by_field_name("key")?;
+        let key = yaml_key_text(key_node, source)?;
+        let key_line_start = line_start_before_offset(source_text, pair.start_byte());
+        entries.push(SiblingEntry {
+            key,
+            insertion_start: leading_comment_block_start(
+                source_text,
+                key_line_start,
+                child_indent_len,
+            ),
+            end: line_end_with_ending_after_offset(source_text, pair.end_byte()),
+        });
+    }
+    Some(entries)
+}
+
 fn line_start_before_offset(source_text: &str, offset: usize) -> usize {
     let bytes = source_text.as_bytes();
     let mut cursor = offset.min(bytes.len());
     while cursor > 0 && bytes[cursor - 1] != b'\n' && bytes[cursor - 1] != b'\r' {
         cursor -= 1;
+    }
+    cursor
+}
+
+fn line_end_with_ending_after_offset(source_text: &str, offset: usize) -> usize {
+    let bytes = source_text.as_bytes();
+    let mut cursor = line_end_after_offset(source_text, offset);
+    if cursor < bytes.len() {
+        if bytes[cursor] == b'\r' && cursor + 1 < bytes.len() && bytes[cursor + 1] == b'\n' {
+            cursor += 2;
+        } else {
+            cursor += 1;
+        }
     }
     cursor
 }
@@ -1561,10 +1632,250 @@ fn line_end_after_offset(source_text: &str, offset: usize) -> usize {
     cursor
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SiblingEntry {
+    key: String,
+    insertion_start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SiblingGroup {
+    start: usize,
+    end: usize,
+}
+
+fn group_aware_insertion_offset(
+    source_text: &str,
+    mut entries: Vec<SiblingEntry>,
+    fallback: usize,
+    new_key: &str,
+) -> usize {
+    if entries.is_empty() {
+        return fallback;
+    }
+
+    entries.sort_by_key(|entry| entry.insertion_start);
+    let groups = sibling_groups(source_text, &entries);
+    if let Some(offset) = prefix_family_insertion_offset(&entries, &groups, new_key) {
+        return offset;
+    }
+    if let Some(offset) = sorted_group_insertion_offset(&entries, &groups, new_key) {
+        return offset;
+    }
+    fallback
+}
+
+fn sibling_groups(source_text: &str, entries: &[SiblingEntry]) -> Vec<SiblingGroup> {
+    let mut groups = Vec::new();
+    let mut start = 0usize;
+    for index in 1..entries.len() {
+        if has_blank_line_between(
+            source_text,
+            entries[index - 1].end,
+            entries[index].insertion_start,
+        ) {
+            groups.push(SiblingGroup { start, end: index });
+            start = index;
+        }
+    }
+    groups.push(SiblingGroup {
+        start,
+        end: entries.len(),
+    });
+    groups
+}
+
+fn has_blank_line_between(source_text: &str, start: usize, end: usize) -> bool {
+    if start >= end || end > source_text.len() {
+        return false;
+    }
+    source_text[start..end]
+        .lines()
+        .any(|line| line.trim().is_empty())
+}
+
+fn prefix_family_insertion_offset(
+    entries: &[SiblingEntry],
+    groups: &[SiblingGroup],
+    new_key: &str,
+) -> Option<usize> {
+    let family = key_family(new_key)?;
+    for group in groups {
+        let mut index = group.start;
+        while index < group.end {
+            if key_family(&entries[index].key) != Some(family) {
+                index += 1;
+                continue;
+            }
+
+            let run_start = index;
+            while index < group.end && key_family(&entries[index].key) == Some(family) {
+                index += 1;
+            }
+            let run_end = index;
+            if run_end - run_start < 2 {
+                continue;
+            }
+
+            if entries[run_start..run_end]
+                .windows(2)
+                .all(|window| window[0].key <= window[1].key)
+            {
+                for entry in &entries[run_start..run_end] {
+                    if new_key < entry.key.as_str() {
+                        return Some(entry.insertion_start);
+                    }
+                }
+            }
+            return Some(entries[run_end - 1].end);
+        }
+    }
+    None
+}
+
+fn key_family(key: &str) -> Option<&str> {
+    let (index, _) = key
+        .char_indices()
+        .rev()
+        .find(|(_, character)| matches!(character, '_' | '-'))?;
+    if index == 0 || index + 1 >= key.len() {
+        return None;
+    }
+    Some(&key[..index])
+}
+
+fn sorted_group_insertion_offset(
+    entries: &[SiblingEntry],
+    groups: &[SiblingGroup],
+    new_key: &str,
+) -> Option<usize> {
+    if groups.len() == 1 {
+        let group = groups[0];
+        if group.end - group.start >= 3 && group_is_sorted(entries, group) {
+            return Some(insertion_offset_in_sorted_group(entries, group, new_key));
+        }
+        return None;
+    }
+
+    for (group_index, group) in groups.iter().copied().enumerate() {
+        if group.end - group.start < 2 || !group_is_sorted(entries, group) {
+            continue;
+        }
+        let lower_ok =
+            group_index == 0 || new_key > entries[groups[group_index - 1].end - 1].key.as_str();
+        let upper_ok = group_index + 1 == groups.len()
+            || new_key < entries[groups[group_index + 1].start].key.as_str();
+        if lower_ok && upper_ok {
+            return Some(insertion_offset_in_sorted_group(entries, group, new_key));
+        }
+    }
+
+    None
+}
+
+fn group_is_sorted(entries: &[SiblingEntry], group: SiblingGroup) -> bool {
+    entries[group.start..group.end]
+        .windows(2)
+        .all(|window| window[0].key <= window[1].key)
+}
+
+fn insertion_offset_in_sorted_group(
+    entries: &[SiblingEntry],
+    group: SiblingGroup,
+    new_key: &str,
+) -> usize {
+    for entry in &entries[group.start..group.end] {
+        if new_key < entry.key.as_str() {
+            return entry.insertion_start;
+        }
+    }
+    entries[group.end - 1].end
+}
+
+fn leading_comment_block_start(
+    source_text: &str,
+    key_line_start: usize,
+    min_indent: usize,
+) -> usize {
+    let mut cursor = key_line_start;
+    let mut start = key_line_start;
+    while let Some((line_start, line_end)) = previous_line_bounds(source_text, cursor) {
+        let line = &source_text[line_start..line_end];
+        if line.trim().is_empty() {
+            break;
+        }
+        let indent = line
+            .bytes()
+            .take_while(|byte| matches!(*byte, b' ' | b'\t'))
+            .count();
+        if indent >= min_indent && line[indent..].starts_with('#') {
+            start = line_start;
+            cursor = line_start;
+            continue;
+        }
+        break;
+    }
+    start
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TomlInsertion {
     offset: usize,
     preserve_following_separator: bool,
+}
+
+fn toml_root_leaf_insertion_offset(root: Node<'_>, source_text: &str, leaf_key: &str) -> usize {
+    let fallback = root_toml_insertion_offset(root, source_text);
+    let Some(entries) = toml_root_sibling_entries(root, source_text) else {
+        return fallback;
+    };
+    group_aware_insertion_offset(source_text, entries, fallback, leaf_key)
+}
+
+fn toml_table_leaf_insertion_offset(table: Node<'_>, source_text: &str, leaf_key: &str) -> usize {
+    let fallback = move_offset_before_preceding_blank_lines(source_text, table.end_byte());
+    let Some(entries) = toml_table_sibling_entries(table, source_text) else {
+        return fallback;
+    };
+    group_aware_insertion_offset(source_text, entries, fallback, leaf_key)
+}
+
+fn toml_root_sibling_entries(root: Node<'_>, source_text: &str) -> Option<Vec<SiblingEntry>> {
+    let source = source_text.as_bytes();
+    let mut entries = Vec::new();
+    for child in named_children(root) {
+        match child.kind() {
+            "pair" => entries.push(toml_sibling_entry(child, source_text, source)?),
+            "table" | "table_array_element" => break,
+            _ => {}
+        }
+    }
+    Some(entries)
+}
+
+fn toml_table_sibling_entries(table: Node<'_>, source_text: &str) -> Option<Vec<SiblingEntry>> {
+    let source = source_text.as_bytes();
+    let mut entries = Vec::new();
+    for child in named_children(table) {
+        if child.kind() == "pair" {
+            entries.push(toml_sibling_entry(child, source_text, source)?);
+        }
+    }
+    Some(entries)
+}
+
+fn toml_sibling_entry(pair: Node<'_>, source_text: &str, source: &[u8]) -> Option<SiblingEntry> {
+    let (key_segments, _) = toml_pair_key_and_value(pair, source)?;
+    let [key] = key_segments.as_slice() else {
+        return None;
+    };
+    let key_line_start = line_start_before_offset(source_text, pair.start_byte());
+    Some(SiblingEntry {
+        key: key.clone(),
+        insertion_start: leading_comment_block_start(source_text, key_line_start, 0),
+        end: line_end_with_ending_after_offset(source_text, pair.end_byte()),
+    })
 }
 
 fn root_toml_insertion_offset(root: Node<'_>, source_text: &str) -> usize {

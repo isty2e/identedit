@@ -53,21 +53,6 @@ pub(super) fn validate_yaml_create_missing_safety(
     Ok(())
 }
 
-pub(super) fn has_toml_comments(root: Node<'_>) -> bool {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if node.kind().contains("comment") {
-            return true;
-        }
-        for index in 0..node.child_count() {
-            if let Some(child) = node.child(index as u32) {
-                stack.push(child);
-            }
-        }
-    }
-    false
-}
-
 pub(super) fn validate_rendered_config_document(
     format: &ConfigFormat,
     original_source: &str,

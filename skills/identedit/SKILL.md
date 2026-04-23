@@ -102,7 +102,7 @@ Use `--kind` + `--name` when you need kind-specific glob matching (e.g., `--kind
 `patch` handles resolve + precondition validation + apply internally. Use `read → edit → apply` only when you need multi-file atomic or multiple operations in one request.
 
 For non-trivial replacements, prefer `--dry-run --diff` first.
-For config paths, `--create-missing` creates only missing map/table keys; arrays/sequences are never auto-expanded. TOML comment-preserving creation can insert missing standard table parents, but still rejects inline-table parents and table-array conflicts. YAML comment-preserving creation can insert missing mapping parents and missing keys under existing sequence-item mappings. For multiline YAML, use explicit block scalar leaf values only (`|`, `|-`, `|+`, `>`, `>-`, `>+`); multiline mapping/sequence fragments are rejected.
+For config paths, `--create-missing` creates only missing map/table keys; arrays/sequences are never auto-expanded. TOML/YAML creation preserves existing order and blank-line groups: it inserts into clearly sorted groups or same-prefix runs, and otherwise appends conservatively without reordering existing keys. Use line/direct editing when placement depends on project-specific section semantics. TOML creation can insert missing standard table parents, but still rejects inline-table parents and table-array conflicts. YAML creation can insert missing mapping parents and missing keys under existing sequence-item mappings. For multiline YAML, use explicit block scalar leaf values only (`|`, `|-`, `|+`, `>`, `>-`, `>+`); multiline mapping/sequence fragments are rejected.
 
 ## Large Text: `--text-file` / `--stdin-text`
 
@@ -607,11 +607,13 @@ Config path rules:
 - `delete` and `append` reject `create_missing`.
 - Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 - Config path edits are validated against the target format before writing — syntax-breaking edits are rejected.
-- TOML `--create-missing` preserves comments and can create missing standard table parents such as `[server.sidecar]`; it still rejects inline-table parents, array indexes, and table-array parent conflicts.
+- TOML/YAML `--create-missing` preserves comments, existing key order, and blank-line groups. It inserts into clearly sorted groups or same-prefix runs, and otherwise appends conservatively without reordering existing keys.
+- TOML `--create-missing` can create missing standard table parents such as `[server.sidecar]`; it still rejects inline-table parents, array indexes, and table-array parent conflicts.
 - YAML multi-document `--create-missing` is never implicit. Add `--document-index <N>` for the target document; do not rely on document order unless the manifest format makes that order meaningful.
 - YAML `--create-missing` preserves comments for block mappings and can create missing intermediate mapping keys. Existing in-range sequence items can be traversed when the selected item is a mapping, but missing sequences and out-of-range sequence indices are rejected; use append for sequence growth.
 - YAML multiline create-missing is an identedit-local policy: only explicit block scalar leaf values are accepted (`|`, `|-`, `|+`, `>`, `>-`, `>+`). Numeric indentation indicators such as `|2`, multiline mappings, and multiline sequences are rejected; use line/direct editing for those broader rewrites.
 - YAML create-missing quotes unsafe or implicit-scalar-looking string keys while rendering new entries. Use bracket-quoted path segments for literal keys such as `["true"]`, `["null"]`, `["123"]`, or `["app: conf"]`.
+- Fall back to line/direct editing when desired placement depends on project-local comment semantics, cross-section moves, array/table-array restructuring, YAML anchors/aliases/tags, or multiline YAML mappings/sequences.
 
 ---
 

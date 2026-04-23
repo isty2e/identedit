@@ -147,6 +147,450 @@ fn patch_json_config_path_set_create_missing_preserves_yaml_comments() {
 }
 
 #[test]
+fn patch_json_config_path_set_create_missing_yaml_sorted_group_inserts_in_order() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\n  alpha: 1\n  beta: 2\n  delta: 4\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "sorted YAML group insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains("metadata:\n  alpha: 1\n  beta: 2\n  charlie: 3\n  delta: 4\n"),
+        "new key should preserve sorted YAML group order, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_unsorted_group_appends() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\n  build: fast\n  test: strict\n  deploy: manual\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.cache"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unsorted YAML group insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "metadata:\n  build: fast\n  test: strict\n  deploy: manual\n  cache: true\n"
+        ),
+        "new key should append to unsorted YAML group, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_sorted_insert_preserves_following_key_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\n  alpha: 1\n  beta: 2\n  # delta setting\n  delta: 4\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "comment-owned sorted YAML insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "metadata:\n  alpha: 1\n  beta: 2\n  charlie: 3\n  # delta setting\n  delta: 4\n"
+        ),
+        "new key should be inserted before the following key's leading comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_blank_line_group_boundary_is_preserved() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\n  alpha: 1\n  beta: 2\n\n  # delta setting\n  delta: 4\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML insertion should preserve blank-line group boundaries: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "metadata:\n  alpha: 1\n  beta: 2\n  charlie: 3\n\n  # delta setting\n  delta: 4\n"
+        ),
+        "new key should stay in the first group and preserve the following group comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_prefix_family_inserts_near_run() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  sidecar_api_host: localhost\n  sidecar_api_tls: false\n  retries: 3\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML prefix family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "service:\n  sidecar_api_host: localhost\n  sidecar_api_port: 9000\n  sidecar_api_tls: false\n  retries: 3\n"
+        ),
+        "new key should be inserted within the sidecar_api prefix family, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_unsorted_prefix_family_appends_to_run_end() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  sidecar_api_tls: false\n  sidecar_api_host: localhost\n  retries: 3\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML unsorted prefix-family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "service:\n  sidecar_api_tls: false\n  sidecar_api_host: localhost\n  sidecar_api_port: 9000\n  retries: 3\n"
+        ),
+        "new key should append to an unsorted prefix run instead of sorting it, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_sequence_item_sorted_group_inserts_in_order() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"items:\n  - alpha: 1\n    beta: 2\n    delta: 4\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[0].charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML sequence-item sorted insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains("items:\n  - alpha: 1\n    beta: 2\n    charlie: 3\n    delta: 4\n"),
+        "new key should preserve sorted order inside sequence item mapping, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_blank_line_separated_prefixes_do_not_merge() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  sidecar_api_host: localhost\n\n  sidecar_api_tls: false\n  retries: 3\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML separated prefix-family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "service:\n  sidecar_api_host: localhost\n\n  sidecar_api_tls: false\n  retries: 3\n  sidecar_api_port: 9000\n"
+        ),
+        "blank-line separated prefix keys should not be merged into one inferred run, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_cr_only_blank_line_group_boundary() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\r  alpha: 1\r  beta: 2\r\r  # delta setting\r  delta: 4\r")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML CR-only blank-line group insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "metadata:\r  alpha: 1\r  beta: 2\r  charlie: 3\r\r  # delta setting\r  delta: 4\r"
+        ),
+        "new key should preserve CR-only blank-line group boundary, got:\n{updated:?}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_quoted_keys_participate_in_sorted_group() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\n  alpha: 1\n  \"beta key\": 2\n  delta: 4\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata[\"charlie key\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML quoted-key sorted insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated
+            .contains("metadata:\n  alpha: 1\n  \"beta key\": 2\n  charlie key: 3\n  delta: 4\n"),
+        "decoded quoted keys should participate in sorted placement without forcing unnecessary YAML quotes, got:\n{updated}"
+    );
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).expect("updated YAML should parse");
+    assert_eq!(parsed["metadata"]["charlie key"].as_i64(), Some(3));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_nested_comment_owned_sorted_insert() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"outer:\n  metadata:\n    alpha: 1\n    beta: 2\n    # delta setting\n    delta: 4\n  tail: true\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "outer.metadata.charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML nested comment-owned sorted insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "outer:\n  metadata:\n    alpha: 1\n    beta: 2\n    charlie: 3\n    # delta setting\n    delta: 4\n  tail: true\n"
+        ),
+        "new key should stay inside nested mapping and before the owned comment block, got:\n{updated}"
+    );
+}
+
+#[test]
 fn patch_json_config_path_set_create_missing_adds_root_yaml_key_with_leading_comment() {
     let mut temp_file = Builder::new()
         .suffix(".yaml")
@@ -261,6 +705,252 @@ fn patch_json_config_path_set_create_missing_existing_yaml_path_preserves_commen
     let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
     assert!(updated.contains("# keep-this-comment"));
     assert!(updated.contains("retries: 5"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_hyphen_prefix_family_preserves_comment_owner() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  sidecar-api-host: localhost\n  # TLS setting\n  sidecar-api-tls: false\n  retries: 3\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service[\"sidecar-api-port\"]"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML hyphen-prefix family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "service:\n  sidecar-api-host: localhost\n  sidecar-api-port: 9000\n  # TLS setting\n  sidecar-api-tls: false\n  retries: 3\n"
+        ),
+        "new hyphen-family key should insert before the following key's owned comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_sequence_item_prefix_family_preserves_comment_owner()
+ {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"items:\n  - sidecar_api_host: localhost\n    # TLS setting\n    sidecar_api_tls: false\n    retries: 3\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "items[0].sidecar_api_port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML sequence item prefix-family insertion should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "items:\n  - sidecar_api_host: localhost\n    sidecar_api_port: 9000\n    # TLS setting\n    sidecar_api_tls: false\n    retries: 3\n"
+        ),
+        "sequence-item prefix family should preserve the following key's owned comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_root_sorted_group_before_document_end_marker() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"---\nalpha: 1\nbeta: 2\ndelta: 4\n...\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "charlie"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "3",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML root sorted group insertion before document end should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains("---\nalpha: 1\nbeta: 2\ncharlie: 3\ndelta: 4\n...\n"),
+        "root sorted insertion should stay before delta and document end marker, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_prefix_family_before_first_owned_comment() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  # host setting\n  sidecar_api_host: localhost\n  sidecar_api_tls: false\n  retries: 3\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_enabled"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "true",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML prefix-family insertion before first entry should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "service:\n  sidecar_api_enabled: true\n  # host setting\n  sidecar_api_host: localhost\n  sidecar_api_tls: false\n  retries: 3\n"
+        ),
+        "insertion before the first prefix-family entry should preserve that entry's owned comment, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_prefix_family_after_run_before_unrelated_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"service:\n  sidecar_api_host: localhost\n  sidecar_api_tls: false\n  sidecar_cache_host: localhost\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar_api_url"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "http://localhost",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML prefix-family insertion after run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains(
+            "service:\n  sidecar_api_host: localhost\n  sidecar_api_tls: false\n  sidecar_api_url: http://localhost\n  sidecar_cache_host: localhost\n"
+        ),
+        "prefix-family insertion after the run should not drift past the next family, got:\n{updated}"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_yaml_selects_later_sorted_group() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"metadata:\n  alpha: 1\n  beta: 2\n\n  omega: 24\n  zeta: 26\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.sigma"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "25",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "YAML insertion into later sorted group should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated
+            .contains("metadata:\n  alpha: 1\n  beta: 2\n\n  omega: 24\n  sigma: 25\n  zeta: 26\n"),
+        "new key should choose the sorted group whose bounds contain it, got:\n{updated}"
+    );
 }
 
 #[test]
