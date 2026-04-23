@@ -261,7 +261,7 @@ where
         .is_some_and(|text| !text.is_empty())
     {
         return Err(E::custom(
-            "move preview legacy old_text placeholder must be empty when provided",
+            "move preview compatibility old_text field must be empty when provided",
         ));
     }
 
@@ -271,7 +271,7 @@ where
         .is_some_and(|text| !text.is_empty())
     {
         return Err(E::custom(
-            "move preview legacy new_text placeholder must be empty when provided",
+            "move preview compatibility new_text field must be empty when provided",
         ));
     }
 
@@ -280,7 +280,7 @@ where
         .is_some_and(|span| span.start != 0 || span.end != 0)
     {
         return Err(E::custom(
-            "move preview legacy matched_span placeholder must be [0, 0) when provided",
+            "move preview compatibility matched_span field must be [0, 0) when provided",
         ));
     }
 

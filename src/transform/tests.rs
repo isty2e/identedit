@@ -548,8 +548,8 @@ fn reject_move_operation_returns_invalid_request() {
 
     match error {
         IdenteditError::InvalidRequest { message } => {
-            assert!(message.contains("Operation 2 uses move"));
-            assert!(message.contains("not supported by transform"));
+            assert!(message.contains("Operation 2 uses file move"));
+            assert!(message.contains("cannot be built by edit"));
         }
         other => panic!("unexpected error: {other}"),
     }

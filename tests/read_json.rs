@@ -144,7 +144,7 @@ fn select_json_mode_verbose_includes_handle_text_field() {
             "exclude_kinds": []
         }
     });
-    let output = run_read_json(&["--json", "--verbose"], &payload.to_string());
+    let output = run_read_json(&["--verbose"], &payload.to_string());
 
     assert!(
         output.status.success(),

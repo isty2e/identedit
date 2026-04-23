@@ -49,12 +49,7 @@ fn run_read_json_mode(request_json: &str) -> Output {
 
 fn run_read_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command
-        .arg("read")
-        .arg("--mode")
-        .arg("ast")
-        .arg("--json")
-        .arg("--json");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -363,33 +358,20 @@ fn json_mode_rejects_empty_files_array() {
 }
 
 #[test]
-fn json_mode_rejects_positional_file_arguments() {
-    let fixture = fixture_path("example.py");
-    let request = json!({
-        "command": "read",
-        "file": fixture.to_string_lossy().to_string(),
-        "selector": {
-            "kind": "function_definition",
-            "name_pattern": null,
-            "exclude_kinds": []
-        }
-    });
-    let fixture_arg = fixture.to_str().expect("path should be valid UTF-8");
-
-    let output = run_read_json_mode_with_args(&request.to_string(), &[fixture_arg]);
+fn read_rejects_repeated_json_flag() {
+    let output = Command::new(env!("CARGO_BIN_EXE_identedit"))
+        .args(["read", "--json", "--json"])
+        .output()
+        .expect("failed to run identedit binary");
     assert!(
         !output.status.success(),
-        "--json mode should reject positional FILE arguments"
+        "repeated --json should be rejected by the CLI parser"
     );
 
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("positional FILE arguments")),
-        "expected explicit mixed-input validation error"
+        stderr.contains("cannot be used multiple times"),
+        "expected repeated-flag validation error, got: {stderr}"
     );
 }
 

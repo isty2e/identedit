@@ -87,6 +87,22 @@ fn patch_help_exposes_symbol_selector() {
 }
 
 #[test]
+fn read_help_exposes_plain_json_flag() {
+    let output = run_identedit(&["read", "--help"]);
+    assert!(
+        output.status.success(),
+        "read help should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(text.contains("--json"));
+    assert!(
+        !text.contains("--json..."),
+        "read --json should not be exposed as a count flag"
+    );
+}
+
+#[test]
 fn read_line_mode_outputs_line_hash_anchors() {
     let file = copy_fixture_to_temp_python("example.py");
     let read_output = run_identedit(&[

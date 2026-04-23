@@ -507,7 +507,7 @@ fn parse_edit_operation(
             || operation.expected_old_hash.is_some()
         {
             return Err(IdenteditError::InvalidRequest {
-                message: "operation.target cannot be combined with legacy identity/kind/span_hint/expected_old_hash fields".to_string(),
+                message: "operation.target cannot be combined with top-level identity/kind/span_hint/expected_old_hash fields".to_string(),
             });
         }
 

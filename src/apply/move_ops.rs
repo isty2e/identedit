@@ -133,7 +133,7 @@ fn validate_move_preview(
 
             Err(IdenteditError::InvalidRequest {
                 message: format!(
-                    "Move operation for '{}' must use move preview fields or legacy empty placeholder text preview",
+                    "Move operation for '{}' must use move preview fields or compatibility empty text preview",
                     changeset.file.display()
                 ),
             })
