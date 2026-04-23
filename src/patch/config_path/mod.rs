@@ -24,7 +24,8 @@ use resolve::{
 };
 use safety::{
     ConfigFormat, detect_config_format, has_yaml_comments, is_missing_config_path_error,
-    parse_tree_for_format, validate_rendered_config_document, validate_yaml_create_missing_safety,
+    parse_tree_for_format, validate_rendered_config_document,
+    validate_yaml_config_path_reference_safety, validate_yaml_create_missing_safety,
 };
 use syntax::{PathToken, parse_config_path};
 
@@ -190,6 +191,15 @@ pub fn resolve_config_path_operation(
         };
         match strict_resolved {
             Ok(resolved) => {
+                if matches!(format, ConfigFormat::Yaml) {
+                    validate_yaml_config_path_reference_safety(
+                        &tree,
+                        source_text,
+                        document_index,
+                        resolved.replace_span,
+                        raw_path,
+                    )?;
+                }
                 let replacement = set_replacement_text(
                     &format,
                     source_text,
@@ -242,6 +252,15 @@ pub fn resolve_config_path_operation(
             resolve_toml_path(&tree, &source, &path_tokens, &operation, raw_path)?
         }
     };
+    if matches!(format, ConfigFormat::Yaml) {
+        validate_yaml_config_path_reference_safety(
+            &tree,
+            source_text,
+            document_index,
+            resolved.replace_span,
+            raw_path,
+        )?;
+    }
 
     let replacement = match &operation {
         ConfigPathOperation::Set { new_text, .. } => set_replacement_text(
@@ -457,7 +476,27 @@ fn resolve_config_path_set_with_create_missing(
             request.new_text,
         )?,
     };
-    validate_rendered_config_document(request.format, request.source_text, &updated_root_text)?;
+    let yaml_validation_source;
+    let validation_source = if matches!(request.format, ConfigFormat::Yaml) {
+        let root_node = if let Some(index) = request.document_index {
+            yaml_document_root_value_at(request.tree.root_node(), index)?
+        } else {
+            yaml_root_value(request.tree.root_node()).ok_or_else(|| {
+                IdenteditError::InvalidRequest {
+                    message: "YAML document has no root value".to_string(),
+                }
+            })?
+        };
+        yaml_validation_source = rewrite_full_source_text(
+            request.source_text,
+            span_from_node(root_node),
+            &updated_root_text,
+        )?;
+        &yaml_validation_source
+    } else {
+        &updated_root_text
+    };
+    validate_rendered_config_document(request.format, request.source_text, validation_source)?;
 
     if matches!(request.format, ConfigFormat::Json) && request.source.is_empty() {
         return Ok(ResolvedConfigPatch {

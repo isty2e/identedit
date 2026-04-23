@@ -11,6 +11,7 @@ use super::ConfigPathOperation;
 use super::render::{
     append_requires_array_error, array_index_out_of_bounds_error, parse_toml_value_fragment,
 };
+use super::safety::validate_yaml_create_missing_reference_safety;
 use super::syntax::{PathToken, expected_path_container_error, path_tokens_display, token_display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,6 +542,13 @@ pub(super) fn rewrite_yaml_with_comment_preserving_create_missing(
         root,
         source_text.as_bytes(),
         path_tokens,
+        raw_path,
+    )?;
+    validate_yaml_create_missing_reference_safety(
+        tree,
+        source_text,
+        document_index,
+        parent_mapping,
         raw_path,
     )?;
 
@@ -1294,6 +1302,9 @@ fn yaml_render_key_segment(key: &str) -> String {
 
 fn is_yaml_plain_key_safe(key: &str) -> bool {
     if key.is_empty() || key.trim() != key {
+        return false;
+    }
+    if key == "<<" {
         return false;
     }
 
@@ -2252,11 +2263,22 @@ fn yaml_unwrap_node(mut node: Node<'_>) -> Option<Node<'_>> {
     loop {
         match node.kind() {
             "block_node" | "flow_node" | "block_sequence_item" => {
-                node = first_named_child(node)?;
+                node = first_yaml_content_child(node)?;
             }
             _ => return Some(node),
         }
     }
+}
+
+fn first_yaml_content_child(node: Node<'_>) -> Option<Node<'_>> {
+    for index in 0..node.named_child_count() {
+        let child = node.named_child(index as u32)?;
+        if matches!(child.kind(), "anchor" | "tag") {
+            continue;
+        }
+        return Some(child);
+    }
+    None
 }
 
 fn yaml_key_text(key_node: Node<'_>, source: &[u8]) -> Option<String> {

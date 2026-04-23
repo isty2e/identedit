@@ -44,6 +44,971 @@ fn patch_json_config_path_set_create_missing_rejects_yaml_anchor_alias() {
 }
 
 #[test]
+fn patch_json_config_path_set_create_missing_allows_unreferenced_yaml_anchor_elsewhere() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  retries: 2\nservice:\n  name: identedit\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unreferenced YAML anchor outside target path should not block local create-missing: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("defaults: &defaults\n  retries: 2\n"));
+    assert!(updated.contains("service:\n  name: identedit\n  sidecar:\n    port: 9000\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_allows_referenced_yaml_anchor_outside_target_path() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nother: *defaults\nservice:\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "referenced YAML anchor outside target path should not block local create-missing: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("other: *defaults\n"));
+    assert!(updated.contains("service:\n  name: identedit\n  sidecar:\n    port: 9000\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_referenced_yaml_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  retries: 2\nservice: *defaults\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.timeout"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "30",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create-missing inside a referenced YAML anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "error should explain non-local reference semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected anchor edit must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_allows_unreferenced_yaml_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  retries: 2\nservice:\n  name: identedit\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.timeout"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "30",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unreferenced YAML anchor target should allow local create-missing: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("defaults: &defaults\n  retries: 2\n  timeout: 30\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_referenced_nested_yaml_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  sidecar:\n    retries: 2\nservice: *defaults\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create-missing inside a referenced nested YAML anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "error should explain non-local reference semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected anchor edit must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_referenced_yaml_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  tags:\n    - api\nservice: *defaults\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.tags"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "worker"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "append inside a referenced YAML anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "append rejection should explain non-local reference semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected anchor append must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_delete_rejects_referenced_yaml_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  retries: 2\nservice: *defaults\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.retries"
+        },
+        "op": {
+            "type": "delete"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "delete inside a referenced YAML anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "delete rejection should explain non-local reference semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected anchor delete must not mutate file");
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_referenced_yaml_sequence_item_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults:\n  - &entry\n    sidecar:\n      retries: 2\nservice:\n  entry: *entry\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults[0].sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create-missing inside a referenced YAML sequence-item anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "sequence-item anchor rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected sequence-item anchor edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_existing_rejects_referenced_yaml_flow_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults { retries: 2 }\nservice: *defaults\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "existing edit inside a referenced YAML flow anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "flow-anchor rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected flow-anchor edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_referenced_yaml_flow_sequence_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults [api]\nservice: *defaults\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "worker"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "append to a referenced YAML flow-sequence anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "flow-sequence anchor append rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected flow-sequence append must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_delete_rejects_referenced_yaml_sequence_item_anchor_target() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults:\n  - &entry\n    name: api\nservice:\n  entry: *entry\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults[0].name"
+        },
+        "op": {
+            "type": "delete"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "delete inside a referenced YAML sequence-item anchor should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "sequence-item anchor delete rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected sequence-item delete must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_existing_allows_referenced_yaml_anchor_outside_target_path() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice: *defaults\nmetadata:\n  owner: team\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "metadata.owner"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"platform\""
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "referenced YAML anchor outside target path should not block local existing edit: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("service: *defaults\n"));
+    assert!(updated.contains("metadata:\n  owner: \"platform\"\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_existing_rejects_yaml_merge_key_in_ancestor_mapping() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  retries: 2\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "existing edit inside a YAML merge mapping should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "merge-key rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected merge-key edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_existing_rejects_yaml_flow_merge_key_mapping() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults { retries: 2 }\nservice: { <<: *defaults, name: identedit }\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"renamed\""
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "existing edit inside a YAML flow merge mapping should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "flow merge-key rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected flow merge-key edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_delete_rejects_yaml_merge_key_pair_itself() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"service["<<"]"#
+        },
+        "op": {
+            "type": "delete"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "deleting the YAML merge key itself should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "merge-key delete rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected merge-key delete must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_append_rejects_sequence_inside_yaml_merge_mapping() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  tags:\n    - api\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.tags"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "worker"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "append inside a YAML merge mapping should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "merge-mapping append rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected merge-mapping append must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_existing_rejects_yaml_merge_sequence_mapping() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"base: &base\n  retries: 2\noverride: &override\n  timeout: 30\nservice:\n  <<: [*base, *override]\n  name: identedit\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.name"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"renamed\""
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "existing edit inside a YAML merge-sequence mapping should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "merge-sequence rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected merge-sequence edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_existing_rejects_referenced_yaml_anchor_with_dash_name() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &default-config\n  retries: 2\nservice: *default-config\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.retries"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "5"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "referenced YAML anchor with a dash in its name should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "dash-name anchor rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected dash-name anchor edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_allows_unreferenced_yaml_anchor_with_dash_name() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"defaults: &default-config\n  retries: 2\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.timeout"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "30",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "unreferenced YAML anchor with a dash in its name should remain locally editable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("defaults: &default-config\n  retries: 2\n  timeout: 30\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_existing_yaml_block_mapping_allows_quoted_alias_like_string() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"service:\n  value: old\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.value"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"*default-config\""
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted alias-looking text should remain a scalar string: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    let parsed: Value = serde_yaml::from_str(&updated).expect("updated YAML should parse");
+    assert_eq!(parsed["service"]["value"].as_str(), Some("*default-config"));
+}
+
+#[test]
+fn patch_json_config_path_set_existing_allows_quoted_literal_yaml_merge_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"service:\n  \"<<\":\n    value: old\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"service["<<"].value"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"literal\""
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "quoted literal YAML merge key should not be treated as merge semantics: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    let parsed: Value = serde_yaml::from_str(&updated).expect("updated YAML should parse");
+    assert_eq!(parsed["service"]["<<"]["value"].as_str(), Some("literal"));
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_rejects_yaml_merge_key_in_ancestor_mapping() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(
+            b"defaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  sidecar:\n    name: identedit\n",
+        )
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "service.sidecar.port"
+        },
+        "op": {
+            "type": "set",
+            "new_text": "9000",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "create-missing under a mapping inherited from a YAML merge key should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "error should explain merge-key non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(
+        before, after,
+        "rejected merge-key edit must not mutate file"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_create_missing_quotes_literal_yaml_merge_key() {
+    let mut temp_file = Builder::new()
+        .suffix(".yaml")
+        .tempfile()
+        .expect("temp yaml file should be created");
+    temp_file
+        .write_all(b"service:\n  name: identedit\n")
+        .expect("yaml fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": r#"service["<<"].value"#
+        },
+        "op": {
+            "type": "set",
+            "new_text": "\"literal\"",
+            "create_missing": true
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        output.status.success(),
+        "literal YAML merge-key-looking segment should be created as a quoted key: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(
+        updated.contains("  \"<<\":\n"),
+        "literal merge-key-looking key should be quoted, got:\n{updated}"
+    );
+    let parsed: Value = serde_yaml::from_str(&updated).expect("updated YAML should parse");
+    assert_eq!(parsed["service"]["<<"]["value"].as_str(), Some("literal"));
+}
+
+#[test]
 fn patch_json_config_path_set_existing_yaml_comment_value_rejects_tabbed_block_header() {
     let mut temp_file = Builder::new()
         .suffix(".yaml")

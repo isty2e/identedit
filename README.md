@@ -174,7 +174,8 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 - YAML/TOML `--create-missing` preserves existing key order and blank-line groups. It inserts into clearly sorted groups or same-prefix runs, and otherwise appends conservatively without reordering existing keys.
 - YAML `--create-missing` can create explicit block scalar leaf values (`|`, `|-`, `|+`, `>`, `>-`, `>+`) under existing block mappings. It does not auto-create sequences or accept multiline mapping/sequence fragments.
 - YAML create-missing quotes unsafe or implicit-scalar-looking string keys when rendering new entries, so `["true"]`, `["null"]`, `["123"]`, and `["app: conf"]` stay string mapping keys.
-- Use line mode or direct editing when the desired placement depends on project-specific comment semantics, cross-section moves, array/table-array restructuring, YAML anchors/aliases/tags, or multiline YAML mappings/sequences.
+- YAML anchors/aliases are allowed when they are outside the edited path. Create-missing rejects edits inside referenced anchor values or mappings with YAML merge keys because those changes have non-local semantics. YAML tags remain unsupported for create-missing.
+- Use line mode or direct editing when the desired placement depends on project-specific comment semantics, cross-section moves, array/table-array restructuring, YAML anchor/merge semantics, or multiline YAML mappings/sequences.
 - Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
 - Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests/lints after non-trivial edits.
 

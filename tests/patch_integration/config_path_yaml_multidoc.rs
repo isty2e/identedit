@@ -360,29 +360,24 @@ fn patch_json_config_path_create_missing_yaml_multi_document_selected_empty_doc_
 }
 
 #[test]
-fn patch_json_config_path_create_missing_yaml_multi_document_selected_doc_rejects_unrelated_anchor()
+fn patch_json_config_path_create_missing_yaml_multi_document_selected_doc_allows_unrelated_anchor()
 {
     let file_path = create_temp_yaml_source(
         "---\nmetadata:\n  name: first\n---\ndefaults: &defaults\n  owner: team\n",
     );
-    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
 
     let output = patch_yaml_config_path_document(&file_path, "metadata.owner", "\"platform\"", 0);
     assert!(
-        !output.status.success(),
-        "YAML stream with anchors should remain unsupported even when document_index targets another document"
+        output.status.success(),
+        "YAML anchor in an unselected document should not block create-missing in the selected document: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
     assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("anchor/alias/tag"))
-    );
-    let after = fs::read_to_string(&file_path).expect("fixture should remain readable");
-    assert_eq!(
-        before, after,
-        "anchor rejection must not mutate YAML stream"
+        updated.contains(
+            "---\nmetadata:\n  name: first\n  owner: \"platform\"\n---\ndefaults: &defaults\n  owner: team\n"
+        ),
+        "selected document should be updated while unrelated anchor document is preserved, got:\n{updated}"
     );
 }
 
@@ -1520,28 +1515,21 @@ fn patch_flag_config_path_delete_yaml_multi_document_index_disambiguates_duplica
 }
 
 #[test]
-fn patch_json_config_path_create_missing_yaml_multi_document_selected_doc_rejects_alias_in_same_stream()
- {
+fn patch_json_config_path_create_missing_yaml_multi_document_selected_doc_allows_unrelated_alias() {
     let file_path = create_temp_yaml_source(
         "---\nmetadata:\n  name: first\n---\nmetadata:\n  name: second\n  owner: *defaults\n",
     );
-    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
 
     let output =
         patch_yaml_config_path_document(&file_path, "metadata.labels.owner", "\"platform\"", 0);
     assert!(
-        !output.status.success(),
-        "YAML stream with an alias should remain unsupported for selected-document create-missing"
+        output.status.success(),
+        "YAML alias in another document should not block selected-document create-missing: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("anchor/alias/tag"))
-    );
-    let after = fs::read_to_string(&file_path).expect("fixture should remain readable");
-    assert_eq!(before, after, "alias rejection must not mutate YAML stream");
+    let updated = fs::read_to_string(&file_path).expect("fixture should remain readable");
+    assert!(updated.contains("metadata:\n  name: first\n  labels:\n    owner: \"platform\"\n"));
+    assert!(updated.contains("metadata:\n  name: second\n  owner: *defaults\n"));
 }
 
 #[test]
@@ -1801,22 +1789,220 @@ fn patch_json_config_path_append_yaml_multi_document_second_doc_sequence() {
 }
 
 #[test]
-fn patch_json_config_path_set_existing_yaml_multi_document_unrelated_anchor_rejects() {
+fn patch_json_config_path_set_existing_yaml_multi_document_unrelated_anchor_succeeds() {
     let file_path = create_temp_yaml_source(
         "---\nservice:\n  retries: 2\n---\ndefaults: &defaults\n  owner: team\n",
+    );
+
+    let output = patch_yaml_config_path(&file_path, "service.retries", "5", false);
+    assert!(
+        output.status.success(),
+        "YAML anchor in another document should not block existing-path edits: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert_eq!(
+        updated,
+        "---\nservice:\n  retries: 5\n---\ndefaults: &defaults\n  owner: team\n"
+    );
+}
+
+#[test]
+fn patch_json_config_path_set_existing_yaml_multi_document_second_doc_merge_rejects_without_index()
+{
+    let file_path = create_temp_yaml_source(
+        "---\nmetadata:\n  owner: team\n---\ndefaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  retries: 2\n",
     );
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
 
     let output = patch_yaml_config_path(&file_path, "service.retries", "5", false);
     assert!(
         !output.status.success(),
-        "YAML streams containing anchors should remain unsupported even when editing another document"
+        "unique second-document path under YAML merge semantics should still be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "second-document merge rejection should explain non-local semantics"
     );
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
-    assert_eq!(
-        before, after,
-        "anchor rejection must not mutate YAML source"
+    assert_eq!(before, after, "rejected edit must not mutate YAML source");
+}
+
+#[test]
+fn patch_json_config_path_append_yaml_multi_document_second_doc_anchor_rejects_without_index() {
+    let file_path = create_temp_yaml_source(
+        "---\nmetadata:\n  owner: team\n---\ndefaults: &defaults\n  tags:\n    - api\nservice: *defaults\n",
     );
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.tags"
+        },
+        "op": {
+            "type": "append",
+            "new_text": "worker"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "append inside a referenced anchor in a unique second-document path should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "second-document anchor append rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected append must not mutate YAML source");
+}
+
+#[test]
+fn patch_json_config_path_delete_yaml_multi_document_second_doc_anchor_rejects_without_index() {
+    let file_path = create_temp_yaml_source(
+        "---\nmetadata:\n  owner: team\n---\ndefaults: &defaults\n  retries: 2\nservice: *defaults\n",
+    );
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy().to_string(),
+        "target": {
+            "type": "config_path",
+            "path": "defaults.retries"
+        },
+        "op": {
+            "type": "delete"
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "delete inside a referenced anchor in a unique second-document path should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "second-document anchor delete rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected delete must not mutate YAML source");
+}
+
+#[test]
+fn patch_json_config_path_set_yaml_multi_document_second_doc_nested_anchor_rejects_without_index() {
+    let file_path = create_temp_yaml_source(
+        "---\nmetadata:\n  owner: team\n---\ndefaults: &defaults\n  sidecar:\n    retries: 2\nservice: *defaults\n",
+    );
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = patch_yaml_config_path(&file_path, "defaults.sidecar.retries", "5", false);
+    assert!(
+        !output.status.success(),
+        "existing edit inside a nested referenced anchor in the second document should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "second-document nested anchor rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected edit must not mutate YAML source");
+}
+
+#[test]
+fn patch_json_config_path_set_yaml_multi_document_selected_second_doc_allows_unrelated_first_doc_alias()
+ {
+    let file_path = create_temp_yaml_source(
+        "---\nmetadata:\n  owner: *defaults\n---\nservice:\n  retries: 2\n",
+    );
+
+    let output = patch_yaml_config_path_document(&file_path, "service.retries", "5", 1);
+    assert!(
+        output.status.success(),
+        "alias in an unselected first document should not block selected second-document edit: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("owner: *defaults"));
+    assert!(updated.contains("retries: 5"));
+}
+
+#[test]
+fn patch_json_config_path_create_missing_yaml_multi_document_allows_same_name_alias_in_unselected_doc()
+ {
+    let file_path = create_temp_yaml_source(
+        "---\ndefaults: &defaults\n  retries: 2\n---\nservice: *defaults\n",
+    );
+
+    let output = patch_yaml_config_path_document(&file_path, "defaults.timeout", "30", 0);
+    assert!(
+        output.status.success(),
+        "alias with the same name in an unselected YAML document should not make the selected document non-local: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("defaults: &defaults\n  retries: 2\n  timeout: 30\n"));
+    assert!(updated.contains("service: *defaults\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_yaml_multi_document_selected_second_doc_allows_same_name_first_doc_alias()
+ {
+    let file_path = create_temp_yaml_source(
+        "---\ndefaults: &defaults\n  retries: 2\nservice: *defaults\n---\ndefaults: &defaults\n  retries: 2\n",
+    );
+
+    let output = patch_yaml_config_path_document(&file_path, "defaults.retries", "5", 1);
+    assert!(
+        output.status.success(),
+        "same-name anchor referenced only in an unselected document should not block selected-document edit: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(&file_path).expect("updated YAML should be readable");
+    assert!(updated.contains("service: *defaults\n"));
+    assert!(updated.ends_with("---\ndefaults: &defaults\n  retries: 5\n"));
+}
+
+#[test]
+fn patch_json_config_path_set_yaml_multi_document_selected_second_doc_rejects_own_merge() {
+    let file_path = create_temp_yaml_source(
+        "---\nmetadata:\n  owner: team\n---\ndefaults: &defaults\n  retries: 2\nservice:\n  <<: *defaults\n  retries: 2\n",
+    );
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+
+    let output = patch_yaml_config_path_document(&file_path, "service.retries", "5", 1);
+    assert!(
+        !output.status.success(),
+        "selected second-document path under YAML merge semantics should be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("anchor/alias/merge")),
+        "selected second-document merge rejection should explain non-local semantics"
+    );
+    let after = fs::read_to_string(&file_path).expect("fixture should be readable");
+    assert_eq!(before, after, "rejected edit must not mutate YAML source");
 }
 
 #[test]
