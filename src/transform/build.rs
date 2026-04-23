@@ -10,7 +10,7 @@ use super::parse::{parse_handles_for_file_with_context, parse_handles_for_source
 use super::resolve::{HandleIndex, ResolvedOperationView, resolve_operation_view};
 use super::{MatchedChange, TransformInstruction};
 
-pub(super) fn build_replace_changeset(
+pub(crate) fn build_replace_changeset(
     file: &Path,
     identity: &str,
     replacement: String,
@@ -24,27 +24,11 @@ pub(super) fn build_replace_changeset(
     )
 }
 
-pub(super) fn build_delete_changeset(
+pub(crate) fn build_delete_changeset(
     file: &Path,
     identity: &str,
 ) -> Result<FileChange, IdenteditError> {
     build_single_identity_changeset(file, identity, OpKind::Delete)
-}
-
-pub(super) fn build_insert_before_changeset(
-    file: &Path,
-    identity: &str,
-    new_text: String,
-) -> Result<FileChange, IdenteditError> {
-    build_single_identity_changeset(file, identity, OpKind::InsertBefore { new_text })
-}
-
-pub(super) fn build_insert_after_changeset(
-    file: &Path,
-    identity: &str,
-    new_text: String,
-) -> Result<FileChange, IdenteditError> {
-    build_single_identity_changeset(file, identity, OpKind::InsertAfter { new_text })
 }
 
 fn build_single_identity_changeset(
@@ -92,11 +76,12 @@ fn resolve_unique_identity_handle<'a>(
             identity: identity.to_string(),
             file: file.display().to_string(),
             candidates: candidates.len(),
+            candidate_contexts: vec![],
         }),
     }
 }
 
-pub(super) fn build_changeset(
+pub(crate) fn build_changeset(
     file: &Path,
     instructions: Vec<TransformInstruction>,
 ) -> Result<FileChange, IdenteditError> {
@@ -138,7 +123,6 @@ fn build_changeset_with_handles(
 
         matched_changes.push(MatchedChange {
             index,
-            target: canonical_target.clone(),
             op: instruction.op.clone(),
             expected_hash: resolved.expected_hash.clone(),
             old_text: resolved.old_text.clone(),
@@ -151,14 +135,13 @@ fn build_changeset_with_handles(
         operations.push(ChangeOp {
             target: canonical_target,
             op: instruction.op,
-            preview: ChangePreview {
-                old_text: Some(resolved.old_text),
-                old_hash: None,
-                old_len: None,
-                new_text: preview_new_text,
-                matched_span: resolved.matched_span,
-                move_preview: None,
-            },
+            preview: ChangePreview::text(
+                Some(resolved.old_text),
+                None,
+                None,
+                preview_new_text,
+                resolved.matched_span,
+            ),
         });
     }
 
@@ -197,7 +180,7 @@ fn canonicalize_operation_target(
     }
 }
 
-pub(super) fn resolve_changeset_targets(
+pub(crate) fn resolve_changeset_targets(
     changeset: &FileChange,
 ) -> Result<Vec<MatchedChange>, IdenteditError> {
     let context = ExecutionContext::new();
@@ -214,7 +197,7 @@ pub(super) fn resolve_changeset_targets(
     resolve_changeset_targets_in_handles(changeset, &source_text, &handles)
 }
 
-pub(super) fn resolve_changeset_targets_in_handles(
+pub(crate) fn resolve_changeset_targets_in_handles(
     changeset: &FileChange,
     source_text: &str,
     handles: &[SelectionHandle],
@@ -235,7 +218,6 @@ pub(super) fn resolve_changeset_targets_in_handles(
 
         matched.push(MatchedChange {
             index,
-            target: operation.target.clone(),
             op: operation.op.clone(),
             expected_hash: resolved.expected_hash,
             old_text: resolved.old_text,

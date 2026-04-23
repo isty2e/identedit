@@ -98,7 +98,7 @@ fn select_json_mode_rejects_mode_line() {
       "selector": { "kind": "function_definition" }
     });
     let output = common::run_identedit_with_stdin(
-        &["read", "--json", "--json", "--mode", "line"],
+        &["read", "--json", "--mode", "line"],
         &request.to_string(),
     );
     assert!(

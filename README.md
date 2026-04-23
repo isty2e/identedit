@@ -18,7 +18,9 @@ Three entry points covering different editing needs:
 
 **`patch`** — one-shot verified edit (most common):
 ```bash
-identedit patch src/example.py --identity abc123 --replace 'def f(): ...'
+identedit patch src/example.py --symbol process_data --replace 'def process_data(...): ...'
+identedit patch src/example.py --symbol Processor.process_data --replace 'def process_data(...): ...'
+identedit patch src/example.py --at abc123def4567890 --replace 'def process_data(...): ...'
 identedit patch src/example.py --at "42:9e0f1a2b3c4d" --set-line "    return x + y"
 identedit patch config.yaml --config-path server.port --set-value 8080
 identedit patch config.json --config-path items --append-value 4
@@ -44,7 +46,7 @@ Use the canonical CLI entry points: `read`, `edit`, `apply`, `patch`, `merge`, `
 - **Precondition-verified.** Every edit checks that the target hasn't changed since the agent last read it. No silent corruption.
 - **Transactional.** Multi-file edits are all-or-nothing with automatic rollback on failure.
 - **Diagnosable.** Failures return structured JSON with specific error types and recovery suggestions.
-- **Move and copy.** Structural units can be moved or copied within or across files atomically.
+- **Move.** Structural units can be moved within or across files atomically.
 - **Two granularities.** Structure-level for large changes, line-level for small ones. Same safety guarantees for both.
 
 ## Supported Languages
@@ -55,7 +57,7 @@ Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#
 
 ### Prebuilt binaries (GitHub Releases)
 
-1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and pick your tag (for example `v0.1.2`).
+1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and pick your tag (for example `v0.3.0`).
 2. Download the matching asset:
    - `identedit-<tag>-x86_64-unknown-linux-gnu.tar.gz`
    - `identedit-<tag>-aarch64-unknown-linux-gnu.tar.gz`
@@ -80,22 +82,44 @@ cargo install --path .
 ### One-shot patch (most common)
 
 ```bash
-# Replace a function body
-identedit read --kind function_definition --name process_data --json src/example.py
-# → copy identity and expected_old_hash from output
-identedit patch src/example.py --identity <id> --replace 'def process_data(x, y):
+# Replace a function by name (no read step needed)
+identedit patch src/example.py --symbol process_data \
+  --replace 'def process_data(x, y):
+    return x + y'
+
+# Replace a method by containing-name path
+identedit patch src/example.py --symbol Processor.process_data \
+  --replace 'def process_data(self, x, y):
+        return x + y'
+
+# Same thing using identity hash (when you already have read output)
+identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
     return x + y'
 
 # Patch a specific line
 identedit read --mode line src/example.py
-# → copy LINE:HASH anchor from output
 identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
 
 # Update a config key
 identedit patch config.yaml --config-path server.port --set-value 8080
 
+# Keys containing dots or other non-bare characters use bracket-quoted JSON string segments
+identedit patch config.yaml --config-path 'services["sidecar.port"].enabled' --set-value true
+
 # Append to an array-valued config path
 identedit patch config.json --config-path items --append-value 4
+
+# Create a YAML block scalar leaf value without shell quoting the block
+cat <<'EOF' | identedit patch .github/workflows/ci.yml \
+  --config-path jobs.build.steps[0].run --set-value --create-missing --stdin-text
+|
+  cargo test
+  cargo clippy --all-targets -- -D warnings
+EOF
+
+# Create a missing key in the second document of a multi-document YAML stream
+identedit patch manifests.yaml --config-path spec.replicas \
+  --document-index 1 --set-value 3 --create-missing
 ```
 
 ### Multi-file atomic edit
@@ -114,11 +138,21 @@ identedit edit --json < request.json | identedit apply
 ### Large new_text (10+ lines)
 
 ```bash
+# Write replacement body to a temp file, then use --text-file
 cat <<'EOF' > /tmp/new_block.py
 def process_data(x, y):
     return x + y
 EOF
 
+identedit patch src/example.py --kind function_definition --name process_data \
+  --replace --text-file /tmp/new_block.py
+```
+
+Use `--symbol` for a unique local name (`process_data`) or containing-name path (`Processor.process_data`). If a symbol is ambiguous or missing, patch fails without writing. Ambiguous responses include `error.candidates` with identity, span, line, qualified name, and preview context. Use `--kind` + `--name` when you need kind-specific glob matching such as `--name "process_*"`.
+
+Or via the `edit` pipeline with `jq --rawfile`:
+
+```bash
 jq -n --rawfile new_text /tmp/new_block.py '{
   command:"edit", file:"src/example.py",
   operations:[{
@@ -131,16 +165,37 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 ### Safe Defaults
 
 - `edit` is always a dry-run. No files modified until explicit `apply`.
+- `patch --dry-run` validates and previews without writing files.
 - Line-anchored patch defaults to strict mode. `--auto-repair` is explicit opt-in.
 - `apply --dry-run` validates and returns a summary without writing.
+- Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
+- Config paths use dot-separated bare keys by default (`service.port`). For literal keys containing dots, spaces, slashes, colons, brackets, or quotes, use bracket-quoted JSON string segments: `services["sidecar.port"]`, `jobs["build/test"].steps[0]["run:script"]`, `root["quote\"key"]`.
+- Multi-document YAML requires an explicit `--document-index <N>` for `--create-missing`; indices are 0-based. Existing-path edits may still omit it only when the path resolves uniquely across documents.
+- YAML/TOML `--create-missing` preserves existing key order and blank-line groups. It inserts into clearly sorted groups or same-prefix runs, and otherwise appends conservatively without reordering existing keys.
+- YAML `--create-missing` can create explicit block scalar leaf values (`|`, `|-`, `|+`, `>`, `>-`, `>+`) under existing block mappings. It does not auto-create sequences or accept multiline mapping/sequence fragments.
+- YAML create-missing quotes unsafe or implicit-scalar-looking string keys when rendering new entries, so `["true"]`, `["null"]`, `["123"]`, and `["app: conf"]` stay string mapping keys.
+- YAML anchors/aliases are allowed when they are outside the edited path. Create-missing rejects edits inside referenced anchor values or mappings with YAML merge keys because those changes have non-local semantics. YAML tags remain unsupported for create-missing.
+- Use line mode or direct editing when the desired placement depends on project-specific comment semantics, cross-section moves, array/table-array restructuring, YAML anchor/merge semantics, or multiline YAML mappings/sequences.
 - Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
+- Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests/lints after non-trivial edits.
 
 ## Error Recovery (Agent Loop)
 
 1. If `patch` fails with `precondition_failed` or `target_missing`: re-run `read`, rebuild request, retry once.
-2. If `ambiguous_target`: add `span_hint` from `read` output, retry once.
+2. If `ambiguous_target`: inspect `error.candidates`, then retry with a qualified symbol, identity, or JSON `span_hint`.
 3. Maximum 2 attempts per target. If the second attempt fails, fall back to direct file editing.
 
 ## Docs
 
 - Agent workflow guide: [`skills/identedit/SKILL.md`](skills/identedit/SKILL.md)
+
+## Feedback
+
+If identedit friction appears, open or update a GitHub issue:
+
+- https://github.com/isty2e/identedit/issues
+
+Include:
+- What you were trying to do
+- What happened, including the error or unexpected output
+- What you expected instead

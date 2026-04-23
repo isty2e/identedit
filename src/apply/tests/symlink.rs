@@ -4,7 +4,8 @@ use std::os::unix::fs::symlink;
 use tempfile::tempdir;
 
 use crate::changeset::MultiFileChangeset;
-use crate::transform::{build_replace_changeset, parse_handles_for_file};
+use crate::transform::build::build_replace_changeset;
+use crate::transform::parse::parse_handles_for_file;
 
 use super::super::{apply_changeset, apply_multi_file_changeset};
 use super::create_python_target;

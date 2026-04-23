@@ -4,9 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::changeset::{ChangeOp, FileChange, MultiFileChangeset, OpKind};
 use crate::error::IdenteditError;
 
-pub fn run_merge_inputs(
-    inputs: Vec<PathBuf>,
-) -> Result<MultiFileChangeset, IdenteditError> {
+pub fn run_merge_inputs(inputs: Vec<PathBuf>) -> Result<MultiFileChangeset, IdenteditError> {
     let mut merged_by_file = BTreeMap::<String, FileChange>::new();
 
     for input in &inputs {
@@ -95,7 +93,16 @@ fn validate_file_merge_constraints(
             continue;
         }
 
-        let span = operation.preview.matched_span;
+        let span = operation
+            .preview
+            .as_text()
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: format!(
+                    "Strict merge rejected file '{}': operation {index} does not use a text preview",
+                    file.display()
+                ),
+            })?
+            .matched_span;
         if span.start > span.end {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
@@ -202,14 +209,7 @@ mod tests {
                 "hash".to_string(),
             ),
             op: kind,
-            preview: ChangePreview {
-                old_text: Some(String::new()),
-                old_hash: None,
-                old_len: None,
-                new_text: String::new(),
-                matched_span: span,
-                move_preview: None,
-            },
+            preview: ChangePreview::text(Some(String::new()), None, None, String::new(), span),
         }
     }
 

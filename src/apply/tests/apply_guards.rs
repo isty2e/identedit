@@ -5,7 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use tempfile::tempdir;
 
 use crate::error::IdenteditError;
-use crate::transform::{build_replace_changeset, parse_handles_for_file};
+use crate::transform::build::build_replace_changeset;
+use crate::transform::parse::parse_handles_for_file;
 
 use super::super::{
     ApplyGuardState, apply_changeset, apply_changeset_with_hook, apply_changeset_with_hooks,

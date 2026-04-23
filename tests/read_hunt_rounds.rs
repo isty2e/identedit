@@ -34,12 +34,7 @@ fn run_read_json_mode(request_json: &str) -> Output {
 
 fn run_read_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command
-        .arg("read")
-        .arg("--mode")
-        .arg("ast")
-        .arg("--json")
-        .arg("--json");
+    command.arg("read").arg("--mode").arg("ast").arg("--json");
 
     for argument in arguments {
         command.arg(argument);
@@ -533,23 +528,8 @@ fn round3_exploit_name_flag_takes_precedence_over_empty_stdin_payload() {
 }
 
 #[test]
-fn round3_exploit_positional_file_rejection_precedes_exclude_kind_flag_message() {
-    let fixture = fixture_path("example.py");
-    let request = json!({
-        "command": "read",
-        "file": fixture.to_string_lossy().to_string(),
-        "selector": {
-            "kind": "function_definition",
-            "name_pattern": null,
-            "exclude_kinds": []
-        }
-    });
-    let fixture_arg = fixture.to_str().expect("path should be valid UTF-8");
-
-    let output = run_read_json_mode_with_args(
-        &request.to_string(),
-        &["--exclude-kind", "comment", fixture_arg],
-    );
+fn round3_exploit_exclude_kind_flag_takes_precedence_over_invalid_json_payload() {
+    let output = run_read_json_mode_with_args("{", &["--exclude-kind", "comment"]);
     assert!(!output.status.success(), "request should fail");
 
     let response: Value =
@@ -558,37 +538,26 @@ fn round3_exploit_positional_file_rejection_precedes_exclude_kind_flag_message()
     assert!(
         response["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("positional FILE arguments")),
-        "positional FILE rejection should fire first"
+            .is_some_and(|message| message.contains("--exclude-kind")),
+        "expected selector-flag validation before JSON parsing"
     );
 }
 
 #[test]
-fn round3_exploit_positional_file_rejection_precedes_kind_flag_message() {
-    let fixture = fixture_path("example.py");
-    let request = json!({
-        "command": "read",
-        "file": fixture.to_string_lossy().to_string(),
-        "selector": {
-            "kind": "function_definition",
-            "name_pattern": null,
-            "exclude_kinds": []
-        }
-    });
-    let fixture_arg = fixture.to_str().expect("path should be valid UTF-8");
-
-    let output =
-        run_read_json_mode_with_args(&request.to_string(), &["--kind", "module", fixture_arg]);
-    assert!(!output.status.success(), "request should fail");
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
+fn round3_exploit_repeated_json_flag_is_rejected_by_cli_parser() {
+    let output = Command::new(env!("CARGO_BIN_EXE_identedit"))
+        .args(["read", "--json", "--json", "--kind", "module"])
+        .output()
+        .expect("failed to run identedit binary");
     assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("positional FILE arguments")),
-        "positional FILE rejection should fire first"
+        !output.status.success(),
+        "repeated --json should fail before application-level validation"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be used multiple times"),
+        "expected repeated-flag diagnostic, got: {stderr}"
     );
 }
 

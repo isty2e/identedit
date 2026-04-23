@@ -10,10 +10,10 @@ use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransformTarget, 
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
-use crate::transform::{
-    TransformInstruction, build_changeset, build_delete_changeset, build_replace_changeset,
-    parse_handles_for_file, resolve_target_in_handles,
-};
+use crate::transform::TransformInstruction;
+use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
+use crate::transform::parse::parse_handles_for_file;
+use crate::transform::resolve::resolve_target_in_handles;
 
 #[derive(Debug, Args)]
 pub struct EditBuildArgs {
@@ -452,9 +452,8 @@ fn parse_stdin_edit_shape(
         let files = request.files.expect("checked has_batch");
         if files.is_empty() {
             return Err(IdenteditError::InvalidRequest {
-                message:
-                    "edit JSON request field 'files' must contain at least one file entry"
-                        .to_string(),
+                message: "edit JSON request field 'files' must contain at least one file entry"
+                    .to_string(),
             });
         }
         return Ok(files
@@ -508,7 +507,7 @@ fn parse_edit_operation(
             || operation.expected_old_hash.is_some()
         {
             return Err(IdenteditError::InvalidRequest {
-                message: "operation.target cannot be combined with legacy identity/kind/span_hint/expected_old_hash fields".to_string(),
+                message: "operation.target cannot be combined with top-level identity/kind/span_hint/expected_old_hash fields".to_string(),
             });
         }
 
@@ -648,17 +647,20 @@ fn parse_stdin_operation_kind(
 fn apply_preview_mode(changeset: &mut MultiFileChangeset, verbose: bool) {
     for file in &mut changeset.files {
         for operation in &mut file.operations {
+            let Some(preview) = operation.preview.as_text_mut() else {
+                continue;
+            };
             if verbose {
-                operation.preview.old_hash = None;
-                operation.preview.old_len = None;
-                if operation.preview.old_text.is_none() {
-                    operation.preview.old_text = Some(String::new());
+                preview.old_hash = None;
+                preview.old_len = None;
+                if preview.old_text.is_none() {
+                    preview.old_text = Some(String::new());
                 }
             } else {
-                let old_text = operation.preview.old_text.clone().unwrap_or_default();
-                operation.preview.old_hash = Some(hash_text(&old_text));
-                operation.preview.old_len = Some(old_text.len());
-                operation.preview.old_text = None;
+                let old_text = preview.old_text.clone().unwrap_or_default();
+                preview.old_hash = Some(hash_text(&old_text));
+                preview.old_len = Some(old_text.len());
+                preview.old_text = None;
             }
         }
     }

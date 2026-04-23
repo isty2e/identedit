@@ -1,11 +1,12 @@
 use std::path::PathBuf;
-use std::{fmt, result};
 
-use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 use crate::handle::Span;
-pub use crate::hash::HASH_HEX_LEN;
+
+mod wire;
+
+pub use crate::hash::{HASH_HEX_LEN, hash_bytes, hash_text};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -28,161 +29,6 @@ pub enum TransformTarget {
         #[serde(skip_serializing_if = "Option::is_none")]
         end_anchor: Option<String>,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum TransformTargetType {
-    Node,
-    FileStart,
-    FileEnd,
-    Line,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TransformTargetWire {
-    #[serde(default, rename = "type")]
-    target_type: Option<TransformTargetType>,
-    #[serde(default)]
-    identity: Option<String>,
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    span_hint: Option<Span>,
-    #[serde(default)]
-    expected_old_hash: Option<String>,
-    #[serde(default)]
-    expected_file_hash: Option<String>,
-    #[serde(default)]
-    anchor: Option<String>,
-    #[serde(default)]
-    end_anchor: Option<String>,
-}
-
-impl<'de> Deserialize<'de> for TransformTarget {
-    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = TransformTargetWire::deserialize(deserializer)?;
-        match wire.target_type.unwrap_or(TransformTargetType::Node) {
-            TransformTargetType::Node => {
-                if wire.expected_file_hash.is_some()
-                    || wire.anchor.is_some()
-                    || wire.end_anchor.is_some()
-                {
-                    return Err(de::Error::custom(
-                        "node target does not accept expected_file_hash/anchor/end_anchor",
-                    ));
-                }
-                let identity = wire
-                    .identity
-                    .ok_or_else(|| de::Error::missing_field("identity"))?;
-                let kind = wire.kind.ok_or_else(|| de::Error::missing_field("kind"))?;
-                let expected_old_hash = wire
-                    .expected_old_hash
-                    .ok_or_else(|| de::Error::missing_field("expected_old_hash"))?;
-                Ok(TransformTarget::Node {
-                    identity,
-                    kind,
-                    span_hint: wire.span_hint,
-                    expected_old_hash,
-                })
-            }
-            TransformTargetType::FileStart => {
-                reject_node_or_line_fields_for_file_target(&wire)?;
-                let expected_file_hash = wire
-                    .expected_file_hash
-                    .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
-                Ok(TransformTarget::FileStart { expected_file_hash })
-            }
-            TransformTargetType::FileEnd => {
-                reject_node_or_line_fields_for_file_target(&wire)?;
-                let expected_file_hash = wire
-                    .expected_file_hash
-                    .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
-                Ok(TransformTarget::FileEnd { expected_file_hash })
-            }
-            TransformTargetType::Line => {
-                reject_node_or_file_fields_for_line_target(&wire)?;
-                let anchor = wire
-                    .anchor
-                    .ok_or_else(|| de::Error::missing_field("anchor"))?;
-                Ok(TransformTarget::Line {
-                    anchor,
-                    end_anchor: wire.end_anchor,
-                })
-            }
-        }
-    }
-}
-
-fn reject_node_or_line_fields_for_file_target<E>(
-    wire: &TransformTargetWire,
-) -> result::Result<(), E>
-where
-    E: de::Error,
-{
-    let mut invalid_fields = Vec::new();
-    if wire.identity.is_some() {
-        invalid_fields.push("identity");
-    }
-    if wire.kind.is_some() {
-        invalid_fields.push("kind");
-    }
-    if wire.span_hint.is_some() {
-        invalid_fields.push("span_hint");
-    }
-    if wire.expected_old_hash.is_some() {
-        invalid_fields.push("expected_old_hash");
-    }
-    if wire.anchor.is_some() {
-        invalid_fields.push("anchor");
-    }
-    if wire.end_anchor.is_some() {
-        invalid_fields.push("end_anchor");
-    }
-
-    if !invalid_fields.is_empty() {
-        return Err(E::custom(format!(
-            "file-level targets do not accept node-only fields: {}",
-            invalid_fields.join(", ")
-        )));
-    }
-    Ok(())
-}
-
-fn reject_node_or_file_fields_for_line_target<E>(
-    wire: &TransformTargetWire,
-) -> result::Result<(), E>
-where
-    E: de::Error,
-{
-    let mut invalid_fields = Vec::new();
-    if wire.identity.is_some() {
-        invalid_fields.push("identity");
-    }
-    if wire.kind.is_some() {
-        invalid_fields.push("kind");
-    }
-    if wire.span_hint.is_some() {
-        invalid_fields.push("span_hint");
-    }
-    if wire.expected_old_hash.is_some() {
-        invalid_fields.push("expected_old_hash");
-    }
-    if wire.expected_file_hash.is_some() {
-        invalid_fields.push("expected_file_hash");
-    }
-
-    if !invalid_fields.is_empty() {
-        return Err(E::custom(format!(
-            "line targets do not accept non-line fields: {}",
-            invalid_fields.join(", ")
-        )));
-    }
-    Ok(())
 }
 
 impl TransformTarget {
@@ -240,41 +86,6 @@ pub struct TransactionSpec {
     pub mode: TransactionMode,
 }
 
-impl<'de> Deserialize<'de> for TransactionSpec {
-    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct TransactionSpecVisitor;
-
-        impl<'de> Visitor<'de> for TransactionSpecVisitor {
-            type Value = TransactionSpec;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("an object for transaction settings")
-            }
-
-            fn visit_map<M>(self, map: M) -> result::Result<Self::Value, M::Error>
-            where
-                M: MapAccess<'de>,
-            {
-                #[derive(Deserialize)]
-                #[serde(deny_unknown_fields)]
-                struct TransactionSpecWire {
-                    #[serde(default)]
-                    mode: TransactionMode,
-                }
-
-                let wire =
-                    TransactionSpecWire::deserialize(de::value::MapAccessDeserializer::new(map))?;
-                Ok(TransactionSpec { mode: wire.mode })
-            }
-        }
-
-        deserializer.deserialize_map(TransactionSpecVisitor)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TransactionMode {
@@ -303,9 +114,16 @@ pub enum OpKind {
     Move { to: PathBuf },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum ChangePreview {
+    Text(TextChangePreview),
+    Move(MoveChangePreview),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ChangePreview {
+pub struct TextChangePreview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,6 +132,11 @@ pub struct ChangePreview {
     pub old_len: Option<usize>,
     pub new_text: String,
     pub matched_span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveChangePreview {
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "move")]
     pub move_preview: Option<MovePreview>,
 }
@@ -325,12 +148,47 @@ pub struct MovePreview {
     pub to: PathBuf,
 }
 
-pub fn hash_bytes(bytes: &[u8]) -> String {
-    crate::hash::hash_bytes(bytes)
-}
+impl ChangePreview {
+    pub fn text(
+        old_text: Option<String>,
+        old_hash: Option<String>,
+        old_len: Option<usize>,
+        new_text: String,
+        matched_span: Span,
+    ) -> Self {
+        Self::Text(TextChangePreview {
+            old_text,
+            old_hash,
+            old_len,
+            new_text,
+            matched_span,
+        })
+    }
 
-pub fn hash_text(text: &str) -> String {
-    crate::hash::hash_text(text)
+    pub fn move_operation(move_preview: Option<MovePreview>) -> Self {
+        Self::Move(MoveChangePreview { move_preview })
+    }
+
+    pub fn as_text(&self) -> Option<&TextChangePreview> {
+        match self {
+            Self::Text(preview) => Some(preview),
+            Self::Move(_) => None,
+        }
+    }
+
+    pub fn as_text_mut(&mut self) -> Option<&mut TextChangePreview> {
+        match self {
+            Self::Text(preview) => Some(preview),
+            Self::Move(_) => None,
+        }
+    }
+
+    pub fn as_move(&self) -> Option<&MoveChangePreview> {
+        match self {
+            Self::Text(_) => None,
+            Self::Move(preview) => Some(preview),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -338,9 +196,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ChangeOp, MovePreview, MultiFileChangeset, OpKind, TransactionMode, TransformTarget,
-        hash_text,
+        ChangeOp, ChangePreview, MovePreview, MultiFileChangeset, OpKind, TextChangePreview,
+        TransactionMode, TransformTarget, hash_text,
     };
+    use crate::handle::Span;
 
     #[test]
     fn multi_file_changeset_defaults_transaction_mode_to_all_or_nothing() {
@@ -434,11 +293,48 @@ mod tests {
             other => panic!("expected move op, got {other:?}"),
         }
         assert_eq!(
-            parsed.preview.move_preview,
-            Some(MovePreview {
+            parsed.preview,
+            ChangePreview::move_operation(Some(MovePreview {
                 from: PathBuf::from("fixture.py"),
                 to: PathBuf::from("renamed.py"),
-            })
+            }))
+        );
+    }
+
+    #[test]
+    fn change_op_deserializes_legacy_move_preview_placeholder_shape() {
+        let payload = r#"{
+            "target": {
+                "identity": "id-1",
+                "kind": "function_definition",
+                "expected_old_hash": "hash-1"
+            },
+            "op": {
+                "type": "move",
+                "to": "renamed.py"
+            },
+            "preview": {
+                "old_text": "",
+                "new_text": "",
+                "matched_span": {
+                    "start": 0,
+                    "end": 0
+                },
+                "move": {
+                    "from": "fixture.py",
+                    "to": "renamed.py"
+                }
+            }
+        }"#;
+
+        let parsed: ChangeOp =
+            serde_json::from_str(payload).expect("legacy move preview should deserialize");
+        assert_eq!(
+            parsed.preview,
+            ChangePreview::move_operation(Some(MovePreview {
+                from: PathBuf::from("fixture.py"),
+                to: PathBuf::from("renamed.py"),
+            }))
         );
     }
 
@@ -513,6 +409,16 @@ mod tests {
             OpKind::Insert { new_text } => assert_eq!(new_text, "# header\n"),
             other => panic!("expected insert op, got {other:?}"),
         }
+        assert_eq!(
+            parsed.preview,
+            ChangePreview::Text(TextChangePreview {
+                old_text: Some(String::new()),
+                old_hash: None,
+                old_len: None,
+                new_text: "# header\n".to_string(),
+                matched_span: Span { start: 0, end: 0 },
+            })
+        );
     }
 
     #[test]

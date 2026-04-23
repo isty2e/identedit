@@ -406,10 +406,7 @@ fn read_json_duplicate_nested_keys_produce_parse_errors() {
     ];
 
     for payload in payloads {
-        let output = run_identedit_with_raw_stdin(
-            &["read", "--json"],
-            payload.as_bytes(),
-        );
+        let output = run_identedit_with_raw_stdin(&["read", "--json"], payload.as_bytes());
         assert!(
             !output.status.success(),
             "read should reject nested duplicate-key payload"

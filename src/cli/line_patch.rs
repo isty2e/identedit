@@ -5,9 +5,9 @@ use serde::Serialize;
 
 use crate::error::IdenteditError;
 use crate::hashline::{
-    HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult, HashlineCheckSummary,
-    HashlineEdit, HashlineMismatch, HashlineMismatchStatus, apply_hashline_edits_with_mode,
-    check_hashline_edits,
+    HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult,
+    HashlineCheckSummary, HashlineEdit, HashlineMismatch, HashlineMismatchStatus,
+    apply_hashline_edits_with_mode, check_hashline_edits,
 };
 use crate::patch::engine::run_resolve_verify_apply;
 
@@ -30,6 +30,7 @@ pub enum HashlineModeResponse {
 pub struct HashlinePatchResponse {
     pub file: PathBuf,
     pub auto_repair: bool,
+    pub dry_run: bool,
     pub strict_check: HashlineCheckPayload,
     pub applied_mode: HashlineModeResponse,
     pub changed: bool,
@@ -37,13 +38,30 @@ pub struct HashlinePatchResponse {
     pub operations_applied: usize,
 }
 
+#[derive(Debug)]
+pub(crate) struct HashlinePatchExecution {
+    pub response: HashlinePatchResponse,
+    pub source: String,
+    pub applied_content: String,
+}
+
 pub(crate) fn execute_hashline_patch(
     file: PathBuf,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
 ) -> Result<HashlinePatchResponse, IdenteditError> {
+    Ok(execute_hashline_patch_with_preview(file, edits, auto_repair, dry_run)?.response)
+}
+
+pub(crate) fn execute_hashline_patch_with_preview(
+    file: PathBuf,
+    edits: Vec<HashlineEdit>,
+    auto_repair: bool,
+    dry_run: bool,
+) -> Result<HashlinePatchExecution, IdenteditError> {
     run_resolve_verify_apply(
-        || resolve_hashline_patch_request(file, edits, auto_repair),
+        || resolve_hashline_patch_request(file, edits, auto_repair, dry_run),
         verify_hashline_patch_request,
         apply_hashline_patch_request,
     )
@@ -55,6 +73,7 @@ struct ResolvedHashlinePatch {
     source: String,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
 }
 
 #[derive(Debug)]
@@ -63,6 +82,7 @@ struct VerifiedHashlinePatch {
     source: String,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
     strict_check_result: HashlineCheckResult,
     applied_mode: HashlineApplyMode,
 }
@@ -71,6 +91,7 @@ fn resolve_hashline_patch_request(
     file: PathBuf,
     edits: Vec<HashlineEdit>,
     auto_repair: bool,
+    dry_run: bool,
 ) -> Result<ResolvedHashlinePatch, IdenteditError> {
     let source = fs::read_to_string(&file).map_err(|error| IdenteditError::io(&file, error))?;
     Ok(ResolvedHashlinePatch {
@@ -78,6 +99,7 @@ fn resolve_hashline_patch_request(
         source,
         edits,
         auto_repair,
+        dry_run,
     })
 }
 
@@ -100,6 +122,7 @@ fn verify_hashline_patch_request(
         source: resolved.source,
         edits: resolved.edits,
         auto_repair: resolved.auto_repair,
+        dry_run: resolved.dry_run,
         strict_check_result,
         applied_mode,
     })
@@ -107,7 +130,7 @@ fn verify_hashline_patch_request(
 
 fn apply_hashline_patch_request(
     verified: VerifiedHashlinePatch,
-) -> Result<HashlinePatchResponse, IdenteditError> {
+) -> Result<HashlinePatchExecution, IdenteditError> {
     let strict_check = build_hashline_check_payload(
         verified.strict_check_result.clone(),
         verified.auto_repair || !verified.strict_check_result.ok,
@@ -117,14 +140,15 @@ fn apply_hashline_patch_request(
             .map_err(map_hashline_apply_error)?;
     let changed = verified.source != applied.content;
 
-    if changed {
+    if changed && !verified.dry_run {
         fs::write(&verified.file, applied.content.as_bytes())
             .map_err(|error| IdenteditError::io(&verified.file, error))?;
     }
 
-    Ok(HashlinePatchResponse {
+    let response = HashlinePatchResponse {
         file: verified.file,
         auto_repair: verified.auto_repair,
+        dry_run: verified.dry_run,
         strict_check,
         applied_mode: match verified.applied_mode {
             HashlineApplyMode::Strict => HashlineModeResponse::Strict,
@@ -133,6 +157,12 @@ fn apply_hashline_patch_request(
         changed,
         operations_total: applied.operations_total,
         operations_applied: applied.operations_applied,
+    };
+
+    Ok(HashlinePatchExecution {
+        response,
+        source: verified.source,
+        applied_content: applied.content,
     })
 }
 

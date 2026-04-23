@@ -7,8 +7,8 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 
 use crate::apply::{
-    ApplyFailureInjection, ApplyFileResult, ApplyResponse, ApplySummary, ApplyTransaction,
-    apply_multi_file_changeset, apply_multi_file_changeset_with_injection,
+    ApplyDryRunSummary, ApplyFailureInjection, ApplyFileResult, ApplyResponse, ApplySummary,
+    ApplyTransaction, apply_multi_file_changeset, apply_multi_file_changeset_with_injection,
     dry_run_multi_file_changeset,
 };
 use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget, hash_text};
@@ -51,6 +51,8 @@ struct StdinApplyRequest {
 pub struct ApplyCliResponse {
     pub summary: ApplySummary,
     pub transaction: ApplyTransaction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<ApplyDryRunSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied: Option<Vec<ApplyFileResult>>,
 }
@@ -228,7 +230,7 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
         file: file_change.file.clone(),
         operations: line_operations,
     };
-    let resolved = crate::transform::resolve_changeset_targets(&line_only_change)?;
+    let resolved = crate::transform::build::resolve_changeset_targets(&line_only_change)?;
 
     for (resolved_index, matched_change) in resolved.into_iter().enumerate() {
         let original_index = original_indices
@@ -250,15 +252,24 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
                 ),
             })?;
 
-        operation.preview.matched_span = matched_change.matched_span;
-        if operation.preview.old_text.is_some() {
-            operation.preview.old_text = Some(matched_change.old_text);
-            operation.preview.old_hash = None;
-            operation.preview.old_len = None;
+        let Some(preview) = operation.preview.as_text_mut() else {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Internal apply repair error: operation {} does not use a text preview",
+                    original_index
+                ),
+            });
+        };
+
+        preview.matched_span = matched_change.matched_span;
+        if preview.old_text.is_some() {
+            preview.old_text = Some(matched_change.old_text);
+            preview.old_hash = None;
+            preview.old_len = None;
         } else {
-            operation.preview.old_hash = Some(hash_text(&matched_change.old_text));
-            operation.preview.old_len = Some(matched_change.old_text.len());
-            operation.preview.old_text = None;
+            preview.old_hash = Some(hash_text(&matched_change.old_text));
+            preview.old_len = Some(matched_change.old_text.len());
+            preview.old_text = None;
         }
     }
 
@@ -286,11 +297,13 @@ pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> Ap
         applied,
         summary,
         transaction,
+        dry_run,
     } = response;
 
     ApplyCliResponse {
         summary,
         transaction,
+        dry_run,
         applied: verbose.then_some(applied),
     }
 }

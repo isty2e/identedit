@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use crate::changeset::{FileChange, OpKind, TransformTarget, hash_text};
+use crate::changeset::{
+    ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget, hash_text,
+};
 use crate::error::IdenteditError;
 use crate::handle::Span;
 use crate::transform::MatchedChange;
@@ -125,6 +127,18 @@ pub(super) fn apply_replacements_to_text(
     Ok(source_text)
 }
 
+fn text_preview(operation: &ChangeOp, index: usize) -> Result<&TextChangePreview, IdenteditError> {
+    operation
+        .preview
+        .as_text()
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: format!(
+                "Operation {} preview must use text preview fields for this operation family",
+                index
+            ),
+        })
+}
+
 pub(super) fn validate_preview_consistency(
     changeset: &FileChange,
     matched_changes: &[MatchedChange],
@@ -139,24 +153,14 @@ pub(super) fn validate_preview_consistency(
             }
         })?;
 
+        let preview = text_preview(operation, matched.index)?;
         validate_target_preview_span_consistency(matched.index, operation)?;
-        validate_preview_old_state(matched.index, operation, matched)?;
+        validate_preview_old_state(matched.index, preview, matched)?;
 
-        if operation.preview.matched_span != matched.matched_span
-            && !allow_stale_preview_span(operation)
-        {
+        if preview.matched_span != matched.matched_span && !allow_stale_preview_span(operation) {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Operation {} preview.matched_span does not match resolved target span; span_hint may be stale",
-                    matched.index
-                ),
-            });
-        }
-
-        if operation.preview.move_preview.is_some() {
-            return Err(IdenteditError::InvalidRequest {
-                message: format!(
-                    "Operation {} preview.move is only allowed for move operations",
                     matched.index
                 ),
             });
@@ -178,7 +182,7 @@ pub(super) fn validate_preview_consistency(
                 });
             }
         };
-        if operation.preview.new_text != *op_new_text {
+        if preview.new_text != *op_new_text {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Operation {} preview.new_text does not match op payload",
@@ -193,7 +197,7 @@ pub(super) fn validate_preview_consistency(
 
 fn validate_target_preview_span_consistency(
     index: usize,
-    operation: &crate::changeset::ChangeOp,
+    operation: &ChangeOp,
 ) -> Result<(), IdenteditError> {
     let TransformTarget::Node {
         span_hint: Some(span_hint),
@@ -202,6 +206,7 @@ fn validate_target_preview_span_consistency(
     else {
         return Ok(());
     };
+    let preview = text_preview(operation, index)?;
 
     let expected_preview_span = match operation.op {
         OpKind::Replace { .. }
@@ -216,10 +221,10 @@ fn validate_target_preview_span_consistency(
             start: span_hint.end,
             end: span_hint.end,
         },
-        OpKind::Insert { .. } | OpKind::Move { .. } => operation.preview.matched_span,
+        OpKind::Insert { .. } | OpKind::Move { .. } => preview.matched_span,
     };
 
-    if operation.preview.matched_span != expected_preview_span {
+    if preview.matched_span != expected_preview_span {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
                 "Operation {index} preview.matched_span must be consistent with target span_hint",
@@ -249,16 +254,19 @@ fn allow_stale_preview_span(operation: &crate::changeset::ChangeOp) -> bool {
         return false;
     };
 
-    operation.preview.matched_span == *span_hint
+    operation
+        .preview
+        .as_text()
+        .is_some_and(|preview| preview.matched_span == *span_hint)
 }
 
 fn validate_preview_old_state(
     index: usize,
-    operation: &crate::changeset::ChangeOp,
+    preview: &TextChangePreview,
     matched: &MatchedChange,
 ) -> Result<(), IdenteditError> {
-    let has_old_text = operation.preview.old_text.is_some();
-    let has_compact = operation.preview.old_hash.is_some() || operation.preview.old_len.is_some();
+    let has_old_text = preview.old_text.is_some();
+    let has_compact = preview.old_hash.is_some() || preview.old_len.is_some();
 
     if has_old_text && has_compact {
         return Err(IdenteditError::InvalidRequest {
@@ -270,7 +278,7 @@ fn validate_preview_old_state(
     }
 
     if has_old_text {
-        if operation.preview.old_text.as_deref() != Some(matched.old_text.as_str()) {
+        if preview.old_text.as_deref() != Some(matched.old_text.as_str()) {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Operation {} preview.old_text does not match resolved target text",
@@ -282,17 +290,13 @@ fn validate_preview_old_state(
     }
 
     let preview_old_hash =
-        operation
-            .preview
-            .old_hash
-            .as_ref()
-            .ok_or_else(|| IdenteditError::InvalidRequest {
-                message: format!(
-                    "Operation {} preview must include either old_text or compact old_hash/old_len fields",
-                    index
-                ),
-            })?;
-    let preview_old_len = operation.preview.old_len.ok_or_else(|| {
+        preview.old_hash.as_ref().ok_or_else(|| IdenteditError::InvalidRequest {
+            message: format!(
+                "Operation {} preview must include either old_text or compact old_hash/old_len fields",
+                index
+            ),
+        })?;
+    let preview_old_len = preview.old_len.ok_or_else(|| {
         IdenteditError::InvalidRequest {
             message: format!(
                 "Operation {} preview must include either old_text or compact old_hash/old_len fields",

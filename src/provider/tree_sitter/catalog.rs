@@ -414,6 +414,7 @@ pub(super) fn bundled_language_specs() -> &'static [LanguageSpec] {
     BUNDLED_LANGUAGE_SPECS
 }
 
+#[cfg(test)]
 pub(super) fn python_language_spec() -> &'static LanguageSpec {
     &PYTHON_LANGUAGE_SPEC
 }

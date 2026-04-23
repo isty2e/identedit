@@ -2,10 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::changeset::{OpKind, hash_text};
 
-use super::{
-    MatchedChange, TransformTarget, reject_move_operation, resolve_target_in_handles,
-    validate_change_conflicts,
-};
+use super::conflict::{reject_move_operation, validate_change_conflicts};
+use super::resolve::resolve_target_in_handles;
+use super::{MatchedChange, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 
@@ -28,12 +27,6 @@ fn matched_change(
 ) -> MatchedChange {
     MatchedChange {
         index,
-        target: TransformTarget::node(
-            format!("id-{index}"),
-            anchor_kind.to_string(),
-            Some(anchor_span),
-            "hash".to_string(),
-        ),
         op,
         expected_hash: "hash".to_string(),
         old_text: String::new(),
@@ -133,6 +126,7 @@ fn resolve_target_returns_ambiguous_when_stale_span_hint_matches_multiple_candid
             identity,
             file,
             candidates,
+            ..
         } => {
             assert_eq!(identity, "missing-identity");
             assert_eq!(file, "fixture.py");
@@ -253,6 +247,7 @@ fn resolve_target_kind_and_hash_fallback_rejects_ambiguous_candidates() {
             identity,
             file,
             candidates,
+            ..
         } => {
             assert_eq!(identity, "stale-identity");
             assert_eq!(file, "fixture.py");
@@ -553,8 +548,8 @@ fn reject_move_operation_returns_invalid_request() {
 
     match error {
         IdenteditError::InvalidRequest { message } => {
-            assert!(message.contains("Operation 2 uses move"));
-            assert!(message.contains("not supported by transform"));
+            assert!(message.contains("Operation 2 uses file move"));
+            assert!(message.contains("cannot be built by edit"));
         }
         other => panic!("unexpected error: {other}"),
     }
