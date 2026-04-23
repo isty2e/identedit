@@ -188,3 +188,14 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 ## Docs
 
 - Agent workflow guide: [`skills/identedit/SKILL.md`](skills/identedit/SKILL.md)
+
+## Feedback
+
+If identedit friction appears, open or update a GitHub issue:
+
+- https://github.com/isty2e/identedit/issues
+
+Include:
+- What you were trying to do
+- What happened, including the error or unexpected output
+- What you expected instead

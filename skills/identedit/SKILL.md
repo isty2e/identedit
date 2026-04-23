@@ -1,6 +1,6 @@
 ---
 name: identedit
-description: "Precision code editing with hash-based safety. USE WHEN: multi-file atomic edit needed, target text appears multiple times in a large file, or previous direct edit/apply_patch failed due to context mismatch or landed in the wrong place. Supports replace/patch/move of functions/lines and config path edits (JSON/YAML/TOML). NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
+description: "Precision code editing with precondition safety. USE WHEN: multi-file atomic edits, repeated target text, config-path edits, or a previous edit attempt failed or landed in the wrong place. NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
 ---
 
 # Identedit — Agent-Oriented Code Editing
@@ -16,8 +16,8 @@ Two modes:
 Use identedit when any condition matches:
 - 2+ files must succeed or fail together.
 - Large file and repeated target text make direct patching risky.
-- A previous direct edit or `apply_patch` failed from context mismatch.
-- A previous direct edit or `apply_patch` landed in the wrong location.
+- A previous edit attempt failed from context mismatch.
+- A previous edit attempt landed in the wrong location.
 - You need insert-at-file-start/end with precondition safety.
 - You need a nested JSON/YAML/TOML config key edit by path.
 - You need multiple operations on the same file in one verified plan.
@@ -25,6 +25,8 @@ Use identedit when any condition matches:
 Otherwise prefer direct file editing for speed.
 
 ## Quick Commands
+
+Use this table as a command lookup once you already know identedit is the right tool.
 
 | Task | Command |
 |---|---|
@@ -43,6 +45,8 @@ Otherwise prefer direct file editing for speed.
 | Move a structure | `identedit edit --json` with `move_before` / `move_after` |
 
 ## Quick Choice
+
+Use this table to decide whether identedit is worth the overhead versus direct editing.
 
 | Situation | Use |
 |---|---|
@@ -245,10 +249,3 @@ Load these only when the task needs the details:
 ## Tool Pairing
 
 Use `ast-grep` for pattern-based discovery and identedit for verified application. Use `repren` for bulk text refactoring, simultaneous renames, case-preserving variants, and file/directory renames.
-
-## Feedback
-
-When identedit friction appears, open or update a GitHub issue with:
-- What you were trying to do.
-- What happened, including error output.
-- What you expected instead.
