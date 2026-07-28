@@ -40,7 +40,7 @@ fn select_mode_line_returns_line_handles_with_anchors() {
     assert_eq!(handles[0]["text"], "alpha");
     assert_eq!(
         handles[0]["anchor"],
-        format!("1:{}", identedit::hashline::compute_line_hash("alpha"))
+        format!("1:{}", crate::common::compute_line_hash("alpha"))
     );
 }
 

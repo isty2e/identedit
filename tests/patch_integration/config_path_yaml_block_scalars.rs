@@ -1476,7 +1476,7 @@ fn patch_json_config_path_set_existing_yaml_block_scalar_exact_hash_succeeds() {
         "target": {
             "type": "config_path",
             "path": "data.script",
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",

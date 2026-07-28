@@ -18,6 +18,22 @@ fn copy_fixture_to_temp_python(name: &str) -> PathBuf {
     common::copy_fixture_to_temp_python(name)
 }
 
+#[test]
+fn package_exposes_only_the_identedit_binary() {
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let manifest_text = fs::read_to_string(manifest_path).expect("Cargo.toml should be readable");
+    let manifest: toml::Value =
+        toml::from_str(&manifest_text).expect("Cargo.toml should be valid TOML");
+
+    assert_eq!(manifest["package"]["autolib"].as_bool(), Some(false));
+    assert!(
+        !Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/lib.rs")
+            .exists(),
+        "the CLI-only package must not expose an implicit Rust library target"
+    );
+}
+
 fn read_json(file: &Path) -> Value {
     let output = run_identedit(&[
         "read",

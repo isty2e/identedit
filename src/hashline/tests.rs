@@ -1,8 +1,7 @@
 use super::{
     HASHLINE_DEFAULT_HEX_LEN, HASHLINE_MIN_HEX_LEN, HashlineApplyError, HashlineApplyMode,
     HashlineEdit, HashlineMismatchStatus, apply_hashline_edits, apply_hashline_edits_with_mode,
-    check_hashline_edits, check_hashline_refs, compute_line_hash, format_hashed_lines,
-    format_line_ref, parse_line_ref,
+    check_hashline_edits, check_hashline_refs, compute_line_hash, format_line_ref, parse_line_ref,
 };
 
 fn line_ref(source: &str, line: usize) -> String {
@@ -21,21 +20,6 @@ fn hashline_display(line: usize, content: &str) -> String {
 fn compute_line_hash_uses_fixed_hex_length() {
     let hash = compute_line_hash("project = \"identedit\"");
     assert_eq!(hash.len(), HASHLINE_DEFAULT_HEX_LEN);
-}
-
-#[test]
-fn format_hashed_lines_emits_line_hash_content_triplets() {
-    let rendered = format_hashed_lines("alpha\nbeta");
-    let mut lines = rendered.lines();
-
-    let first = lines.next().expect("first line should exist");
-    assert!(first.starts_with("1:"));
-    assert!(first.ends_with("|alpha"));
-
-    let second = lines.next().expect("second line should exist");
-    assert!(second.starts_with("2:"));
-    assert!(second.ends_with("|beta"));
-    assert!(lines.next().is_none());
 }
 
 #[test]

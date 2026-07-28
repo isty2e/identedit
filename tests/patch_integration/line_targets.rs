@@ -707,7 +707,7 @@ fn patch_line_flag_supports_auto_repair() {
         .write_all(source.as_bytes())
         .expect("fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
-    let stale_anchor = format!("1:{}", identedit::hashline::compute_line_hash("b"));
+    let stale_anchor = format!("1:{}", crate::common::compute_line_hash("b"));
 
     let output = run_identedit(&[
         "patch",
@@ -741,7 +741,7 @@ fn patch_line_flag_auto_repair_dry_run_does_not_modify_file() {
         .write_all(source.as_bytes())
         .expect("fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
-    let stale_anchor = format!("1:{}", identedit::hashline::compute_line_hash("b"));
+    let stale_anchor = format!("1:{}", crate::common::compute_line_hash("b"));
 
     let output = run_identedit(&[
         "patch",
@@ -1114,7 +1114,7 @@ fn patch_json_line_target_can_auto_repair() {
         .expect("fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
 
-    let stale_anchor = format!("1:{}", identedit::hashline::compute_line_hash("b"));
+    let stale_anchor = format!("1:{}", crate::common::compute_line_hash("b"));
     let request = json!({
         "command": "patch",
         "file": file_path.to_string_lossy().to_string(),
@@ -1156,7 +1156,7 @@ fn patch_json_line_target_auto_repair_dry_run_ambiguous_keeps_file_unchanged() {
         .write_all(source.as_bytes())
         .expect("fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
-    let stale_anchor = format!("2:{}", identedit::hashline::compute_line_hash("z"));
+    let stale_anchor = format!("2:{}", crate::common::compute_line_hash("z"));
     let request = json!({
         "command": "patch",
         "file": file_path.to_string_lossy().to_string(),
@@ -1200,7 +1200,7 @@ fn patch_json_rejects_node_target_with_line_only_op() {
             "type": "node",
             "identity": handle["identity"],
             "kind": handle["kind"],
-            "expected_old_hash": identedit::changeset::hash_text(
+            "expected_old_hash": crate::common::hash_text(
                 handle["text"].as_str().expect("text should be string")
             )
         },

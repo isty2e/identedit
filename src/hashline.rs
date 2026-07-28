@@ -269,10 +269,6 @@ pub fn show_hashed_lines(source: &str) -> Vec<HashedLine> {
     show::show_hashed_lines(source)
 }
 
-pub fn format_hashed_lines(source: &str) -> String {
-    show::format_hashed_lines(source)
-}
-
 pub fn check_hashline_edits(
     source: &str,
     edits: &[HashlineEdit],
@@ -300,7 +296,8 @@ pub fn check_hashline_refs(
     check::check_hashline_anchors(source, &anchors)
 }
 
-pub fn apply_hashline_edits(
+#[cfg(test)]
+pub(crate) fn apply_hashline_edits(
     source: &str,
     edits: &[HashlineEdit],
 ) -> Result<HashlineApplyResult, HashlineApplyError> {

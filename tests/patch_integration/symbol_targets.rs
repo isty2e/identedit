@@ -1049,7 +1049,7 @@ fn patch_json_node_target_scoped_regex_applies_change_and_reports_count() {
             "identity": handle["identity"],
             "kind": handle["kind"],
             "span_hint": handle["span"],
-            "expected_old_hash": identedit::changeset::hash_text(
+            "expected_old_hash": crate::common::hash_text(
                 handle["text"].as_str().expect("text should be string")
             )
         },
@@ -1092,7 +1092,7 @@ fn patch_json_node_target_scoped_regex_rejects_invalid_pattern() {
             "identity": handle["identity"],
             "kind": handle["kind"],
             "span_hint": handle["span"],
-            "expected_old_hash": identedit::changeset::hash_text(
+            "expected_old_hash": crate::common::hash_text(
                 handle["text"].as_str().expect("text should be string")
             )
         },
@@ -1131,7 +1131,7 @@ fn patch_json_node_target_scoped_regex_rejects_zero_matches() {
             "identity": handle["identity"],
             "kind": handle["kind"],
             "span_hint": handle["span"],
-            "expected_old_hash": identedit::changeset::hash_text(
+            "expected_old_hash": crate::common::hash_text(
                 handle["text"].as_str().expect("text should be string")
             )
         },
@@ -1176,7 +1176,7 @@ fn patch_json_node_target_scoped_regex_preserves_stale_precondition_behavior() {
             "identity": handle["identity"],
             "kind": handle["kind"],
             "span_hint": handle["span"],
-            "expected_old_hash": identedit::changeset::hash_text(
+            "expected_old_hash": crate::common::hash_text(
                 handle["text"].as_str().expect("text should be string")
             )
         },

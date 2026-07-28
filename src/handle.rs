@@ -115,7 +115,7 @@ mod tests {
     fn compute_identity_uses_fixed_hex_prefix_length() {
         let identity =
             compute_identity("function_definition", Some("process_data"), "def a(): pass");
-        assert_eq!(identity.len(), crate::changeset::HASH_HEX_LEN);
+        assert_eq!(identity.len(), crate::hash::HASH_HEX_LEN);
         assert!(
             identity
                 .chars()
@@ -132,10 +132,7 @@ mod tests {
             Some("process_data".to_string()),
             "def process_data(value):\n    return value + 1\n".to_string(),
         );
-        assert_eq!(
-            handle.expected_old_hash.len(),
-            crate::changeset::HASH_HEX_LEN
-        );
+        assert_eq!(handle.expected_old_hash.len(), crate::hash::HASH_HEX_LEN);
         assert!(
             handle
                 .expected_old_hash

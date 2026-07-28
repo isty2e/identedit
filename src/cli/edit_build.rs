@@ -6,10 +6,11 @@ use clap::Args;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransformTarget, hash_text};
+use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
+use crate::hash::hash_text;
 use crate::transform::TransformInstruction;
 use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
 use crate::transform::parse::parse_handles_for_file;

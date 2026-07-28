@@ -8,7 +8,7 @@ fn apply_accepts_compact_preview_for_replace_operation() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let replacement = "def process_data(value):\n    return value + 42";
 
     let changeset = json!({
@@ -57,7 +57,7 @@ fn apply_rejects_compact_preview_with_tampered_old_hash() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let replacement = "def process_data(value):\n    return value + 42";
 
     let changeset = json!({
@@ -106,7 +106,7 @@ fn apply_rejects_multiple_inserts_at_same_byte_position() {
     let span_start = span["start"].as_u64().expect("span start") as usize;
     let span_end = span["end"].as_u64().expect("span end") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -161,7 +161,7 @@ fn apply_rejects_insert_touching_replace_boundary() {
     let span_start = span["start"].as_u64().expect("span start") as usize;
     let span_end = span["end"].as_u64().expect("span end") as usize;
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let replacement = "def process_data(value):\n    return value + 99";
 
     let changeset = json!({
@@ -217,7 +217,7 @@ fn apply_json_rejects_delete_and_insert_on_same_anchor() {
     let span_start = span["start"].as_u64().expect("span start") as usize;
     let span_end = span["end"].as_u64().expect("span end") as usize;
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -286,11 +286,11 @@ fn apply_json_rejects_overlapping_root_replace_and_nested_insert() {
     let root_old_text = root_handle["text"]
         .as_str()
         .expect("root text should be string");
-    let root_hash = identedit::changeset::hash_text(root_old_text);
+    let root_hash = crate::common::hash_text(root_old_text);
     let nested_old_text = nested_handle["text"]
         .as_str()
         .expect("nested text should be string");
-    let nested_hash = identedit::changeset::hash_text(nested_old_text);
+    let nested_hash = crate::common::hash_text(nested_old_text);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -354,7 +354,7 @@ fn apply_json_same_anchor_insert_before_after_is_order_independent() {
     let start_a = span_a["start"].as_u64().expect("span start") as usize;
     let end_a = span_a["end"].as_u64().expect("span end") as usize;
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let changeset_a = json!({
         "file": file_path_a.to_string_lossy().to_string(),
         "operations": [
@@ -402,7 +402,7 @@ fn apply_json_same_anchor_insert_before_after_is_order_independent() {
     let start_b = span_b["start"].as_u64().expect("span start") as usize;
     let end_b = span_b["end"].as_u64().expect("span end") as usize;
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
     let changeset_b = json!({
         "file": file_path_b.to_string_lossy().to_string(),
         "operations": [
@@ -563,7 +563,7 @@ fn apply_json_insert_before_changeset_second_apply_returns_span_hint_mismatch() 
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -631,7 +631,7 @@ fn apply_json_non_overlapping_operations_are_order_independent() {
                     "identity": object_handle_a["identity"],
                     "kind": object_handle_a["kind"],
                     "span_hint": {"start": object_span_a["start"], "end": object_span_a["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         object_handle_a["text"].as_str().expect("text should be string")
                     )
                 },
@@ -647,7 +647,7 @@ fn apply_json_non_overlapping_operations_are_order_independent() {
                     "identity": array_handle_a["identity"],
                     "kind": array_handle_a["kind"],
                     "span_hint": {"start": array_span_a["start"], "end": array_span_a["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         array_handle_a["text"].as_str().expect("text should be string")
                     )
                 },
@@ -682,7 +682,7 @@ fn apply_json_non_overlapping_operations_are_order_independent() {
                     "identity": array_handle_b["identity"],
                     "kind": array_handle_b["kind"],
                     "span_hint": {"start": array_span_b["start"], "end": array_span_b["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         array_handle_b["text"].as_str().expect("text should be string")
                     )
                 },
@@ -698,7 +698,7 @@ fn apply_json_non_overlapping_operations_are_order_independent() {
                     "identity": object_handle_b["identity"],
                     "kind": object_handle_b["kind"],
                     "span_hint": {"start": object_span_b["start"], "end": object_span_b["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         object_handle_b["text"].as_str().expect("text should be string")
                     )
                 },
@@ -736,7 +736,7 @@ fn apply_json_replace_preview_tampering_matrix() {
         let span_end = span["end"].as_u64().expect("span end");
         let old_text = handle["text"].as_str().expect("text should be string");
         let replacement = "{\"enabled\": false, \"retries\": 99}";
-        let expected_hash = identedit::changeset::hash_text(old_text);
+        let expected_hash = crate::common::hash_text(old_text);
 
         let mut operation = json!({
             "target": {
@@ -806,7 +806,7 @@ fn apply_same_anchor_insert_before_after_is_order_independent() {
     let start_a = span_a["start"].as_u64().expect("span start") as usize;
     let end_a = span_a["end"].as_u64().expect("span end") as usize;
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let changeset_a = json!({
         "file": file_path_a.to_string_lossy().to_string(),
         "operations": [
@@ -855,7 +855,7 @@ fn apply_same_anchor_insert_before_after_is_order_independent() {
     let start_b = span_b["start"].as_u64().expect("span start") as usize;
     let end_b = span_b["end"].as_u64().expect("span end") as usize;
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
     let changeset_b = json!({
         "file": file_path_b.to_string_lossy().to_string(),
         "operations": [
@@ -920,7 +920,7 @@ fn apply_insert_after_preserves_crlf_source_segments() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -975,7 +975,7 @@ fn apply_insert_before_preserves_utf8_bom_prefix() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1067,7 +1067,7 @@ fn apply_reports_deterministic_error_for_duplicated_same_target_operations() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let make_changeset = |first_new_text: &str, second_new_text: &str| {
         json!({
@@ -1147,12 +1147,12 @@ fn apply_reports_deterministic_error_for_three_operation_conflict_permutations()
     let helper_handle = select_named_handle(&file_path, "helper");
     let process_span = &process_handle["span"];
     let helper_span = &helper_handle["span"];
-    let process_hash = identedit::changeset::hash_text(
+    let process_hash = crate::common::hash_text(
         process_handle["text"]
             .as_str()
             .expect("process handle text should be string"),
     );
-    let helper_hash = identedit::changeset::hash_text(
+    let helper_hash = crate::common::hash_text(
         helper_handle["text"]
             .as_str()
             .expect("helper handle text should be string"),
@@ -1254,7 +1254,7 @@ fn apply_rejects_span_hint_with_start_greater_than_end() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1316,7 +1316,7 @@ fn apply_rejects_zero_length_span_hint() {
     let handle = select_response["handles"][0].clone();
     let start = handle["span"]["start"].as_u64().expect("span start") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": fixture.to_string_lossy().to_string(),
@@ -1363,7 +1363,7 @@ fn apply_rejects_extreme_span_values_without_panicking() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_named_handle(&file_path, "process_*");
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1407,7 +1407,7 @@ fn apply_rejects_non_matching_span_hint_for_unique_target() {
     let start = span["start"].as_u64().expect("span start") as usize;
     let end = span["end"].as_u64().expect("span end") as usize;
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1453,7 +1453,7 @@ fn apply_preserves_real_newlines_in_replacement_text() {
     let span = &handle["span"];
     let replacement = "def process_data(value):\n    total = value + 3\n    return total";
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),

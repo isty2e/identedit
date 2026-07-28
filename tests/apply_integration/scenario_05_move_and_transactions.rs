@@ -600,7 +600,7 @@ fn apply_json_mode_rejects_unknown_span_field() {
     let handle = select_named_handle(&file_path, "process_*");
     let span = &handle["span"];
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let request = json!({
         "command": "apply",
         "changeset": {
@@ -892,9 +892,9 @@ fn apply_multi_file_stdin_mode_applies_all_files_in_deterministic_order() {
     let new_text_a = "def process_data(value):\n    return value * 99";
     let new_text_b = "def process_data(value):\n    return value * 98";
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
 
     let payload = json!({
         "files": [
@@ -998,13 +998,12 @@ fn apply_multi_file_json_mode_applies_cross_language_changes() {
     let py_span = &py_handle["span"];
     let py_new_text = "def process_data(value):\n    return value * 77";
     let py_expected_hash =
-        identedit::changeset::hash_text(py_handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(py_handle["text"].as_str().expect("text should be string"));
     let json_handle = select_root_json_object_handle(&file_json);
     let json_span = &json_handle["span"];
     let json_new_text = "{\n  \"enabled\": true,\n  \"version\": 2,\n  \"tool\": \"identedit\"\n}";
-    let json_expected_hash = identedit::changeset::hash_text(
-        json_handle["text"].as_str().expect("text should be string"),
-    );
+    let json_expected_hash =
+        crate::common::hash_text(json_handle["text"].as_str().expect("text should be string"));
 
     let request = json!({
         "command": "apply",
@@ -1120,12 +1119,12 @@ fn apply_same_file_stale_identity_resolves_by_unique_kind_and_expected_hash() {
     let alpha_new_text =
         "def alpha(value):\n    if value > 0:\n        return value + 10\n    return value";
     let beta_new_text = "def beta(value):\n    return value + 20";
-    let alpha_expected_hash = identedit::changeset::hash_text(
+    let alpha_expected_hash = crate::common::hash_text(
         alpha_handle["text"]
             .as_str()
             .expect("alpha text should be string"),
     );
-    let beta_expected_hash = identedit::changeset::hash_text(
+    let beta_expected_hash = crate::common::hash_text(
         beta_handle["text"]
             .as_str()
             .expect("beta text should be string"),
@@ -1215,7 +1214,7 @@ fn apply_multi_file_stale_target_fails_without_writing_other_files() {
     let new_text_a = "def process_data(value):\n    return value * 201";
     let new_text_b = "def process_data(value):\n    return value * 202";
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let stale_hash_b = "deadbeef";
 
     let payload = json!({
@@ -1289,9 +1288,9 @@ fn apply_inject_failure_flag_requires_experimental_env_gate() {
     let span_a = &handle_a["span"];
     let span_b = &handle_b["span"];
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
 
     let payload = json!({
         "files": [
@@ -1374,9 +1373,9 @@ fn apply_inject_failure_after_one_write_rolls_back_prior_commits() {
     let span_a = &handle_a["span"];
     let span_b = &handle_b["span"];
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
     let new_text_a = "def process_data(value):\n    return value * 601";
     let new_text_b = "def process_data(value):\n    return value * 602";
 
@@ -1491,7 +1490,7 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -1502,7 +1501,7 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             destination_handle["text"].as_str().expect("destination text should be present")
                         )
                     }
@@ -1575,9 +1574,9 @@ fn apply_inject_failure_after_one_write_rolls_back_in_json_mode() {
     let span_a = &handle_a["span"];
     let span_b = &handle_b["span"];
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
     let new_text_a = "def process_data(value):\n    return value * 611";
     let new_text_b = "def process_data(value):\n    return value * 612";
 
@@ -1671,9 +1670,9 @@ fn apply_inject_failure_count_above_commit_count_is_noop() {
     let span_a = &handle_a["span"];
     let span_b = &handle_b["span"];
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
     let new_text_a = "def process_data(value):\n    return value * 701";
     let new_text_b = "def process_data(value):\n    return value * 702";
 
@@ -1761,9 +1760,9 @@ fn apply_multi_file_lock_contention_fails_without_writing_unlocked_files() {
     let new_text_a = "def process_data(value):\n    return value * 211";
     let new_text_b = "def process_data(value):\n    return value * 212";
     let expected_hash_a =
-        identedit::changeset::hash_text(handle_a["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
     let expected_hash_b =
-        identedit::changeset::hash_text(handle_b["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle_b["text"].as_str().expect("text should be string"));
 
     let contention_lock = OpenOptions::new()
         .read(true)
@@ -1849,7 +1848,7 @@ fn apply_multi_file_same_logical_path_variants_still_reject_without_mutation() {
     let span = &handle["span"];
     let new_text = "def process_data(value):\n    return value * 33";
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let payload = json!({
         "files": [

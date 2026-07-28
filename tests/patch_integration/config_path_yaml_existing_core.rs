@@ -1209,7 +1209,7 @@ fn patch_json_create_missing_existing_yaml_path_with_hash_precondition_preserves
         "target": {
             "type": "config_path",
             "path": "service.retries",
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",
@@ -1548,7 +1548,7 @@ fn patch_json_config_path_set_create_missing_whitespace_only_yaml_with_exact_has
         "target": {
             "type": "config_path",
             "path": "server.enabled",
-            "expected_file_hash": identedit::hash::hash_text(source)
+            "expected_file_hash": crate::common::hash_text(source)
         },
         "op": {
             "type": "set",

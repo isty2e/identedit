@@ -2,6 +2,7 @@
 name = "identedit"
 version = "0.3.0"
 edition = "2024"
+autolib = false
 
 [dependencies]
 blake3 = "1"

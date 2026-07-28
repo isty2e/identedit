@@ -1900,7 +1900,7 @@ fn patch_json_create_missing_existing_toml_path_with_hash_precondition_preserves
         "target": {
             "type": "config_path",
             "path": "server.port",
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",

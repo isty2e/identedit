@@ -699,7 +699,7 @@ fn patch_json_config_path_set_create_missing_yaml_comment_exact_hash_allows_bloc
         "target": {
             "type": "config_path",
             "path": r#"data["script: install"]"#,
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",

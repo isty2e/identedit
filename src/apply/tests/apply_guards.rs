@@ -476,7 +476,7 @@ fn apply_guard_uses_hash_when_mtime_and_size_collide() {
         .expect("mtime should be readable");
     let expected = ApplyGuardState {
         path_fingerprint: original_fingerprint.clone(),
-        source_hash: crate::changeset::hash_text(original_text),
+        source_hash: crate::hash::hash_text(original_text),
     };
 
     std::fs::write(&file_path, replacement_text).expect("mutation should succeed");
@@ -503,8 +503,8 @@ fn apply_guard_uses_hash_when_mtime_and_size_collide() {
             expected_hash,
             actual_hash,
         } => {
-            assert_eq!(expected_hash, crate::changeset::hash_text(original_text));
-            assert_eq!(actual_hash, crate::changeset::hash_text(replacement_text));
+            assert_eq!(expected_hash, crate::hash::hash_text(original_text));
+            assert_eq!(actual_hash, crate::hash::hash_text(replacement_text));
         }
         other => panic!("unexpected guard result: {other}"),
     }

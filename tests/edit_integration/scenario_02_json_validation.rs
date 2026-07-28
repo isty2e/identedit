@@ -66,7 +66,7 @@ fn transform_json_mode_accepts_batch_files_shape() {
                         "identity": handle_a["identity"],
                         "kind": handle_a["kind"],
                         "span_hint": handle_a["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             handle_a["text"].as_str().expect("text should be string")
                         ),
                         "op": {
@@ -83,7 +83,7 @@ fn transform_json_mode_accepts_batch_files_shape() {
                         "identity": handle_b["identity"],
                         "kind": handle_b["kind"],
                         "span_hint": handle_b["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             handle_b["text"].as_str().expect("text should be string")
                         ),
                         "op": {
@@ -157,7 +157,7 @@ fn transform_json_mode_rejects_batch_request_with_top_level_handle_table() {
                 "identity": handle["identity"],
                 "kind": handle["kind"],
                 "span_hint": handle["span"],
-                "expected_old_hash": identedit::changeset::hash_text(old_text)
+                "expected_old_hash": crate::common::hash_text(old_text)
             }
         },
         "files": [
@@ -234,7 +234,7 @@ fn transform_json_mode_rejects_unknown_handle_ref() {
                 "identity": handle["identity"],
                 "kind": handle["kind"],
                 "span_hint": handle["span"],
-                "expected_old_hash": identedit::changeset::hash_text(old_text)
+                "expected_old_hash": crate::common::hash_text(old_text)
             }
         },
         "operations": [
@@ -351,7 +351,7 @@ fn transform_json_mode_rejects_unknown_operation_field() {
                 "identity": handle["identity"],
                 "identiy": handle["identity"],
                 "kind": handle["kind"],
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -455,7 +455,7 @@ fn transform_json_mode_rejects_unknown_replace_payload_field() {
             {
                 "identity": handle["identity"],
                 "kind": handle["kind"],
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -898,7 +898,7 @@ fn transform_json_mode_treats_canonically_equivalent_unicode_reorder_as_stale() 
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let span = &handle["span"];
     let expected_old_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let mutated_source = "def process_data(value):\n    return \"a\u{0323}\u{0301}\"\n";
     fs::write(&file_path, mutated_source).expect("fixture mutation should succeed");
@@ -955,7 +955,7 @@ fn transform_json_mode_returns_target_missing_when_kind_mismatches() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -1003,7 +1003,7 @@ fn transform_json_mode_returns_target_missing_for_json_kind_mismatch_with_stale_
                     "start": span_start,
                     "end": span_end
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -1040,7 +1040,7 @@ fn transform_json_mode_rejects_span_hint_with_start_greater_than_end() {
                     "start": 100,
                     "end": 10
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -1084,7 +1084,7 @@ fn transform_json_mode_rejects_zero_length_span_hint() {
                     "start": start,
                     "end": start
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -1127,7 +1127,7 @@ fn transform_json_mode_accepts_extreme_span_values_when_target_is_unique() {
                     "start": usize::MAX - 1,
                     "end": usize::MAX
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -1173,7 +1173,7 @@ fn transform_json_mode_accepts_non_matching_span_hint_for_unique_target() {
                     "start": 9999,
                     "end": 10000
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {

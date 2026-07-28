@@ -11,7 +11,7 @@ fn apply_multi_file_boundary_conflict_fails_without_mutating_other_files() {
         .expect("conflict fixture write should succeed");
     let conflict_path = conflict_file.keep().expect("temp file should persist").1;
     let conflict_before = fs::read_to_string(&conflict_path).expect("file should be readable");
-    let conflict_file_hash = identedit::changeset::hash_text(&conflict_before);
+    let conflict_file_hash = crate::common::hash_text(&conflict_before);
     let conflict_handle = select_first_handle(
         &conflict_path,
         "function_definition",
@@ -34,7 +34,7 @@ fn apply_multi_file_boundary_conflict_fails_without_mutating_other_files() {
     let valid_old_text = valid_handle["text"]
         .as_str()
         .expect("text should be string");
-    let valid_expected_hash = identedit::changeset::hash_text(valid_old_text);
+    let valid_expected_hash = crate::common::hash_text(valid_old_text);
     let valid_replacement = "def process_data(value):\n    return value * 17";
 
     let changeset = json!({
@@ -59,7 +59,7 @@ fn apply_multi_file_boundary_conflict_fails_without_mutating_other_files() {
                             "identity": conflict_handle["identity"],
                             "kind": conflict_handle["kind"],
                             "span_hint": {"start": conflict_start, "end": conflict_end},
-                            "expected_old_hash": identedit::changeset::hash_text(
+                            "expected_old_hash": crate::common::hash_text(
                                 conflict_handle["text"].as_str().expect("text should be string")
                             )
                         },
@@ -137,7 +137,7 @@ fn apply_multi_file_alias_path_boundary_conflict_fails_without_mutating_other_fi
     )
     .expect("conflict fixture write should succeed");
     let conflict_before = fs::read_to_string(&conflict_path).expect("file should be readable");
-    let conflict_file_hash = identedit::changeset::hash_text(&conflict_before);
+    let conflict_file_hash = crate::common::hash_text(&conflict_before);
     let conflict_handle =
         select_first_handle(&conflict_path, "function_definition", Some("target_fn"));
     let conflict_span = &conflict_handle["span"];
@@ -155,7 +155,7 @@ fn apply_multi_file_alias_path_boundary_conflict_fails_without_mutating_other_fi
     let safe_old_text = safe_handle["text"]
         .as_str()
         .expect("safe text should be string");
-    let safe_expected_hash = identedit::changeset::hash_text(safe_old_text);
+    let safe_expected_hash = crate::common::hash_text(safe_old_text);
     let safe_replacement = "def process_data(value):\n    return value * 55";
 
     let payload = json!({
@@ -180,7 +180,7 @@ fn apply_multi_file_alias_path_boundary_conflict_fails_without_mutating_other_fi
                             "identity": conflict_handle["identity"],
                             "kind": conflict_handle["kind"],
                             "span_hint": {"start": conflict_start, "end": conflict_end},
-                            "expected_old_hash": identedit::changeset::hash_text(
+                            "expected_old_hash": crate::common::hash_text(
                                 conflict_handle["text"].as_str().expect("text should be string")
                             )
                         },
@@ -259,13 +259,13 @@ fn apply_multi_file_alias_boundary_conflict_error_is_order_independent() {
     )
     .expect("conflict fixture write should succeed");
     let conflict_before = fs::read_to_string(&conflict_path).expect("file should be readable");
-    let conflict_file_hash = identedit::changeset::hash_text(&conflict_before);
+    let conflict_file_hash = crate::common::hash_text(&conflict_before);
     let conflict_handle =
         select_first_handle(&conflict_path, "function_definition", Some("target_order"));
     let conflict_span = &conflict_handle["span"];
     let conflict_start = conflict_span["start"].as_u64().expect("span start") as usize;
     let conflict_end = conflict_span["end"].as_u64().expect("span end") as usize;
-    let expected_old_hash = identedit::changeset::hash_text(
+    let expected_old_hash = crate::common::hash_text(
         conflict_handle["text"]
             .as_str()
             .expect("text should be string"),
@@ -362,7 +362,7 @@ fn apply_multi_file_alias_path_file_end_collision_fails_without_mutating_other_f
     fs::write(&tail_path, "def tail_target(value):\n    return value + 1")
         .expect("tail fixture write should succeed");
     let tail_before = fs::read_to_string(&tail_path).expect("tail file should be readable");
-    let tail_file_hash = identedit::changeset::hash_text(&tail_before);
+    let tail_file_hash = crate::common::hash_text(&tail_before);
     let tail_handle = select_first_handle(&tail_path, "function_definition", Some("tail_target"));
     let tail_span = &tail_handle["span"];
     let tail_start = tail_span["start"].as_u64().expect("span start") as usize;
@@ -384,7 +384,7 @@ fn apply_multi_file_alias_path_file_end_collision_fails_without_mutating_other_f
     let safe_old_text = safe_handle["text"]
         .as_str()
         .expect("safe text should be string");
-    let safe_expected_hash = identedit::changeset::hash_text(safe_old_text);
+    let safe_expected_hash = crate::common::hash_text(safe_old_text);
     let safe_replacement = "def process_data(value):\n    return value * 89";
 
     let payload = json!({
@@ -409,7 +409,7 @@ fn apply_multi_file_alias_path_file_end_collision_fails_without_mutating_other_f
                             "identity": tail_handle["identity"],
                             "kind": tail_handle["kind"],
                             "span_hint": {"start": tail_start, "end": tail_end},
-                            "expected_old_hash": identedit::changeset::hash_text(
+                            "expected_old_hash": crate::common::hash_text(
                                 tail_handle["text"].as_str().expect("text should be string")
                             )
                         },
@@ -488,7 +488,7 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_fails_without_mutating_oth
     )
     .expect("conflict fixture write should succeed");
     let conflict_before = fs::read_to_string(&conflict_path).expect("file should be readable");
-    let conflict_file_hash = identedit::changeset::hash_text(&conflict_before);
+    let conflict_file_hash = crate::common::hash_text(&conflict_before);
     let conflict_handle =
         select_first_handle(&conflict_path, "function_definition", Some("target_json"));
     let conflict_span = &conflict_handle["span"];
@@ -506,7 +506,7 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_fails_without_mutating_oth
     let safe_old_text = safe_handle["text"]
         .as_str()
         .expect("safe text should be string");
-    let safe_expected_hash = identedit::changeset::hash_text(safe_old_text);
+    let safe_expected_hash = crate::common::hash_text(safe_old_text);
     let safe_replacement = "def process_data(value):\n    return value * 66";
 
     let request = json!({
@@ -533,7 +533,7 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_fails_without_mutating_oth
                                 "identity": conflict_handle["identity"],
                                 "kind": conflict_handle["kind"],
                                 "span_hint": {"start": conflict_start, "end": conflict_end},
-                                "expected_old_hash": identedit::changeset::hash_text(
+                                "expected_old_hash": crate::common::hash_text(
                                     conflict_handle["text"].as_str().expect("text should be string")
                                 )
                             },
@@ -616,7 +616,7 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_error_is_order_independent
     )
     .expect("conflict fixture write should succeed");
     let conflict_before = fs::read_to_string(&conflict_path).expect("file should be readable");
-    let conflict_file_hash = identedit::changeset::hash_text(&conflict_before);
+    let conflict_file_hash = crate::common::hash_text(&conflict_before);
     let conflict_handle = select_first_handle(
         &conflict_path,
         "function_definition",
@@ -625,7 +625,7 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_error_is_order_independent
     let conflict_span = &conflict_handle["span"];
     let conflict_start = conflict_span["start"].as_u64().expect("span start") as usize;
     let conflict_end = conflict_span["end"].as_u64().expect("span end") as usize;
-    let expected_old_hash = identedit::changeset::hash_text(
+    let expected_old_hash = crate::common::hash_text(
         conflict_handle["text"]
             .as_str()
             .expect("text should be string"),
@@ -730,7 +730,7 @@ fn apply_rejects_file_start_and_file_end_inserts_on_bom_only_css_file() {
         .expect("bom-only css fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -793,7 +793,7 @@ fn apply_multi_file_css_conflict_rolls_back_unrelated_html_file() {
         .expect("conflict css fixture write should succeed");
     let conflict_path = conflict_temp.keep().expect("temp file should persist").1;
     let conflict_before = fs::read_to_string(&conflict_path).expect("css file should be readable");
-    let conflict_hash = identedit::changeset::hash_text(&conflict_before);
+    let conflict_hash = crate::common::hash_text(&conflict_before);
     let conflict_handle = select_first_handle(&conflict_path, "rule_set", None);
     let conflict_span = &conflict_handle["span"];
     let conflict_start = conflict_span["start"].as_u64().expect("span start") as usize;
@@ -819,7 +819,7 @@ fn apply_multi_file_css_conflict_rolls_back_unrelated_html_file() {
     let html_old_text = html_handle["text"]
         .as_str()
         .expect("html text should be string");
-    let html_expected_hash = identedit::changeset::hash_text(html_old_text);
+    let html_expected_hash = crate::common::hash_text(html_old_text);
 
     let payload = json!({
         "files": [
@@ -843,7 +843,7 @@ fn apply_multi_file_css_conflict_rolls_back_unrelated_html_file() {
                             "identity": conflict_handle["identity"],
                             "kind": conflict_handle["kind"],
                             "span_hint": {"start": conflict_start, "end": conflict_end},
-                            "expected_old_hash": identedit::changeset::hash_text(
+                            "expected_old_hash": crate::common::hash_text(
                                 conflict_handle["text"].as_str().expect("text should be string")
                             )
                         },
@@ -919,7 +919,7 @@ fn apply_multi_file_json_mode_alias_file_end_conflict_error_is_order_independent
     )
     .expect("tail fixture write should succeed");
     let tail_before = fs::read_to_string(&tail_path).expect("tail file should be readable");
-    let tail_file_hash = identedit::changeset::hash_text(&tail_before);
+    let tail_file_hash = crate::common::hash_text(&tail_before);
     let tail_handle =
         select_first_handle(&tail_path, "function_definition", Some("tail_json_order"));
     let tail_span = &tail_handle["span"];
@@ -930,9 +930,8 @@ fn apply_multi_file_json_mode_alias_file_end_conflict_error_is_order_independent
         tail_before.len(),
         "fixture precondition: tail function should end at file boundary"
     );
-    let expected_old_hash = identedit::changeset::hash_text(
-        tail_handle["text"].as_str().expect("text should be string"),
-    );
+    let expected_old_hash =
+        crate::common::hash_text(tail_handle["text"].as_str().expect("text should be string"));
 
     let operation_orders = vec![
         vec![
@@ -1041,7 +1040,7 @@ fn apply_multi_file_hardlink_alias_entries_are_rejected_as_duplicates_without_mu
     let end = span["end"].as_u64().expect("span end") as usize;
     let replacement = "def process_data(value):\n    return value * 71";
     let expected_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let payload = json!({
         "files": [
@@ -1122,7 +1121,7 @@ fn apply_multi_file_hardlink_alias_with_middle_file_is_rejected_without_mutation
     let target_span = &target_handle["span"];
     let target_start = target_span["start"].as_u64().expect("target span start") as usize;
     let target_end = target_span["end"].as_u64().expect("target span end") as usize;
-    let target_expected_hash = identedit::changeset::hash_text(
+    let target_expected_hash = crate::common::hash_text(
         target_handle["text"]
             .as_str()
             .expect("target text should be string"),
@@ -1132,7 +1131,7 @@ fn apply_multi_file_hardlink_alias_with_middle_file_is_rejected_without_mutation
     let middle_span = &middle_handle["span"];
     let middle_start = middle_span["start"].as_u64().expect("middle span start") as usize;
     let middle_end = middle_span["end"].as_u64().expect("middle span end") as usize;
-    let middle_expected_hash = identedit::changeset::hash_text(
+    let middle_expected_hash = crate::common::hash_text(
         middle_handle["text"]
             .as_str()
             .expect("middle text should be string"),
@@ -1232,7 +1231,7 @@ fn apply_rejects_file_end_insert_and_insert_after_on_bom_css_source() {
         .expect("bom css fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let handle = select_first_handle(&file_path, "rule_set", None);
     let span = &handle["span"];
     let span_start = span["start"].as_u64().expect("span start") as usize;
@@ -1263,7 +1262,7 @@ fn apply_rejects_file_end_insert_and_insert_after_on_bom_css_source() {
                     "identity": handle["identity"],
                     "kind": handle["kind"],
                     "span_hint": {"start": span_start, "end": span_end},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -1359,7 +1358,7 @@ fn apply_rejects_file_start_insert_preview_span_mismatch_on_bom_file() {
         .expect("bom fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1407,7 +1406,7 @@ fn apply_rejects_file_end_insert_preview_span_mismatch_on_bom_file() {
         .expect("bom-only fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1448,7 +1447,7 @@ fn apply_rejects_file_end_insert_preview_span_mismatch_on_bom_file() {
 fn apply_rejects_file_start_insert_preview_old_text_tamper() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1489,7 +1488,7 @@ fn apply_rejects_file_start_insert_preview_old_text_tamper() {
 fn apply_rejects_file_end_insert_preview_old_text_tamper() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let file_end = source.len();
 
     let changeset = json!({
@@ -1566,7 +1565,7 @@ fn apply_rejects_file_end_insert_when_file_hash_is_stale() {
 fn apply_rejects_file_end_replace_combo() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let before = fs::read_to_string(&file_path).expect("file should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1611,7 +1610,7 @@ fn apply_supports_delete_for_anchor_span() {
     let span_start = span["start"].as_u64().expect("span start") as usize;
     let span_end = span["end"].as_u64().expect("span end") as usize;
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
@@ -1666,7 +1665,7 @@ fn apply_delete_and_empty_replace_are_semantically_equivalent() {
     let old_text_delete = handle_delete["text"]
         .as_str()
         .expect("text should be string");
-    let expected_hash_delete = identedit::changeset::hash_text(old_text_delete);
+    let expected_hash_delete = crate::common::hash_text(old_text_delete);
 
     let delete_changeset = json!({
         "file": file_path_delete.to_string_lossy().to_string(),
@@ -1705,7 +1704,7 @@ fn apply_delete_and_empty_replace_are_semantically_equivalent() {
     let old_text_replace = handle_replace["text"]
         .as_str()
         .expect("text should be string");
-    let expected_hash_replace = identedit::changeset::hash_text(old_text_replace);
+    let expected_hash_replace = crate::common::hash_text(old_text_replace);
 
     let replace_changeset = json!({
         "file": file_path_replace.to_string_lossy().to_string(),
@@ -1783,7 +1782,7 @@ fn apply_delete_whole_file_span_results_in_empty_file_and_preserves_mode() {
     );
 
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
@@ -1852,7 +1851,7 @@ fn apply_delete_whole_file_span_with_crlf_results_in_empty_file_and_preserves_mo
     );
 
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
@@ -1928,7 +1927,7 @@ fn apply_delete_single_function_in_bom_prefixed_file_preserves_bom_prefix() {
     );
 
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),
         "operations": [
@@ -1979,7 +1978,7 @@ fn apply_rejects_delete_and_insert_on_same_anchor() {
     let span_start = span["start"].as_u64().expect("span start") as usize;
     let span_end = span["end"].as_u64().expect("span end") as usize;
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
 
     let changeset = json!({
         "file": file_path.to_string_lossy().to_string(),

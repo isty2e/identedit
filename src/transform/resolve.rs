@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::changeset::{OpKind, TransformTarget, hash_text};
+use crate::changeset::{OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
+use crate::hash::hash_text;
 use crate::hashline::{compute_line_hash, parse_line_ref};
 
 pub(super) struct ResolvedOperationView {

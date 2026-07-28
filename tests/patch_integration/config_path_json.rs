@@ -143,7 +143,7 @@ fn patch_config_set_value_stdin_json_string_with_leading_dash_applies() {
 fn patch_json_config_path_set_updates_json_value() {
     let file_path = copy_fixture_to_temp_with_suffix("example.json", ".json");
     let original = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::hash::hash_text(&original);
+    let expected_file_hash = crate::common::hash_text(&original);
 
     let request = json!({
         "command": "patch",
@@ -793,7 +793,7 @@ fn patch_json_config_path_set_create_missing_empty_json_with_exact_hash_succeeds
         "target": {
             "type": "config_path",
             "path": "service.enabled",
-            "expected_file_hash": identedit::hash::hash_text("")
+            "expected_file_hash": crate::common::hash_text("")
         },
         "op": {
             "type": "set",
@@ -998,7 +998,7 @@ fn patch_json_config_path_create_missing_existing_multi_document_path_with_hash_
         "target": {
             "type": "config_path",
             "path": "service.retries",
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",
@@ -1322,7 +1322,7 @@ fn patch_json_config_path_set_create_missing_whitespace_only_json_with_exact_has
         "target": {
             "type": "config_path",
             "path": "server.enabled",
-            "expected_file_hash": identedit::hash::hash_text(source)
+            "expected_file_hash": crate::common::hash_text(source)
         },
         "op": {
             "type": "set",
@@ -1482,7 +1482,7 @@ fn patch_json_config_path_set_create_missing_whitespace_only_json_root_leaf_with
         "target": {
             "type": "config_path",
             "path": "enabled",
-            "expected_file_hash": identedit::hash::hash_text(source)
+            "expected_file_hash": crate::common::hash_text(source)
         },
         "op": {
             "type": "set",

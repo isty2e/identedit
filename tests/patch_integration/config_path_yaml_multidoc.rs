@@ -226,7 +226,7 @@ fn patch_json_config_path_create_missing_yaml_multi_document_out_of_range_docume
 fn patch_json_config_path_create_missing_yaml_multi_document_stale_precondition_rejects() {
     let file_path =
         create_temp_yaml_source("---\nmetadata:\n  name: first\n---\nmetadata:\n  name: last\n");
-    let stale_hash = identedit::hash::hash_bytes(
+    let stale_hash = crate::common::hash_bytes(
         fs::read(&file_path)
             .expect("fixture should read")
             .as_slice(),
@@ -760,7 +760,7 @@ fn patch_json_config_path_create_missing_yaml_multi_document_selected_doc_keeps_
 fn patch_json_config_path_create_missing_yaml_multi_document_exact_hash_precondition_succeeds() {
     let file_path =
         create_temp_yaml_source("---\nmetadata:\n  name: first\n---\nmetadata:\n  name: second\n");
-    let expected_file_hash = identedit::hash::hash_bytes(
+    let expected_file_hash = crate::common::hash_bytes(
         fs::read(&file_path)
             .expect("fixture should read")
             .as_slice(),

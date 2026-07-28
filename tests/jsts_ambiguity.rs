@@ -6,6 +6,8 @@ use std::process::{Command, Output, Stdio};
 use serde_json::{Value, json};
 use tempfile::Builder;
 
+mod common;
+
 fn write_temp_source(suffix: &str, source: &str) -> PathBuf {
     let mut temp_file = Builder::new()
         .suffix(suffix)
@@ -42,7 +44,7 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 }
 
 fn hash_text(value: &str) -> String {
-    identedit::changeset::hash_text(value)
+    crate::common::hash_text(value)
 }
 
 #[test]

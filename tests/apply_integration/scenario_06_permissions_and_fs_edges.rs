@@ -40,7 +40,7 @@ fn apply_applies_multiple_non_overlapping_operations() {
                     "identity": helper_handle["identity"],
                     "kind": helper_handle["kind"],
                     "span_hint": {"start": helper_span["start"], "end": helper_span["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         helper_handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -56,7 +56,7 @@ fn apply_applies_multiple_non_overlapping_operations() {
                     "identity": process_handle["identity"],
                     "kind": process_handle["kind"],
                     "span_hint": {"start": process_span["start"], "end": process_span["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         process_handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -113,7 +113,7 @@ fn apply_non_overlapping_operations_are_order_independent() {
                     "identity": helper_handle_a["identity"],
                     "kind": helper_handle_a["kind"],
                     "span_hint": {"start": helper_span_a["start"], "end": helper_span_a["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         helper_handle_a["text"].as_str().expect("text should be string")
                     )
                 },
@@ -129,7 +129,7 @@ fn apply_non_overlapping_operations_are_order_independent() {
                     "identity": process_handle_a["identity"],
                     "kind": process_handle_a["kind"],
                     "span_hint": {"start": process_span_a["start"], "end": process_span_a["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         process_handle_a["text"].as_str().expect("text should be string")
                     )
                 },
@@ -167,7 +167,7 @@ fn apply_non_overlapping_operations_are_order_independent() {
                     "identity": process_handle_b["identity"],
                     "kind": process_handle_b["kind"],
                     "span_hint": {"start": process_span_b["start"], "end": process_span_b["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         process_handle_b["text"].as_str().expect("text should be string")
                     )
                 },
@@ -183,7 +183,7 @@ fn apply_non_overlapping_operations_are_order_independent() {
                     "identity": helper_handle_b["identity"],
                     "kind": helper_handle_b["kind"],
                     "span_hint": {"start": helper_span_b["start"], "end": helper_span_b["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         helper_handle_b["text"].as_str().expect("text should be string")
                     )
                 },
@@ -233,7 +233,7 @@ fn apply_precondition_failure_is_order_independent_when_one_target_is_stale() {
                     "identity": process_handle_a["identity"],
                     "kind": process_handle_a["kind"],
                     "span_hint": {"start": process_span_a["start"], "end": process_span_a["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         process_handle_a["text"].as_str().expect("text should be string")
                     )
                 },
@@ -300,7 +300,7 @@ fn apply_precondition_failure_is_order_independent_when_one_target_is_stale() {
                     "identity": process_handle_b["identity"],
                     "kind": process_handle_b["kind"],
                     "span_hint": {"start": process_span_b["start"], "end": process_span_b["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         process_handle_b["text"].as_str().expect("text should be string")
                     )
                 },
@@ -349,7 +349,7 @@ fn apply_is_atomic_when_any_operation_fails_precondition() {
                     "identity": process_handle["identity"],
                     "kind": process_handle["kind"],
                     "span_hint": {"start": process_span["start"], "end": process_span["end"]},
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         process_handle["text"].as_str().expect("text should be string")
                     )
                 },
