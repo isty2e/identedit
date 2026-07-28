@@ -201,7 +201,7 @@ fn transform_replace_and_apply_support_sql_statement() {
     let replacement = "INSERT INTO users (id, name) VALUES (1, 'pilot');";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -267,7 +267,7 @@ fn transform_reports_ambiguous_target_for_duplicate_sql_statement_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "SELECT id FROM users WHERE id = 2;",
@@ -462,7 +462,7 @@ fn apply_reports_precondition_failed_after_sql_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "INSERT INTO users (id, name) VALUES (2, 'pilot');",
@@ -522,7 +522,7 @@ fn transform_reports_parse_failure_for_nul_in_sql_source() {
     let file_path = write_temp_bytes(".sql", b"SELECT 1;\0\n");
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         "deadbeefdeadbeef",
         "--replace",
         "SELECT 2;",
@@ -621,7 +621,7 @@ fn transform_replace_and_apply_preserve_crlf_sql_source_segments() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "INSERT INTO users (id, name) VALUES (2, 'pilot');",
@@ -737,7 +737,7 @@ fn transform_reports_parse_failure_for_syntax_invalid_sql_source() {
     let file_path = write_temp_source(".sql", "CREATE TABLE users (\n  id INTEGER,\n");
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         "deadbeefdeadbeef",
         "--replace",
         "SELECT 2;",

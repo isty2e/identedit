@@ -150,7 +150,7 @@ fn transform_replace_and_apply_support_java_method_declaration() {
     let replacement = "public int processData(int value) {\n        return value + 2;\n    }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -255,7 +255,7 @@ fn transform_reports_ambiguous_target_for_duplicate_java_method_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "private void configure() {\n            System.out.println(\"updated\");\n        }",
@@ -562,7 +562,7 @@ fn apply_reports_precondition_failed_after_java_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "public int processData(int value) {\n        return value + 2;\n    }",
@@ -624,8 +624,8 @@ fn transform_reports_parse_failure_for_nul_in_java_source() {
     let file_path = write_temp_bytes(".java", b"class Broken {\0}\n");
     let output = run_identedit(&[
         "edit",
-        "--identity",
-        "deadbeef",
+        "--at",
+        "deadbeefdeadbeef",
         "--replace",
         "class Broken {}",
         file_path.to_str().expect("path should be utf-8"),
@@ -743,7 +743,7 @@ fn transform_replace_and_apply_support_crlf_java_source() {
     let replacement = "int run(int value) {\r\n        return value + 2;\r\n    }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

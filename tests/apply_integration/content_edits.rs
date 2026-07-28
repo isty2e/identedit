@@ -11,7 +11,7 @@ fn apply_changeset_file_modifies_target_file() {
     let replacement = "def process_data(value):\n    return value * 2";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -63,7 +63,7 @@ fn apply_changeset_argument_supports_shell_variable_expanded_path() {
         .expect("identity should be present");
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value):\n    return value * 7",

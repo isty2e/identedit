@@ -44,7 +44,7 @@ fn file_move_preview(from: &Path, to: &Path) -> Value {
 fn build_replace_changeset(file: &Path, identity: &str, replacement: &str) -> Value {
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

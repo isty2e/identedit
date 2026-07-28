@@ -119,7 +119,7 @@ fn transform_replace_and_apply_support_go_function_declaration() {
     let replacement = "func processData(value int) int {\n\treturn value - 1\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -187,7 +187,7 @@ fn select_transform_apply_pipeline_supports_go_type_spec_rewrite() {
     let replacement = "type Processor struct {\n\tvalue int\n\tfactor int\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

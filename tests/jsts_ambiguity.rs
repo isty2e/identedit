@@ -83,7 +83,7 @@ fn transform_reports_ambiguous_target_for_duplicate_js_identity_without_span_hin
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "function duplicate() {\n  return 2;\n}",

@@ -3,34 +3,34 @@ use std::path::PathBuf;
 
 use crate::error::IdenteditError;
 
-use super::PatchArgs;
+use super::EditIntentArgs;
 
 #[derive(Debug, Clone)]
-pub(super) enum PatchTextSource {
+pub(super) enum EditTextSource {
     File(PathBuf),
     Stdin,
 }
 
-pub(super) fn resolve_patch_text_source(
-    args: &PatchArgs,
-) -> Result<Option<PatchTextSource>, IdenteditError> {
+pub(super) fn resolve_text_source(
+    args: &EditIntentArgs,
+) -> Result<Option<EditTextSource>, IdenteditError> {
     match (args.text_file.clone(), args.stdin_text) {
         (Some(_), true) => Err(IdenteditError::InvalidRequest {
             message: "Choose exactly one external text source: --text-file <path> or --stdin-text."
                 .to_string(),
         }),
-        (Some(path), false) => Ok(Some(PatchTextSource::File(path))),
-        (None, true) => Ok(Some(PatchTextSource::Stdin)),
+        (Some(path), false) => Ok(Some(EditTextSource::File(path))),
+        (None, true) => Ok(Some(EditTextSource::Stdin)),
         (None, false) => Ok(None),
     }
 }
 
-pub(super) fn read_patch_text_source(source: PatchTextSource) -> Result<String, IdenteditError> {
+pub(super) fn read_text_source(source: EditTextSource) -> Result<String, IdenteditError> {
     match source {
-        PatchTextSource::File(path) => {
+        EditTextSource::File(path) => {
             std::fs::read_to_string(&path).map_err(|error| IdenteditError::io(&path, error))
         }
-        PatchTextSource::Stdin => {
+        EditTextSource::Stdin => {
             let mut buffer = String::new();
             std::io::stdin()
                 .read_to_string(&mut buffer)
@@ -40,10 +40,10 @@ pub(super) fn read_patch_text_source(source: PatchTextSource) -> Result<String, 
     }
 }
 
-pub(super) fn resolve_patch_text_payload(
+pub(super) fn resolve_text_payload(
     flag_name: &str,
     raw_value: Option<Option<String>>,
-    text_source: Option<PatchTextSource>,
+    text_source: Option<EditTextSource>,
 ) -> Result<Option<String>, IdenteditError> {
     match raw_value {
         None => Ok(None),
@@ -64,7 +64,7 @@ pub(super) fn resolve_patch_text_payload(
                     "{flag_name} requires text. Provide {flag_name} <text>, {flag_name} --text-file <path>, or {flag_name} --stdin-text."
                 ),
             })?;
-            read_patch_text_source(source).map(Some)
+            read_text_source(source).map(Some)
         }
     }
 }
@@ -74,7 +74,7 @@ pub(super) fn text_arg_present(raw_value: &Option<Option<String>>) -> bool {
 }
 
 pub(super) fn reject_unused_text_source(
-    text_source: Option<PatchTextSource>,
+    text_source: Option<EditTextSource>,
     valid_operations: &str,
 ) -> Result<(), IdenteditError> {
     if text_source.is_some() {

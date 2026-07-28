@@ -713,8 +713,8 @@ fn transform_flags_mode_extensionless_file_uses_fallback_and_reports_target_miss
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
-        "irrelevant",
+        "--at",
+        "0000000000000000",
         "--replace",
         "def process_data(value):\n    return value + 2",
         file_path.to_str().expect("path should be utf-8"),
@@ -775,7 +775,7 @@ fn transform_fallback_duplicate_identity_reports_ambiguous_target() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "const repeated = (value) => value + 2;",
@@ -802,8 +802,8 @@ fn transform_flags_mode_hidden_dotfile_without_basename_uses_fallback_and_report
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
-        "irrelevant",
+        "--at",
+        "0000000000000000",
         "--replace",
         "def process_data(value):\n    return value + 2",
         dotfile_path.to_str().expect("path should be utf-8"),
@@ -824,8 +824,8 @@ fn transform_flags_mode_returns_io_error_for_directory_input() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
-        "irrelevant",
+        "--at",
+        "0000000000000000",
         "--replace",
         "def process_data(value):\n    return value + 2",
         directory_path.to_str().expect("path should be utf-8"),
@@ -913,8 +913,8 @@ fn transform_json_mode_returns_io_error_for_directory_input() {
 fn transform_non_utf8_path_argument_returns_io_error_without_panicking() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("edit");
-    command.arg("--identity");
-    command.arg("irrelevant");
+    command.arg("--at");
+    command.arg("0000000000000000");
     command.arg("--replace");
     command.arg("def x():\n    return 1");
     command.arg(OsString::from_vec(vec![0xFF, 0x2E, 0x70, 0x79]));

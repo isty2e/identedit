@@ -5,8 +5,8 @@ use serde_json::Value;
 use crate::apply::{ApplyResponse, apply_multi_file_changeset, dry_run_multi_file_changeset};
 use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget};
 use crate::cli::apply::shape_apply_response;
+use crate::cli::edit_intent::{NodeEditIntent, PreparedEditIntent};
 use crate::error::IdenteditError;
-use crate::handle::SelectionHandle;
 use crate::patch::engine::run_resolve_verify_apply;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
 use crate::transform::build::build_changeset;
@@ -16,8 +16,22 @@ use super::super::line_patch::{
     execute_hashline_patch_with_preview,
 };
 use super::diff::{render_changeset_diff, render_file_diff};
-use super::target::NodeTargetSelector;
 use super::{ColorMode, PatchArgs, PatchCommandOutput};
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PatchExecution {
+    apply_backed: ApplyBackedExecution,
+    line: LineExecution,
+}
+
+impl PatchExecution {
+    pub(super) fn from_args(args: &PatchArgs) -> Self {
+        Self {
+            apply_backed: ApplyBackedExecution::from_args(args),
+            line: LineExecution::from_args(args),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApplyBackedExecution {
@@ -79,68 +93,33 @@ impl PatchOutputMode {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct NodeFlagPatchRequest {
-    pub file: PathBuf,
-    pub selector: NodeTargetSelector,
-    pub operation: PreparedNodePatchOperation,
-    pub execution: ApplyBackedExecution,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct CanonicalFlagPatchRequest {
-    pub file: PathBuf,
-    pub operation: EditOperation,
-    pub execution: ApplyBackedExecution,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct LineFlagPatchRequest {
-    pub file: PathBuf,
-    pub edit: crate::hashline::HashlineEdit,
-    pub execution: LineExecution,
-}
-
-#[derive(Debug, Clone)]
-pub enum FlagPatchRequest {
-    Node(NodeFlagPatchRequest),
-    Canonical(CanonicalFlagPatchRequest),
-    Line(LineFlagPatchRequest),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreparedNodePatchOperation {
-    Standard(OpKind),
-    ScopedRegex {
-        pattern: String,
-        replacement: String,
-    },
-}
-
 pub(super) fn execute_flag_patch_request(
-    request: FlagPatchRequest,
+    intent: PreparedEditIntent,
+    execution: PatchExecution,
 ) -> Result<PatchCommandOutput, IdenteditError> {
-    match request {
-        FlagPatchRequest::Node(request) => execute_node_flag_patch_request(request),
-        FlagPatchRequest::Canonical(request) => {
-            run_patch_edit_operation(request.file, request.operation, request.execution, None)
+    match intent {
+        PreparedEditIntent::Node(intent) => {
+            execute_node_flag_patch_request(intent, execution.apply_backed)
         }
-        FlagPatchRequest::Line(request) => match request.execution.output {
+        PreparedEditIntent::Canonical(intent) => {
+            run_patch_edit_operation(intent.file, intent.operation, execution.apply_backed, None)
+        }
+        PreparedEditIntent::Line(intent) => match execution.line.output {
             PatchOutputMode::Json => {
                 let response = execute_hashline_patch(
-                    request.file,
-                    vec![request.edit],
-                    request.execution.auto_repair,
-                    request.execution.dry_run,
+                    intent.file,
+                    vec![intent.edit],
+                    execution.line.auto_repair,
+                    execution.line.dry_run,
                 )?;
                 serialize_line_patch_response(response).map(PatchCommandOutput::Json)
             }
             PatchOutputMode::Diff { color } => {
                 let execution = execute_hashline_patch_with_preview(
-                    request.file,
-                    vec![request.edit],
-                    request.execution.auto_repair,
-                    request.execution.dry_run,
+                    intent.file,
+                    vec![intent.edit],
+                    execution.line.auto_repair,
+                    execution.line.dry_run,
                 )?;
                 Ok(PatchCommandOutput::Text(render_line_patch_diff(
                     execution, color,
@@ -150,47 +129,17 @@ pub(super) fn execute_flag_patch_request(
     }
 }
 
-pub(super) fn execute_node_flag_patch_request(
-    request: NodeFlagPatchRequest,
-) -> Result<PatchCommandOutput, IdenteditError> {
-    let handle = request.selector.resolve(&request.file)?;
-    execute_patch_flag_node_operation(request.file, handle, request.operation, request.execution)
-}
-
-fn execute_patch_flag_node_operation(
-    file: PathBuf,
-    handle: SelectionHandle,
-    operation: PreparedNodePatchOperation,
+fn execute_node_flag_patch_request(
+    intent: NodeEditIntent,
     execution: ApplyBackedExecution,
 ) -> Result<PatchCommandOutput, IdenteditError> {
-    let target = TransformTarget::node(
-        handle.identity,
-        handle.kind,
-        Some(handle.span),
-        handle.expected_old_hash,
-    );
-
-    match operation {
-        PreparedNodePatchOperation::Standard(op) => {
-            run_patch_node_operation(file, target, op, execution, None)
-        }
-        PreparedNodePatchOperation::ScopedRegex {
-            pattern,
-            replacement,
-        } => {
-            let rewritten =
-                rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement)?;
-            run_patch_node_operation(
-                file,
-                target,
-                OpKind::Replace {
-                    new_text: rewritten.new_text,
-                },
-                execution,
-                Some(rewritten.replacements),
-            )
-        }
-    }
+    let resolved = intent.resolve()?;
+    run_patch_edit_operation(
+        resolved.file,
+        resolved.operation,
+        execution,
+        resolved.regex_replacements,
+    )
 }
 
 pub(super) fn run_patch_node_operation(

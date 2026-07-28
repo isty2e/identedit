@@ -6,13 +6,17 @@ use crate::changeset::{
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
+#[cfg(test)]
 use crate::hash::hash_text;
 
 use super::MatchedChange;
 use super::conflict::{reject_move_operation, validate_change_conflicts};
-use super::parse::{parse_handles_for_file_with_context, parse_handles_for_source_with_context};
+#[cfg(test)]
+use super::parse::parse_handles_for_file_with_context;
+use super::parse::parse_handles_for_source_with_context;
 use super::resolve::{HandleIndex, ResolvedOperationView, resolve_operation_view};
 
+#[cfg(test)]
 pub(crate) fn build_replace_changeset(
     file: &Path,
     identity: &str,
@@ -27,6 +31,7 @@ pub(crate) fn build_replace_changeset(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn build_delete_changeset(
     file: &Path,
     identity: &str,
@@ -34,6 +39,7 @@ pub(crate) fn build_delete_changeset(
     build_single_identity_changeset(file, identity, OpKind::Delete)
 }
 
+#[cfg(test)]
 fn build_single_identity_changeset(
     file: &Path,
     identity: &str,
@@ -55,6 +61,7 @@ fn build_single_identity_changeset(
     build_changeset_with_handles(file, &source_text, &handles, vec![operation])
 }
 
+#[cfg(test)]
 fn resolve_unique_identity_handle<'a>(
     file: &Path,
     handles: &'a [SelectionHandle],

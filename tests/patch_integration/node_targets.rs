@@ -11,7 +11,7 @@ fn patch_replace_applies_change_in_single_command() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -48,7 +48,7 @@ fn patch_scoped_replacement_stdin_without_pattern_reports_pairing_error() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--identity",
+            "--at",
             identity,
             "--scoped-replacement",
             "--stdin-text",
@@ -82,7 +82,7 @@ fn patch_delete_removes_target_node() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--delete",
         file_path.to_str().expect("path should be utf-8"),
@@ -115,7 +115,7 @@ fn patch_rejects_multiple_operations_in_single_request() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value):\n    return value + 1",
@@ -143,7 +143,7 @@ fn patch_returns_ambiguous_target_error_for_duplicate_identity() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def duplicate():\n    return 2",
@@ -181,7 +181,7 @@ fn patch_verbose_includes_applied_file_results() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value):\n    return value * 5",
@@ -216,7 +216,7 @@ fn patch_ambiguous_target_failure_keeps_source_file_unchanged() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def duplicate():\n    return 999",
@@ -238,7 +238,7 @@ fn patch_ambiguous_target_failure_keeps_source_file_unchanged() {
 fn patch_reports_io_error_for_missing_file() {
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         "deadbeefdeadbeef",
         "--replace",
         "def process_data(value):\n    return value",
@@ -273,7 +273,7 @@ fn patch_insert_before_preserves_utf8_bom() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--insert-before",
         "# before helper\n",
@@ -310,7 +310,7 @@ fn patch_replace_supports_crlf_files() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value):\r\n    return value * 10\r\n",

@@ -45,7 +45,7 @@ fn patch_scoped_regex_accepts_stdin_text_replacement() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--identity",
+            "--at",
             identity,
             "--scoped-regex",
             "value",
@@ -80,7 +80,7 @@ fn patch_scoped_regex_text_file_dry_run_does_not_modify_file() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--scoped-regex",
         "value",
@@ -120,7 +120,7 @@ fn patch_scoped_regex_text_file_path_with_spaces_applies() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--scoped-regex",
         "value",
@@ -787,7 +787,7 @@ fn patch_kind_name_rejects_mixed_with_identity_target() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--kind",
         "function_definition",
@@ -811,7 +811,7 @@ fn patch_kind_name_rejects_mixed_with_identity_target() {
         .expect("error message should be present");
     assert!(
         message.contains("Choose exactly one target selector")
-            && message.contains("--identity")
+            && message.contains("--at")
             && message.contains("--kind"),
         "mixed target error should explain the valid selector families"
     );
@@ -975,7 +975,7 @@ fn patch_scoped_regex_flag_mode_rewrites_only_inside_target_span() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--scoped-regex",
         "value",
@@ -1013,7 +1013,7 @@ fn patch_scoped_regex_flag_mode_rejects_zero_matches() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--scoped-regex",
         "does_not_exist",

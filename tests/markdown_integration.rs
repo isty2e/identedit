@@ -191,7 +191,7 @@ fn transform_replace_and_apply_support_markdown_heading() {
     let replacement = "# Identedit Engine";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -257,7 +257,7 @@ fn transform_reports_ambiguous_target_for_duplicate_markdown_heading_identity() 
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "## Updated",
@@ -470,7 +470,7 @@ fn apply_reports_precondition_failed_after_markdown_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "## Build Pipeline",
@@ -584,7 +584,7 @@ fn transform_replace_and_apply_preserve_crlf_markdown_source_segments() {
     let replacement = "## Build Pipeline";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

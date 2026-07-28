@@ -455,7 +455,7 @@ fn apply_json_delete_changeset_second_apply_returns_target_missing() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--delete",
         file_path.to_str().expect("path should be utf-8"),
@@ -501,7 +501,7 @@ fn apply_json_replace_changeset_second_apply_returns_target_missing() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "{\"enabled\":false,\"retries\":42}",

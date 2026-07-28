@@ -28,7 +28,7 @@ fn patch_json_mode_rejects_flag_text_source_options() {
         .as_str()
         .expect("error message should be present");
     assert!(
-        message.contains("--stdin-text") && message.contains("flag mode"),
+        message.contains("text-source") && message.contains("flag-mode"),
         "error should explain json/text-source incompatibility, got: {message}"
     );
 }

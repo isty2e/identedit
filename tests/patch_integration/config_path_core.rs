@@ -191,7 +191,7 @@ fn patch_flag_config_path_create_missing_rejects_unrelated_line_flags() {
         "--set-value",
         "9000",
         "--create-missing",
-        "--anchor",
+        "--at",
         &anchor,
         file_path.to_str().expect("path should be utf-8"),
     ]);

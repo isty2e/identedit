@@ -147,7 +147,7 @@ fn transform_replace_and_apply_support_csharp_method_declaration() {
         "public int ProcessData(int value)\n        {\n            return value + 2;\n        }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -241,7 +241,7 @@ fn transform_reports_ambiguous_target_for_duplicate_csharp_method_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "private void Configure() {\n        Console.WriteLine(\"updated\");\n    }",
@@ -549,7 +549,7 @@ fn apply_reports_precondition_failed_after_csharp_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "public int ProcessData(int value)\n        {\n            return value + 2;\n        }",
@@ -612,7 +612,7 @@ fn transform_replace_and_apply_support_crlf_csharp_source() {
     let replacement = "public int Run(int value) {\r\n        return value + 2;\r\n    }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -666,8 +666,8 @@ fn transform_reports_parse_failure_for_nul_in_csharp_source() {
     let file_path = write_temp_bytes(".cs", b"class Broken {\0}\n");
     let output = run_identedit(&[
         "edit",
-        "--identity",
-        "deadbeef",
+        "--at",
+        "deadbeefdeadbeef",
         "--replace",
         "class Broken {}",
         file_path.to_str().expect("path should be utf-8"),

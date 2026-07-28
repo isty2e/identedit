@@ -146,7 +146,7 @@ fn transform_replace_and_apply_support_php_function_definition() {
     let replacement = "function process_data(int $value): int\n{\n    return $value + 2;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -240,7 +240,7 @@ fn transform_reports_ambiguous_target_for_duplicate_php_function_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "function configure(int $value): int\n{\n    return $value + 2;\n}",

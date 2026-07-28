@@ -7,6 +7,7 @@ use crate::error::IdenteditError;
 mod apply;
 mod edit;
 mod edit_build;
+mod edit_intent;
 mod error_response;
 mod grammar;
 mod line_patch;
@@ -34,7 +35,7 @@ enum Commands {
     #[command(about = "Read file structure/content with node or line identities")]
     Read(read::ReadArgs),
     #[command(about = "Build an edit plan from canonical targets")]
-    Edit(edit::EditArgs),
+    Edit(Box<edit::EditArgs>),
     #[command(about = "Commit a prepared edit plan to one or more files")]
     Apply(apply::ApplyArgs),
     #[command(about = "Merge multiple edit plans with strict conflict checks")]
@@ -53,7 +54,7 @@ pub fn run_cli(cli: Cli) -> Result<String, IdenteditError> {
                 .map_err(|source| IdenteditError::ResponseSerialization { source }),
         },
         Commands::Edit(args) => {
-            let response = edit::run_edit(args)?;
+            let response = edit::run_edit(*args)?;
             serde_json::to_string_pretty(&response)
                 .map_err(|source| IdenteditError::ResponseSerialization { source })
         }

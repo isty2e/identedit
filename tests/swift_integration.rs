@@ -187,7 +187,7 @@ fn transform_replace_and_apply_support_swift_function_declaration() {
         "func processData(_ value: Int) -> Int {\n        return value + offset + 2\n    }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -252,7 +252,7 @@ fn transform_reports_ambiguous_target_for_duplicate_swift_function_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "func configure(_ value: Int) -> Int {\n    return value + 2\n}",
@@ -422,7 +422,7 @@ fn apply_reports_precondition_failed_after_swift_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "func processData(_ value: Int) -> Int {\n        return value + offset + 5\n    }",

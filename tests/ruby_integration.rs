@@ -181,7 +181,7 @@ fn transform_replace_and_apply_support_ruby_method() {
     let replacement = "def process_data(value)\n      value + VALUE + 2\n    end";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -246,7 +246,7 @@ fn transform_reports_ambiguous_target_for_duplicate_ruby_method_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "def configure(value)\n    value + 2\n  end",
@@ -416,7 +416,7 @@ fn apply_reports_precondition_failed_after_ruby_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value)\n      value + VALUE + 5\n    end",
@@ -537,7 +537,7 @@ fn transform_replace_and_apply_preserve_crlf_ruby_source_segments() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value)\n    value + 2\n  end",

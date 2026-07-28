@@ -123,7 +123,7 @@ fn transform_replace_and_apply_support_typescript_arrow_function() {
     let replacement = "(value: number): number => value - 1";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -192,7 +192,7 @@ fn select_transform_apply_pipeline_supports_tsx_function_rewrite() {
         "export function View(): JSX.Element {\n  return <section>Updated</section>;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -249,7 +249,7 @@ fn select_transform_apply_pipeline_supports_javascript_function_rewrite() {
     let replacement = "function processData(value) {\n  return value - 1;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -306,7 +306,7 @@ fn select_transform_apply_pipeline_supports_jsx_function_rewrite() {
     let replacement = "function View() {\n  return <main>Updated</main>;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

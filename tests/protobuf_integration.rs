@@ -196,7 +196,7 @@ fn transform_replace_and_apply_support_protobuf_message() {
     let replacement = "message Response {\n  string message = 1;\n  string trace_id = 2;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -262,7 +262,7 @@ fn transform_reports_ambiguous_target_for_duplicate_protobuf_message_identity() 
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "message Repeat {\n  string value = 1;\n  string updated = 2;\n}",
@@ -456,7 +456,7 @@ fn apply_reports_precondition_failed_after_protobuf_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "service KannaService {\n  rpc GetStatus(Request) returns (Response);\n  rpc Health(Request) returns (Response);\n}",
@@ -555,7 +555,7 @@ fn transform_replace_and_apply_preserve_crlf_protobuf_source_segments() {
     let replacement = "message Request {\r\n  string id = 1;\r\n  string trace_id = 2;\r\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

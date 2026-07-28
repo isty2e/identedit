@@ -70,7 +70,7 @@ fn patch_without_operation_flag_returns_invalid_request() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         file_path.to_str().expect("path should be utf-8"),
     ]);

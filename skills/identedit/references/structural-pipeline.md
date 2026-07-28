@@ -62,17 +62,17 @@ Filters:
 
 ## Step 2: Edit Plan
 
-Flag mode supports one identity operation:
+Flag mode supports the same single-target selectors and operations as `patch`, but only emits a changeset:
 
 ```bash
 identedit edit \
-  --identity ca465ff1a2b3c4d5 \
+  --at ca465ff1a2b3c4d5 \
   --replace 'def process_data(x, y):
     return x + y' \
   example.py
 ```
 
-For large `new_text`, prefer `patch --text-file` in one-shot mode or `jq --rawfile` in JSON mode.
+For large `new_text`, use `--text-file` or `--stdin-text` in flag mode, or `jq --rawfile` in JSON mode.
 
 JSON mode supports multiple operations:
 

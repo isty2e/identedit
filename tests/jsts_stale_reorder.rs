@@ -83,14 +83,8 @@ fn build_changeset_json(path: &str, replacement: &str) -> String {
         .as_str()
         .expect("identity should be present");
 
-    let transform_output = run_identedit(&[
-        "edit",
-        "--identity",
-        identity,
-        "--replace",
-        replacement,
-        path,
-    ]);
+    let transform_output =
+        run_identedit(&["edit", "--at", identity, "--replace", replacement, path]);
     assert!(
         transform_output.status.success(),
         "transform failed: {}",

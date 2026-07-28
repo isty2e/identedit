@@ -18,6 +18,54 @@ fn copy_fixture_to_temp_python(name: &str) -> PathBuf {
     common::copy_fixture_to_temp_python(name)
 }
 
+fn run_shared_intent(command: &str, intent_args: &[&str], file: &Path) -> std::process::Output {
+    let mut args = Vec::with_capacity(intent_args.len() + 3);
+    args.push(command);
+    args.extend_from_slice(intent_args);
+    if command == "patch" {
+        args.push("--dry-run");
+    }
+    args.push(file.to_str().expect("path should be utf-8"));
+    run_identedit(&args)
+}
+
+fn assert_shared_intent_is_plannable_and_dry_runnable(intent_args: &[&str], file: &Path) {
+    let before = fs::read_to_string(file).expect("file should be readable");
+
+    let edit_output = run_shared_intent("edit", intent_args, file);
+    assert!(
+        edit_output.status.success(),
+        "edit should accept shared intent: {}",
+        String::from_utf8_lossy(&edit_output.stderr)
+    );
+    let edit_response: Value =
+        serde_json::from_slice(&edit_output.stdout).expect("edit stdout should be JSON");
+    assert_eq!(
+        edit_response["files"][0]["operations"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        fs::read_to_string(file).expect("file should remain readable"),
+        before,
+        "edit must only plan the shared intent"
+    );
+
+    let patch_output = run_shared_intent("patch", intent_args, file);
+    assert!(
+        patch_output.status.success(),
+        "patch --dry-run should accept shared intent: {}",
+        String::from_utf8_lossy(&patch_output.stderr)
+    );
+    serde_json::from_slice::<Value>(&patch_output.stdout).expect("patch stdout should be JSON");
+    assert_eq!(
+        fs::read_to_string(file).expect("file should remain readable"),
+        before,
+        "patch --dry-run must not apply the shared intent"
+    );
+}
+
 #[test]
 fn package_exposes_only_the_identedit_binary() {
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
@@ -87,6 +135,111 @@ fn top_level_version_reports_package_version() {
         text.trim(),
         format!("identedit {}", env!("CARGO_PKG_VERSION"))
     );
+}
+
+#[test]
+fn edit_and_patch_expose_the_same_single_target_intent_options() {
+    let edit_output = run_identedit(&["edit", "--help"]);
+    let patch_output = run_identedit(&["patch", "--help"]);
+    assert!(edit_output.status.success());
+    assert!(patch_output.status.success());
+
+    let edit_help = String::from_utf8(edit_output.stdout).expect("edit help should be utf-8");
+    let patch_help = String::from_utf8(patch_output.stdout).expect("patch help should be utf-8");
+    let shared_options = [
+        "--at",
+        "--end-anchor",
+        "--config-path",
+        "--document-index",
+        "--kind",
+        "--name",
+        "--symbol",
+        "--replace",
+        "--text-file",
+        "--stdin-text",
+        "--set-value",
+        "--append-value",
+        "--create-missing",
+        "--insert",
+        "--scoped-regex",
+        "--scoped-replacement",
+        "--delete",
+        "--insert-before",
+        "--insert-after",
+        "--set-line",
+        "--replace-range",
+        "--insert-after-line",
+    ];
+
+    for option in shared_options {
+        assert!(
+            edit_help.contains(option),
+            "edit help is missing shared intent option {option}"
+        );
+        assert!(
+            patch_help.contains(option),
+            "patch help is missing shared intent option {option}"
+        );
+    }
+    assert!(
+        !edit_help.contains("--identity"),
+        "edit should not expose the removed --identity alias"
+    );
+}
+
+#[test]
+fn edit_and_patch_accept_representative_shared_intents() {
+    let file = copy_fixture_to_temp_python("example.py");
+
+    assert_shared_intent_is_plannable_and_dry_runnable(
+        &[
+            "--symbol",
+            "process_data",
+            "--replace",
+            "def process_data(value):\n    return value - 21",
+        ],
+        &file,
+    );
+
+    let line_output = run_identedit(&[
+        "read",
+        "--mode",
+        "line",
+        "--json",
+        file.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(line_output.status.success());
+    let line_response: Value =
+        serde_json::from_slice(&line_output.stdout).expect("line read stdout should be JSON");
+    let anchor = line_response["handles"][1]["anchor"]
+        .as_str()
+        .expect("line anchor should be present");
+    assert_shared_intent_is_plannable_and_dry_runnable(
+        &["--at", anchor, "--set-line", "    result = value + 21"],
+        &file,
+    );
+
+    assert_shared_intent_is_plannable_and_dry_runnable(
+        &["--at", "file-end", "--insert", "\n# shared intent\n"],
+        &file,
+    );
+}
+
+#[test]
+fn edit_and_patch_report_the_same_invalid_intent_diagnostic() {
+    let file = copy_fixture_to_temp_python("example.py");
+    let invalid_intent = ["--at", "file-end", "--replace", "invalid"];
+
+    let edit_output = run_shared_intent("edit", &invalid_intent, &file);
+    let patch_output = run_shared_intent("patch", &invalid_intent, &file);
+    assert!(!edit_output.status.success());
+    assert!(!patch_output.status.success());
+
+    let edit_response: Value =
+        serde_json::from_slice(&edit_output.stdout).expect("edit stdout should be JSON");
+    let patch_response: Value =
+        serde_json::from_slice(&patch_output.stdout).expect("patch stdout should be JSON");
+    assert_eq!(edit_response["error"], patch_response["error"]);
 }
 
 #[test]
@@ -231,7 +384,7 @@ fn apply_dry_run_previews_without_writing() {
 
     let edit_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value):\n    return value - 5",
@@ -276,7 +429,7 @@ fn apply_dry_run_reports_compact_multi_file_summary() {
 
     let first_edit = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         first_identity,
         "--replace",
         "def process_data(value):\n    return value - 10",
@@ -289,7 +442,7 @@ fn apply_dry_run_reports_compact_multi_file_summary() {
     );
     let second_edit = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         second_identity,
         "--replace",
         "def process_data(value):\n    return value + 10",
