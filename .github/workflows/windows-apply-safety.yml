@@ -1,0 +1,26 @@
+name: windows-apply-safety
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-apply-safety.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "src/apply/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-replace-move:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test Windows no-replace moves
+        run: cargo test --locked --lib rename_file_no_replace_
