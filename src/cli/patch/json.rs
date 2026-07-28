@@ -14,8 +14,8 @@ use crate::patch::config_path::{
 
 use super::super::line_patch::execute_hashline_patch;
 use super::execute::{
-    run_patch_node_operation_json, run_patch_scoped_regex_node_operation,
-    serialize_line_patch_response,
+    run_patch_edit_operation_json, run_patch_node_operation_json,
+    run_patch_scoped_regex_node_operation, serialize_line_patch_response,
 };
 
 #[derive(Debug, Deserialize)]
@@ -364,5 +364,5 @@ fn run_patch_json_config(
         )?,
     };
 
-    run_patch_node_operation_json(file, canonical.target, canonical.op, dry_run, verbose, None)
+    run_patch_edit_operation_json(file, canonical, dry_run, verbose)
 }

@@ -176,7 +176,7 @@ fn preflight_changeset(
         || changeset
             .operations
             .iter()
-            .any(|operation| operation.target.requires_node_resolution());
+            .any(|operation| operation.target().requires_node_resolution());
     let handles = if requires_structure_parse {
         parse_handles_for_source_with_registry(&changeset.file, source_text.as_bytes(), registry)?
     } else {

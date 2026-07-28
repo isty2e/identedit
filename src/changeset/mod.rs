@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::handle::Span;
 
@@ -66,6 +67,16 @@ impl TransformTarget {
                 .unwrap_or_default(),
         }
     }
+
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Node { .. } => "node",
+            Self::FileStart { .. } => "file_start",
+            Self::FileEnd { .. } => "file_end",
+            Self::File { .. } => "file",
+            Self::Line { .. } => "line",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,14 +107,6 @@ pub enum TransactionMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChangeOp {
-    pub target: TransformTarget,
-    pub op: OpKind,
-    pub preview: ChangePreview,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OpKind {
     Replace { new_text: String },
@@ -114,6 +117,62 @@ pub enum OpKind {
     MoveBefore { destination: Box<TransformTarget> },
     MoveAfter { destination: Box<TransformTarget> },
     Move { to: PathBuf },
+}
+
+impl OpKind {
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Replace { .. } => "replace",
+            Self::Delete => "delete",
+            Self::InsertBefore { .. } => "insert_before",
+            Self::InsertAfter { .. } => "insert_after",
+            Self::Insert { .. } => "insert",
+            Self::MoveBefore { .. } => "move_before",
+            Self::MoveAfter { .. } => "move_after",
+            Self::Move { .. } => "move",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct EditOperation {
+    target: TransformTarget,
+    op: OpKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeOp {
+    #[serde(flatten)]
+    operation: EditOperation,
+    preview: ChangePreview,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub(crate) enum OperationModelError {
+    #[error(
+        "unsupported target/op combination: '{target}' target cannot be used with '{operation}' operation"
+    )]
+    UnsupportedTargetOperation {
+        target: &'static str,
+        operation: &'static str,
+    },
+    #[error("invalid same-file move destination for '{operation}': {message}")]
+    InvalidMoveDestination {
+        operation: &'static str,
+        message: &'static str,
+    },
+    #[error("invalid '{target}' target for '{operation}' operation: {message}")]
+    InvalidTargetOperationDetails {
+        target: &'static str,
+        operation: &'static str,
+        message: &'static str,
+    },
+    #[error("invalid preview for '{operation}' operation: expected {expected} preview fields")]
+    InvalidPreviewFamily {
+        operation: &'static str,
+        expected: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -150,8 +209,115 @@ pub struct MovePreview {
     pub to: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FileMoveOperationRef<'a> {
+    pub(crate) expected_file_hash: &'a str,
+    pub(crate) destination: &'a std::path::Path,
+    pub(crate) preview: &'a MoveChangePreview,
+}
+
+impl EditOperation {
+    pub(crate) fn try_new(
+        target: TransformTarget,
+        op: OpKind,
+    ) -> Result<Self, OperationModelError> {
+        if !valid_target_operation_pair(&target, &op) {
+            return Err(OperationModelError::UnsupportedTargetOperation {
+                target: target.kind_name(),
+                operation: op.kind_name(),
+            });
+        }
+        validate_target_operation_details(&target, &op)?;
+        validate_same_file_move_destination(&op)?;
+
+        Ok(Self { target, op })
+    }
+
+    pub(crate) fn target(&self) -> &TransformTarget {
+        &self.target
+    }
+
+    pub(crate) fn op(&self) -> &OpKind {
+        &self.op
+    }
+}
+
+impl ChangeOp {
+    pub(crate) fn try_new(
+        operation: EditOperation,
+        preview: ChangePreview,
+    ) -> Result<Self, OperationModelError> {
+        let preview = normalize_preview_family(operation.op(), preview)?;
+        Ok(Self { operation, preview })
+    }
+
+    pub(crate) fn from_parts(
+        target: TransformTarget,
+        op: OpKind,
+        preview: ChangePreview,
+    ) -> Result<Self, OperationModelError> {
+        Self::try_new(EditOperation::try_new(target, op)?, preview)
+    }
+
+    pub(crate) fn target(&self) -> &TransformTarget {
+        self.operation.target()
+    }
+
+    pub(crate) fn operation(&self) -> &EditOperation {
+        &self.operation
+    }
+
+    pub(crate) fn op(&self) -> &OpKind {
+        self.operation.op()
+    }
+
+    pub(crate) fn preview(&self) -> &ChangePreview {
+        &self.preview
+    }
+
+    pub(crate) fn text_preview(&self) -> Option<&TextChangePreview> {
+        self.preview.as_text()
+    }
+
+    pub(crate) fn text_preview_mut(&mut self) -> Option<&mut TextChangePreview> {
+        self.preview.as_text_mut()
+    }
+
+    pub(crate) fn as_file_move(&self) -> Option<FileMoveOperationRef<'_>> {
+        match (self.target(), self.op(), self.preview()) {
+            (
+                TransformTarget::File { expected_file_hash },
+                OpKind::Move { to },
+                ChangePreview::Move(preview),
+            ) => Some(FileMoveOperationRef {
+                expected_file_hash,
+                destination: to.as_path(),
+                preview,
+            }),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn replace_target(
+        &mut self,
+        target: TransformTarget,
+    ) -> Result<(), OperationModelError> {
+        self.operation = EditOperation::try_new(target, self.operation.op.clone())?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_preview(
+        &mut self,
+        preview: ChangePreview,
+    ) -> Result<(), OperationModelError> {
+        self.preview = normalize_preview_family(self.op(), preview)?;
+        Ok(())
+    }
+}
+
 impl ChangePreview {
-    pub fn text(
+    pub(crate) fn text(
         old_text: Option<String>,
         old_hash: Option<String>,
         old_len: Option<usize>,
@@ -172,14 +338,14 @@ impl ChangePreview {
         Self::Move(MoveChangePreview { move_preview })
     }
 
-    pub fn as_text(&self) -> Option<&TextChangePreview> {
+    fn as_text(&self) -> Option<&TextChangePreview> {
         match self {
             Self::Text(preview) => Some(preview),
             Self::Move(_) => None,
         }
     }
 
-    pub fn as_text_mut(&mut self) -> Option<&mut TextChangePreview> {
+    fn as_text_mut(&mut self) -> Option<&mut TextChangePreview> {
         match self {
             Self::Text(preview) => Some(preview),
             Self::Move(_) => None,
@@ -187,9 +353,104 @@ impl ChangePreview {
     }
 }
 
+fn valid_target_operation_pair(target: &TransformTarget, op: &OpKind) -> bool {
+    match target {
+        TransformTarget::Node { .. } => matches!(
+            op,
+            OpKind::Replace { .. }
+                | OpKind::Delete
+                | OpKind::InsertBefore { .. }
+                | OpKind::InsertAfter { .. }
+                | OpKind::MoveBefore { .. }
+                | OpKind::MoveAfter { .. }
+        ),
+        TransformTarget::FileStart { .. } | TransformTarget::FileEnd { .. } => {
+            matches!(op, OpKind::Insert { .. })
+        }
+        TransformTarget::File { .. } => matches!(op, OpKind::Move { .. }),
+        TransformTarget::Line { .. } => {
+            matches!(op, OpKind::Replace { .. } | OpKind::InsertAfter { .. })
+        }
+    }
+}
+
+fn validate_same_file_move_destination(op: &OpKind) -> Result<(), OperationModelError> {
+    let (operation, destination) = match op {
+        OpKind::MoveBefore { destination } => ("move_before", destination.as_ref()),
+        OpKind::MoveAfter { destination } => ("move_after", destination.as_ref()),
+        _ => return Ok(()),
+    };
+
+    match destination {
+        TransformTarget::Node { .. }
+        | TransformTarget::FileStart { .. }
+        | TransformTarget::FileEnd { .. }
+        | TransformTarget::Line {
+            end_anchor: None, ..
+        } => Ok(()),
+        TransformTarget::File { .. } => Err(OperationModelError::InvalidMoveDestination {
+            operation,
+            message: "whole-file targets cannot identify an in-file position",
+        }),
+        TransformTarget::Line {
+            end_anchor: Some(_),
+            ..
+        } => Err(OperationModelError::InvalidMoveDestination {
+            operation,
+            message: "line destinations do not accept end_anchor",
+        }),
+    }
+}
+
+fn validate_target_operation_details(
+    target: &TransformTarget,
+    op: &OpKind,
+) -> Result<(), OperationModelError> {
+    if matches!(
+        (target, op),
+        (
+            TransformTarget::Line {
+                end_anchor: Some(_),
+                ..
+            },
+            OpKind::InsertAfter { .. }
+        )
+    ) {
+        return Err(OperationModelError::InvalidTargetOperationDetails {
+            target: "line",
+            operation: "insert_after",
+            message: "end_anchor is only valid for replace operations",
+        });
+    }
+
+    Ok(())
+}
+
+fn normalize_preview_family(
+    op: &OpKind,
+    preview: ChangePreview,
+) -> Result<ChangePreview, OperationModelError> {
+    match (op, preview) {
+        (OpKind::Move { .. }, ChangePreview::Move(preview)) => Ok(ChangePreview::Move(preview)),
+        (OpKind::Move { .. }, ChangePreview::Text(_)) => {
+            Err(OperationModelError::InvalidPreviewFamily {
+                operation: "move",
+                expected: "move",
+            })
+        }
+        (_, ChangePreview::Text(preview)) => Ok(ChangePreview::Text(preview)),
+        (op, ChangePreview::Move(_)) => Err(OperationModelError::InvalidPreviewFamily {
+            operation: op.kind_name(),
+            expected: "text",
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use serde_json::{Value, json};
 
     use super::{
         ChangeOp, ChangePreview, MovePreview, MultiFileChangeset, OpKind, TextChangePreview,
@@ -285,18 +546,18 @@ mod tests {
 
         let parsed: ChangeOp = serde_json::from_str(payload).expect("move op should deserialize");
         assert_eq!(
-            parsed.target,
-            TransformTarget::File {
+            parsed.target(),
+            &TransformTarget::File {
                 expected_file_hash: "0123456789abcdef".to_string(),
             }
         );
-        match parsed.op {
+        match parsed.op() {
             OpKind::Move { to } => assert_eq!(to.as_os_str(), "renamed.py"),
             other => panic!("expected move op, got {other:?}"),
         }
         assert_eq!(
-            parsed.preview,
-            ChangePreview::move_operation(Some(MovePreview {
+            parsed.preview(),
+            &ChangePreview::move_operation(Some(MovePreview {
                 from: PathBuf::from("fixture.py"),
                 to: PathBuf::from("renamed.py"),
             }))
@@ -416,13 +677,13 @@ mod tests {
         }"##;
 
         let parsed: ChangeOp = serde_json::from_str(payload).expect("insert op should deserialize");
-        match parsed.op {
+        match parsed.op() {
             OpKind::Insert { new_text } => assert_eq!(new_text, "# header\n"),
             other => panic!("expected insert op, got {other:?}"),
         }
         assert_eq!(
-            parsed.preview,
-            ChangePreview::Text(TextChangePreview {
+            parsed.preview(),
+            &ChangePreview::Text(TextChangePreview {
                 old_text: Some(String::new()),
                 old_hash: None,
                 old_len: None,
@@ -462,5 +723,380 @@ mod tests {
         assert!(message.contains("file-level targets do not accept node-only fields"));
         assert!(message.contains("kind"));
         assert!(message.contains("span_hint"));
+    }
+
+    fn wire_target(target_type: &str) -> Value {
+        match target_type {
+            "node" => json!({
+                "type": "node",
+                "identity": "0123456789abcdef",
+                "kind": "function_definition",
+                "span_hint": { "start": 0, "end": 8 },
+                "expected_old_hash": "fedcba9876543210"
+            }),
+            "file_start" | "file_end" | "file" => json!({
+                "type": target_type,
+                "expected_file_hash": "0123456789abcdef"
+            }),
+            "line" => json!({
+                "type": "line",
+                "anchor": "1:0123456789ab"
+            }),
+            other => panic!("unsupported test target type: {other}"),
+        }
+    }
+
+    fn wire_op(op_type: &str) -> Value {
+        match op_type {
+            "replace" => json!({ "type": "replace", "new_text": "replacement" }),
+            "delete" => json!({ "type": "delete" }),
+            "insert_before" => json!({ "type": "insert_before", "new_text": "before" }),
+            "insert_after" => json!({ "type": "insert_after", "new_text": "after" }),
+            "insert" => json!({ "type": "insert", "new_text": "inserted" }),
+            "move_before" | "move_after" => json!({
+                "type": op_type,
+                "destination": wire_target("node")
+            }),
+            "move" => json!({ "type": "move", "to": "renamed.py" }),
+            other => panic!("unsupported test operation type: {other}"),
+        }
+    }
+
+    fn text_preview(op_type: &str) -> Value {
+        let new_text = match op_type {
+            "replace" => "replacement",
+            "insert_before" => "before",
+            "insert_after" => "after",
+            "insert" => "inserted",
+            "delete" | "move_before" | "move_after" => "",
+            other => panic!("operation does not use text preview: {other}"),
+        };
+        json!({
+            "old_text": "",
+            "new_text": new_text,
+            "matched_span": { "start": 0, "end": 0 }
+        })
+    }
+
+    fn move_preview() -> Value {
+        json!({
+            "move": {
+                "from": "fixture.py",
+                "to": "renamed.py"
+            }
+        })
+    }
+
+    fn wire_change_op(target_type: &str, op_type: &str) -> Value {
+        json!({
+            "target": wire_target(target_type),
+            "op": wire_op(op_type),
+            "preview": if op_type == "move" {
+                move_preview()
+            } else {
+                text_preview(op_type)
+            }
+        })
+    }
+
+    fn valid_target_op_pair(target_type: &str, op_type: &str) -> bool {
+        match target_type {
+            "node" => matches!(
+                op_type,
+                "replace"
+                    | "delete"
+                    | "insert_before"
+                    | "insert_after"
+                    | "move_before"
+                    | "move_after"
+            ),
+            "file_start" | "file_end" => op_type == "insert",
+            "file" => op_type == "move",
+            "line" => matches!(op_type, "replace" | "insert_after"),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn change_op_round_trips_every_valid_target_operation_variant() {
+        const VALID_PAIRS: &[(&str, &str)] = &[
+            ("node", "replace"),
+            ("node", "delete"),
+            ("node", "insert_before"),
+            ("node", "insert_after"),
+            ("node", "move_before"),
+            ("node", "move_after"),
+            ("file_start", "insert"),
+            ("file_end", "insert"),
+            ("file", "move"),
+            ("line", "replace"),
+            ("line", "insert_after"),
+        ];
+
+        for &(target_type, op_type) in VALID_PAIRS {
+            let wire = wire_change_op(target_type, op_type);
+            let parsed: ChangeOp = serde_json::from_value(wire)
+                .unwrap_or_else(|error| panic!("{target_type}/{op_type} must parse: {error}"));
+            let serialized = serde_json::to_value(&parsed)
+                .unwrap_or_else(|error| panic!("{target_type}/{op_type} must serialize: {error}"));
+            assert_eq!(serialized["target"]["type"], target_type);
+            assert_eq!(serialized["op"]["type"], op_type);
+            assert!(
+                serialized.get("operation").is_none(),
+                "canonical internals must not leak into the wire schema"
+            );
+            let reparsed: ChangeOp = serde_json::from_value(serialized).unwrap_or_else(|error| {
+                panic!("{target_type}/{op_type} must reparse after serialization: {error}")
+            });
+
+            assert_eq!(parsed, reparsed, "{target_type}/{op_type}");
+        }
+    }
+
+    #[test]
+    fn change_op_rejects_every_invalid_target_operation_pair_at_ingress() {
+        const TARGET_TYPES: &[&str] = &["node", "file_start", "file_end", "file", "line"];
+        const OP_TYPES: &[&str] = &[
+            "replace",
+            "delete",
+            "insert_before",
+            "insert_after",
+            "insert",
+            "move_before",
+            "move_after",
+            "move",
+        ];
+
+        for &target_type in TARGET_TYPES {
+            for &op_type in OP_TYPES {
+                if valid_target_op_pair(target_type, op_type) {
+                    continue;
+                }
+
+                let error =
+                    serde_json::from_value::<ChangeOp>(wire_change_op(target_type, op_type))
+                        .unwrap_err();
+                assert!(
+                    error
+                        .to_string()
+                        .contains("unsupported target/op combination"),
+                    "{target_type}/{op_type} produced an unexpected diagnostic: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn change_op_rejects_preview_family_mismatches_at_ingress() {
+        let text_operation_with_move_preview = json!({
+            "target": wire_target("node"),
+            "op": wire_op("replace"),
+            "preview": move_preview()
+        });
+        let move_operation_with_text_preview = json!({
+            "target": wire_target("file"),
+            "op": wire_op("move"),
+            "preview": {
+                "old_text": "not a compatibility placeholder",
+                "new_text": "",
+                "matched_span": { "start": 0, "end": 0 }
+            }
+        });
+
+        for wire in [
+            text_operation_with_move_preview,
+            move_operation_with_text_preview,
+        ] {
+            let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+            assert!(
+                error.to_string().contains("preview"),
+                "preview mismatch diagnostic should name the preview: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn change_op_normalizes_legacy_empty_text_move_preview() {
+        let wire = json!({
+            "target": wire_target("file"),
+            "op": wire_op("move"),
+            "preview": {
+                "old_text": "",
+                "new_text": "",
+                "matched_span": { "start": 0, "end": 0 }
+            }
+        });
+
+        let parsed: ChangeOp =
+            serde_json::from_value(wire).expect("legacy empty move preview should remain accepted");
+        let serialized = serde_json::to_value(parsed).expect("normalized move should serialize");
+
+        assert_eq!(serialized["preview"], json!({}));
+        serde_json::from_value::<ChangeOp>(serialized)
+            .expect("canonical empty move preview should reparse");
+    }
+
+    #[test]
+    fn change_op_rejects_legacy_empty_text_move_preview_inside_canonical_model() {
+        let error = ChangeOp::from_parts(
+            TransformTarget::File {
+                expected_file_hash: "0123456789abcdef".to_string(),
+            },
+            OpKind::Move {
+                to: PathBuf::from("renamed.py"),
+            },
+            ChangePreview::text(
+                Some(String::new()),
+                None,
+                None,
+                String::new(),
+                Span { start: 0, end: 0 },
+            ),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("expected move preview fields"));
+    }
+
+    #[test]
+    fn change_op_rejects_incomplete_legacy_empty_move_preview() {
+        let wire = json!({
+            "target": wire_target("file"),
+            "op": wire_op("move"),
+            "preview": {
+                "old_text": ""
+            }
+        });
+
+        let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+        assert!(error.to_string().contains("missing field `new_text`"));
+    }
+
+    #[test]
+    fn invalid_target_operation_pair_is_diagnosed_before_preview_shape() {
+        let wire = json!({
+            "target": wire_target("node"),
+            "op": wire_op("insert"),
+            "preview": {}
+        });
+
+        let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported target/op combination"),
+            "canonical target/op validation should not depend on preview shape: {error}"
+        );
+    }
+
+    #[test]
+    fn same_file_move_rejects_non_position_destinations_at_ingress() {
+        let invalid_destinations = [
+            wire_target("file"),
+            json!({
+                "type": "line",
+                "anchor": "1:0123456789ab",
+                "end_anchor": "2:abcdef012345"
+            }),
+        ];
+
+        for op_type in ["move_before", "move_after"] {
+            for destination in invalid_destinations.clone() {
+                let mut operation = wire_op(op_type);
+                operation["destination"] = destination;
+                let wire = json!({
+                    "target": wire_target("node"),
+                    "op": operation,
+                    "preview": text_preview(op_type)
+                });
+
+                let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+                assert!(
+                    error.to_string().contains("destination"),
+                    "invalid {op_type} destination should be diagnosed: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn same_file_move_accepts_each_position_destination_variant() {
+        let valid_destinations = [
+            wire_target("node"),
+            wire_target("file_start"),
+            wire_target("file_end"),
+            wire_target("line"),
+        ];
+
+        for op_type in ["move_before", "move_after"] {
+            for destination in valid_destinations.clone() {
+                let mut operation = wire_op(op_type);
+                operation["destination"] = destination;
+                let wire = json!({
+                    "target": wire_target("node"),
+                    "op": operation,
+                    "preview": text_preview(op_type)
+                });
+
+                serde_json::from_value::<ChangeOp>(wire)
+                    .unwrap_or_else(|error| panic!("valid {op_type} destination failed: {error}"));
+            }
+        }
+    }
+
+    #[test]
+    fn line_range_target_rejects_insert_after_at_ingress() {
+        let wire = json!({
+            "target": {
+                "type": "line",
+                "anchor": "1:0123456789ab",
+                "end_anchor": "2:abcdef012345"
+            },
+            "op": wire_op("insert_after"),
+            "preview": text_preview("insert_after")
+        });
+
+        let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+        assert!(
+            error.to_string().contains("end_anchor"),
+            "line range diagnostic should identify end_anchor: {error}"
+        );
+    }
+
+    #[test]
+    fn canonical_mutators_preserve_the_existing_operation_on_validation_failure() {
+        let original_target = TransformTarget::node(
+            "0123456789abcdef".to_string(),
+            "function_definition".to_string(),
+            Some(Span { start: 0, end: 8 }),
+            "fedcba9876543210".to_string(),
+        );
+        let original_preview = ChangePreview::text(
+            Some("old".to_string()),
+            None,
+            None,
+            "new".to_string(),
+            Span { start: 0, end: 8 },
+        );
+        let mut operation = ChangeOp::from_parts(
+            original_target.clone(),
+            OpKind::Replace {
+                new_text: "new".to_string(),
+            },
+            original_preview.clone(),
+        )
+        .expect("fixture operation should be canonical");
+
+        operation
+            .replace_target(TransformTarget::FileEnd {
+                expected_file_hash: "0123456789abcdef".to_string(),
+            })
+            .expect_err("replace cannot target file_end");
+        operation
+            .replace_preview(ChangePreview::move_operation(None))
+            .expect_err("replace cannot use a move preview");
+
+        assert_eq!(operation.target(), &original_target);
+        assert_eq!(operation.preview(), &original_preview);
     }
 }

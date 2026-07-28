@@ -127,7 +127,7 @@ fn repair_line_targets_in_changeset(
     for file_change in &mut changeset.files {
         let mut target_refs = Vec::<(usize, bool, String)>::new();
         for (operation_index, operation) in file_change.operations.iter().enumerate() {
-            if let TransformTarget::Line { anchor, end_anchor } = &operation.target {
+            if let TransformTarget::Line { anchor, end_anchor } = operation.target() {
                 target_refs.push((operation_index, false, anchor.clone()));
                 if let Some(end_anchor) = end_anchor {
                     target_refs.push((operation_index, true, end_anchor.clone()));
@@ -182,7 +182,11 @@ fn repair_line_targets_in_changeset(
                         file_change.file.display()
                     ),
                 })?;
-            let TransformTarget::Line { anchor, end_anchor } = &mut operation.target else {
+            let TransformTarget::Line {
+                mut anchor,
+                mut end_anchor,
+            } = operation.target().clone()
+            else {
                 return Err(IdenteditError::InvalidRequest {
                     message: format!(
                         "Internal apply repair error: expected line target at operation {}",
@@ -192,12 +196,13 @@ fn repair_line_targets_in_changeset(
             };
 
             if *is_end_anchor {
-                if let Some(end_anchor) = end_anchor {
-                    *end_anchor = new_anchor.clone();
+                if let Some(current_end_anchor) = end_anchor.as_mut() {
+                    *current_end_anchor = new_anchor.clone();
                 }
             } else {
-                *anchor = new_anchor.clone();
+                anchor = new_anchor.clone();
             }
+            operation.replace_target(TransformTarget::Line { anchor, end_anchor })?;
         }
     }
 
@@ -217,7 +222,7 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
     let mut original_indices = Vec::new();
     let mut line_operations = Vec::new();
     for (index, operation) in file_change.operations.iter().enumerate() {
-        if matches!(operation.target, TransformTarget::Line { .. }) {
+        if matches!(operation.target(), TransformTarget::Line { .. }) {
             original_indices.push(index);
             line_operations.push(operation.clone());
         }
@@ -253,7 +258,7 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
                 ),
             })?;
 
-        let Some(preview) = operation.preview.as_text_mut() else {
+        let Some(preview) = operation.text_preview_mut() else {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Internal apply repair error: operation {} does not use a text preview",

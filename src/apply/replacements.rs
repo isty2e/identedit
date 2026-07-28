@@ -128,8 +128,7 @@ pub(super) fn apply_replacements_to_text(
 
 fn text_preview(operation: &ChangeOp, index: usize) -> Result<&TextChangePreview, IdenteditError> {
     operation
-        .preview
-        .as_text()
+        .text_preview()
         .ok_or_else(|| IdenteditError::InvalidRequest {
             message: format!(
                 "Operation {} preview must use text preview fields for this operation family",
@@ -165,7 +164,7 @@ pub(super) fn validate_preview_consistency(
             });
         }
 
-        let op_new_text = match &operation.op {
+        let op_new_text = match operation.op() {
             OpKind::Replace { new_text } => new_text,
             OpKind::Delete => "",
             OpKind::InsertBefore { new_text } => new_text,
@@ -201,13 +200,13 @@ fn validate_target_preview_span_consistency(
     let TransformTarget::Node {
         span_hint: Some(span_hint),
         ..
-    } = &operation.target
+    } = operation.target()
     else {
         return Ok(());
     };
     let preview = text_preview(operation, index)?;
 
-    let expected_preview_span = match operation.op {
+    let expected_preview_span = match operation.op() {
         OpKind::Replace { .. }
         | OpKind::Delete
         | OpKind::MoveBefore { .. }
@@ -236,7 +235,7 @@ fn validate_target_preview_span_consistency(
 
 fn allow_stale_preview_span(operation: &crate::changeset::ChangeOp) -> bool {
     if !matches!(
-        operation.op,
+        operation.op(),
         OpKind::Replace { .. }
             | OpKind::Delete
             | OpKind::MoveBefore { .. }
@@ -248,14 +247,13 @@ fn allow_stale_preview_span(operation: &crate::changeset::ChangeOp) -> bool {
     let TransformTarget::Node {
         span_hint: Some(span_hint),
         ..
-    } = &operation.target
+    } = operation.target()
     else {
         return false;
     };
 
     operation
-        .preview
-        .as_text()
+        .text_preview()
         .is_some_and(|preview| preview.matched_span == *span_hint)
 }
 

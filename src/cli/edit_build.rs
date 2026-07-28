@@ -6,12 +6,11 @@ use clap::Args;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransformTarget};
+use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
 use crate::hash::hash_text;
-use crate::transform::TransformInstruction;
 use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
 use crate::transform::parse::parse_handles_for_file;
 use crate::transform::resolve::resolve_target_in_handles;
@@ -177,7 +176,7 @@ struct ParsedEditInstruction {
 #[derive(Debug)]
 struct FileInstructionBucket {
     file: PathBuf,
-    instructions: Vec<TransformInstruction>,
+    instructions: Vec<EditOperation>,
 }
 
 #[derive(Debug, Default)]
@@ -201,7 +200,7 @@ impl NormalizeState {
         self.bucket_index.insert(file, index);
     }
 
-    fn push_instruction_for_file(&mut self, file: PathBuf, instruction: TransformInstruction) {
+    fn push_instruction_for_file(&mut self, file: PathBuf, instruction: EditOperation) {
         if let Some(index) = self.bucket_index.get(&file).copied() {
             self.buckets[index].instructions.push(instruction);
             return;
@@ -262,25 +261,20 @@ impl NormalizeState {
 
         self.push_instruction_for_file(
             source_file.to_path_buf(),
-            TransformInstruction {
-                target: source_target,
-                op: OpKind::Delete,
-            },
+            EditOperation::try_new(source_target, OpKind::Delete)?,
         );
+        let destination_op = if insert_before {
+            OpKind::InsertBefore {
+                new_text: moved_text,
+            }
+        } else {
+            OpKind::InsertAfter {
+                new_text: moved_text,
+            }
+        };
         self.push_instruction_for_file(
             destination_file,
-            TransformInstruction {
-                target: destination_target,
-                op: if insert_before {
-                    OpKind::InsertBefore {
-                        new_text: moved_text,
-                    }
-                } else {
-                    OpKind::InsertAfter {
-                        new_text: moved_text,
-                    }
-                },
-            },
+            EditOperation::try_new(destination_target, destination_op)?,
         );
 
         Ok(())
@@ -384,10 +378,7 @@ fn normalize_edit_file_requests(
             match parsed.op {
                 ParsedOperationKind::Canonical(op) => state.push_instruction_for_file(
                     source_file.clone(),
-                    TransformInstruction {
-                        target: parsed.target,
-                        op,
-                    },
+                    EditOperation::try_new(parsed.target, op)?,
                 ),
                 ParsedOperationKind::MoveToBefore {
                     destination_file,
@@ -648,7 +639,7 @@ fn parse_stdin_operation_kind(
 fn apply_preview_mode(changeset: &mut MultiFileChangeset, verbose: bool) {
     for file in &mut changeset.files {
         for operation in &mut file.operations {
-            let Some(preview) = operation.preview.as_text_mut() else {
+            let Some(preview) = operation.text_preview_mut() else {
                 continue;
             };
             if verbose {

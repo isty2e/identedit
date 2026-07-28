@@ -55,7 +55,7 @@ fn render_file_change_diff(
     use_color: bool,
 ) -> Result<(), IdenteditError> {
     for operation in &file_change.operations {
-        let Some(preview) = operation.preview.as_text() else {
+        let Some(preview) = operation.text_preview() else {
             return Err(IdenteditError::InvalidRequest {
                 message: "--diff currently supports text patch previews only.".to_string(),
             });

@@ -4,6 +4,7 @@ use miette::Diagnostic;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::changeset::OperationModelError;
 use crate::handle::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -118,6 +119,14 @@ impl IdenteditError {
         Self::Io {
             path: path.display().to_string(),
             source,
+        }
+    }
+}
+
+impl From<OperationModelError> for IdenteditError {
+    fn from(error: OperationModelError) -> Self {
+        Self::InvalidRequest {
+            message: error.to_string(),
         }
     }
 }

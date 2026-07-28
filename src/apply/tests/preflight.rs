@@ -45,44 +45,19 @@ fn build_move_changeset_with_hash(
 ) -> FileChange {
     FileChange {
         file: source.to_path_buf(),
-        operations: vec![ChangeOp {
-            target: TransformTarget::File { expected_file_hash },
-            op: OpKind::Move {
-                to: destination.to_path_buf(),
-            },
-            preview: ChangePreview::move_operation(Some(crate::changeset::MovePreview {
-                from: source.to_path_buf(),
-                to: destination.to_path_buf(),
-            })),
-        }],
-    }
-}
-
-#[test]
-fn move_validation_rejects_node_target() {
-    let directory = tempdir().expect("tempdir should be created");
-    let source = directory.path().join("source.py");
-    let destination = directory.path().join("destination.py");
-    std::fs::write(&source, "def moved():\n    return 1\n")
-        .expect("source fixture write should succeed");
-    let mut changeset = build_move_changeset(&source, &destination);
-    changeset.operations[0].target = TransformTarget::node(
-        "ignored-identity".to_string(),
-        "file".to_string(),
-        None,
-        "ignored-hash".to_string(),
-    );
-
-    let error = validate_move_operation_constraints(&[changeset])
-        .expect_err("move must reject non-file targets");
-    match error {
-        IdenteditError::InvalidRequest { message } => {
-            assert!(
-                message.contains("Move operation requires a 'file' target"),
-                "unexpected target diagnostic: {message}"
-            );
-        }
-        other => panic!("unexpected error variant: {other}"),
+        operations: vec![
+            ChangeOp::from_parts(
+                TransformTarget::File { expected_file_hash },
+                OpKind::Move {
+                    to: destination.to_path_buf(),
+                },
+                ChangePreview::move_operation(Some(crate::changeset::MovePreview {
+                    from: source.to_path_buf(),
+                    to: destination.to_path_buf(),
+                })),
+            )
+            .expect("move changeset should be canonical"),
+        ],
     }
 }
 
@@ -213,16 +188,18 @@ fn preflight_fails_fast_and_preserves_all_file_contents() {
         "def process_data(value):\n    return value * 11".to_string(),
     )
     .expect("changeset_b should be built");
-    let stale_span_hint = match &changeset_b.operations[0].target {
+    let stale_span_hint = match changeset_b.operations[0].target() {
         TransformTarget::Node { span_hint, .. } => *span_hint,
         _ => None,
     };
-    changeset_b.operations[0].target = TransformTarget::node(
-        "missing-preflight-identity".to_string(),
-        "function_definition".to_string(),
-        stale_span_hint,
-        "stale-hash".to_string(),
-    );
+    changeset_b.operations[0]
+        .replace_target(TransformTarget::node(
+            "missing-preflight-identity".to_string(),
+            "function_definition".to_string(),
+            stale_span_hint,
+            "stale-hash".to_string(),
+        ))
+        .expect("node replacement target should remain canonical");
 
     let registry = ProviderRegistry::default();
     let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &registry)
@@ -1845,7 +1822,9 @@ fn move_validation_allows_missing_move_preview_payload_for_backward_compatibilit
     std::fs::write(&source, "def move_me():\n    return 1\n").expect("fixture write should work");
 
     let mut move_changeset = build_move_changeset(&source, &destination);
-    move_changeset.operations[0].preview = ChangePreview::move_operation(None);
+    move_changeset.operations[0]
+        .replace_preview(ChangePreview::move_operation(None))
+        .expect("missing move preview payload should remain canonical");
 
     let plans = validate_move_operation_constraints(&[move_changeset])
         .expect("missing move preview should remain backward-compatible");
@@ -1860,11 +1839,14 @@ fn move_validation_rejects_mismatched_move_preview_paths() {
     std::fs::write(&source, "def move_me():\n    return 1\n").expect("fixture write should work");
 
     let mut move_changeset = build_move_changeset(&source, &destination);
-    move_changeset.operations[0].preview =
-        ChangePreview::move_operation(Some(crate::changeset::MovePreview {
-            from: directory.path().join("other.py"),
-            to: destination.clone(),
-        }));
+    move_changeset.operations[0]
+        .replace_preview(ChangePreview::move_operation(Some(
+            crate::changeset::MovePreview {
+                from: directory.path().join("other.py"),
+                to: destination.clone(),
+            },
+        )))
+        .expect("mismatched move paths still use the canonical move preview family");
 
     let error = validate_move_operation_constraints(&[move_changeset])
         .expect_err("mismatched move preview should be rejected");
