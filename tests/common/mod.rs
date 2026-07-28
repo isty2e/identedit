@@ -8,8 +8,11 @@ use std::process::{Command, Output, Stdio};
 use serde_json::Value;
 use tempfile::Builder;
 
+// Intentionally duplicate the CLI protocol constants instead of importing the
+// implementation. Contract tests must fail if the black-box output drifts from
+// src/hash.rs::HASH_HEX_LEN or src/hashline.rs::HASHLINE_PUBLIC_HEX_LEN.
 pub const PROTOCOL_HASH_HEX_LEN: usize = 16;
-const LINE_HASH_HEX_LEN: usize = 12;
+pub const LINE_HASH_HEX_LEN: usize = 12;
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex()[..PROTOCOL_HASH_HEX_LEN].to_string()

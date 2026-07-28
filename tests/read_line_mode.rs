@@ -38,10 +38,15 @@ fn select_mode_line_returns_line_handles_with_anchors() {
     assert_eq!(handles[0]["target_type"], "line");
     assert_eq!(handles[0]["line"], 1);
     assert_eq!(handles[0]["text"], "alpha");
-    assert_eq!(
-        handles[0]["anchor"],
-        format!("1:{}", crate::common::compute_line_hash("alpha"))
-    );
+    let anchor = handles[0]["anchor"]
+        .as_str()
+        .expect("line handle anchor should be a string");
+    let (_, hash) = anchor
+        .split_once(':')
+        .expect("line handle anchor should contain a separator");
+    assert_eq!(hash.len(), common::LINE_HASH_HEX_LEN);
+    assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_eq!(anchor, format!("1:{}", common::compute_line_hash("alpha")));
 }
 
 #[test]
