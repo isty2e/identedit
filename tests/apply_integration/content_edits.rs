@@ -48,7 +48,6 @@ fn apply_changeset_file_modifies_target_file() {
     let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
     assert!(modified.contains("return value * 2"));
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_changeset_argument_supports_shell_variable_expanded_path() {
@@ -96,7 +95,6 @@ fn apply_changeset_argument_supports_shell_variable_expanded_path() {
     let modified = fs::read_to_string(&target_path).expect("target should be readable");
     assert!(modified.contains("return value * 7"));
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_changeset_argument_single_quoted_env_token_path_remains_literal() {
@@ -118,7 +116,6 @@ fn apply_changeset_argument_single_quoted_env_token_path_remains_literal() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_handles_large_batches_of_operations_within_reasonable_time() {
     let file_path = create_large_python_file(150);
@@ -206,7 +203,6 @@ fn apply_handles_large_batches_of_operations_within_reasonable_time() {
         "apply took too long for large operation batch: {elapsed:?}"
     );
 }
-
 #[test]
 fn apply_handles_crlf_files_without_normalizing_line_endings() {
     let mut temp_file = Builder::new()
@@ -260,7 +256,6 @@ fn apply_handles_crlf_files_without_normalizing_line_endings() {
     assert!(modified.contains("return value + 11\r\n"));
     assert!(modified.contains("def helper():\r\n"));
 }
-
 #[test]
 fn apply_handles_cr_only_files_without_normalizing_line_endings() {
     let mut temp_file = Builder::new()
@@ -314,7 +309,6 @@ fn apply_handles_cr_only_files_without_normalizing_line_endings() {
     assert!(modified.contains("return value + 11\r"));
     assert!(modified.contains("def helper():\r"));
 }
-
 #[test]
 fn apply_preserves_utf8_bom_prefix_after_replacement() {
     let mut temp_file = Builder::new()
@@ -365,7 +359,6 @@ fn apply_preserves_utf8_bom_prefix_after_replacement() {
         "apply should preserve leading UTF-8 BOM bytes"
     );
 }
-
 #[test]
 fn apply_preserves_mixed_line_endings_outside_replaced_span() {
     let mut temp_file = Builder::new()
@@ -421,7 +414,6 @@ fn apply_preserves_mixed_line_endings_outside_replaced_span() {
         "replacement should be written exactly as requested"
     );
 }
-
 #[test]
 fn apply_returns_precondition_failed_when_expected_hash_is_stale() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -473,7 +465,6 @@ fn apply_returns_precondition_failed_when_expected_hash_is_stale() {
         serde_json::from_slice(&apply_output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "precondition_failed");
 }
-
 #[test]
 fn apply_returns_precondition_failed_when_identity_is_stale_but_span_matches() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -526,7 +517,6 @@ fn apply_returns_precondition_failed_when_identity_is_stale_but_span_matches() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "precondition_failed");
 }
-
 #[test]
 fn apply_treats_canonically_equivalent_unicode_reorder_as_stale_precondition() {
     let mut temp_file = Builder::new()
@@ -592,7 +582,6 @@ fn apply_treats_canonically_equivalent_unicode_reorder_as_stale_precondition() {
         "expected hash mismatch detail in precondition failure"
     );
 }
-
 #[test]
 fn apply_returns_io_error_for_non_utf8_files() {
     let mut temp_file = Builder::new()
@@ -620,7 +609,6 @@ fn apply_returns_io_error_for_non_utf8_files() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_returns_io_error_for_partially_binary_python_payload() {
     let mut temp_file = Builder::new()
@@ -646,7 +634,6 @@ fn apply_returns_io_error_for_partially_binary_python_payload() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_returns_parse_failure_for_nul_in_python_source() {
     let mut temp_file = Builder::new()
@@ -672,7 +659,6 @@ fn apply_returns_parse_failure_for_nul_in_python_source() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn apply_returns_parse_failure_for_bom_plus_nul_python_source() {
     let mut temp_file = Builder::new()
@@ -698,7 +684,6 @@ fn apply_returns_parse_failure_for_bom_plus_nul_python_source() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn apply_returns_parse_failure_for_syntax_invalid_python_file() {
     let mut temporary_file = Builder::new()
@@ -724,7 +709,6 @@ fn apply_returns_parse_failure_for_syntax_invalid_python_file() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn apply_json_mode_succeeds_with_command_wrapped_payload() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -782,7 +766,6 @@ fn apply_json_mode_succeeds_with_command_wrapped_payload() {
     let modified = fs::read_to_string(&file_path).expect("file should be readable");
     assert!(modified.contains("return value + 7"));
 }
-
 #[test]
 fn apply_supports_unicode_replacement_text() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -822,7 +805,6 @@ fn apply_supports_unicode_replacement_text() {
     let modified = fs::read_to_string(&file_path).expect("file should be readable");
     assert!(modified.contains("\"e\u{301} + 😸\""));
 }
-
 #[test]
 fn apply_preserves_nul_byte_in_replacement_text() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -867,7 +849,6 @@ fn apply_preserves_nul_byte_in_replacement_text() {
         "file bytes should preserve embedded NUL without truncation"
     );
 }
-
 #[test]
 fn apply_rejects_tampered_preview_old_text() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -912,7 +893,6 @@ fn apply_rejects_tampered_preview_old_text() {
         "expected preview validation message"
     );
 }
-
 #[test]
 fn apply_rejects_tampered_preview_span() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -959,7 +939,6 @@ fn apply_rejects_tampered_preview_span() {
         "expected preview validation message"
     );
 }
-
 #[test]
 fn apply_rejects_tampered_preview_new_text() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1004,7 +983,6 @@ fn apply_rejects_tampered_preview_new_text() {
         "expected preview validation message"
     );
 }
-
 #[test]
 fn apply_rejects_delete_preview_tampering_matrix() {
     for tamper_kind in ["old_text", "new_text", "matched_span"] {
@@ -1075,7 +1053,6 @@ fn apply_rejects_delete_preview_tampering_matrix() {
         );
     }
 }
-
 #[test]
 fn apply_rejects_multi_operation_partial_preview_tamper_matrix() {
     for tamper_kind in ["old_text", "new_text", "matched_span"] {
@@ -1170,7 +1147,6 @@ fn apply_rejects_multi_operation_partial_preview_tamper_matrix() {
         );
     }
 }
-
 #[test]
 fn apply_rejects_overlapping_operations() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1242,7 +1218,6 @@ fn apply_rejects_overlapping_operations() {
         "expected overlapping operation message"
     );
 }
-
 #[test]
 fn apply_supports_insert_before_and_after_for_same_anchor() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1311,7 +1286,6 @@ fn apply_supports_insert_before_and_after_for_same_anchor() {
         "insert_after text should appear immediately after the anchor"
     );
 }
-
 #[test]
 fn apply_supports_file_end_insert_target() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1355,7 +1329,6 @@ fn apply_supports_file_end_insert_target() {
         "insert text should be appended at file end"
     );
 }
-
 #[test]
 fn apply_supports_file_start_insert_target() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1399,7 +1372,6 @@ fn apply_supports_file_start_insert_target() {
         "insert text should be prepended at file start"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_target_missing_expected_file_hash() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1437,7 +1409,6 @@ fn apply_rejects_file_start_target_missing_expected_file_hash() {
         "expected explicit missing expected_file_hash message"
     );
 }
-
 #[test]
 fn apply_rejects_node_target_with_expected_file_hash_field() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1490,7 +1461,6 @@ fn apply_rejects_node_target_with_expected_file_hash_field() {
         "expected node/file hash schema rejection message"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_insert_when_file_hash_is_stale() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1524,7 +1494,6 @@ fn apply_rejects_file_start_insert_when_file_hash_is_stale() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "precondition_failed");
 }
-
 #[test]
 fn apply_rejects_file_start_and_file_end_inserts_on_empty_file() {
     let mut empty_file = Builder::new()
@@ -1583,7 +1552,6 @@ fn apply_rejects_file_start_and_file_end_inserts_on_empty_file() {
         "expected overlap rejection for same-position inserts"
     );
 }
-
 #[test]
 fn apply_file_start_insert_from_transform_preserves_utf8_bom_prefix() {
     let mut temp_file = Builder::new()
@@ -1643,7 +1611,6 @@ fn apply_file_start_insert_from_transform_preserves_utf8_bom_prefix() {
         "insert text should be placed after BOM for file_start insert"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_insert_and_insert_before_same_boundary() {
     let mut temp_file = Builder::new()
@@ -1715,7 +1682,6 @@ fn apply_rejects_file_start_insert_and_insert_before_same_boundary() {
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_and_file_end_inserts_on_bom_only_file() {
     let mut bom_only_file = Builder::new()

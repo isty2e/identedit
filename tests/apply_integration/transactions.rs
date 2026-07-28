@@ -1,799 +1,5 @@
 use super::*;
 
-#[cfg(unix)]
-#[test]
-fn apply_json_mode_move_rejects_existing_symlink_destination() {
-    use std::os::unix::fs::symlink;
-
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_path = workspace.path().join("source.py");
-    let real_destination = workspace.path().join("existing_target.py");
-    let symlink_destination = workspace.path().join("existing_link.py");
-    fs::write(&source_path, "def keep():\n    return 1\n")
-        .expect("source fixture write should succeed");
-    fs::write(&real_destination, "def already_here():\n    return 9\n")
-        .expect("destination fixture write should succeed");
-    symlink(&real_destination, &symlink_destination).expect("symlink should be created");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": source_path.to_string_lossy().to_string(),
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_path),
-                            "op": {
-                                "type": "move",
-                                "to": symlink_destination.to_string_lossy().to_string()
-                            },
-                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), symlink_destination.to_string_lossy().to_string())
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "existing symlink destination should be treated as occupied path"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| { message.contains("Destination path already exists") }),
-        "expected destination-exists rejection for symlink path"
-    );
-    assert!(
-        source_path.exists(),
-        "source should not be moved on rejection"
-    );
-}
-
-#[test]
-fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_path = workspace.path().join("source.py");
-    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "source.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_path),
-                            "op": {
-                                "type": "move",
-                                "to": "./renamed.py"
-                            },
-                            "preview": file_move_preview("source.py", "./renamed.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        output.status.success(),
-        "relative-path move should succeed in json mode: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["transaction"]["status"], "committed");
-    assert!(
-        !workspace.path().join("source.py").exists(),
-        "relative source path should be moved away"
-    );
-    assert!(
-        workspace.path().join("renamed.py").exists(),
-        "relative destination should be created in current directory"
-    );
-}
-
-#[test]
-fn apply_json_mode_move_rejects_dot_segment_self_move_in_relative_mode() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_path = workspace.path().join("source.py");
-    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "./source.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_path),
-                            "op": {
-                                "type": "move",
-                                "to": "nested/../source.py"
-                            },
-                            "preview": file_move_preview("./source.py", "nested/../source.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        !output.status.success(),
-        "dot-segment alias that resolves to same path should be rejected as self-move"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("self-move")),
-        "expected self-move rejection after dot-segment normalization"
-    );
-}
-
-#[test]
-fn apply_json_mode_executes_move_to_nested_existing_directory() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_path = workspace.path().join("source.py");
-    let nested_dir = workspace.path().join("nested");
-    fs::create_dir_all(&nested_dir).expect("nested directory should be created");
-    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "source.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_path),
-                            "op": {
-                                "type": "move",
-                                "to": "nested/renamed.py"
-                            },
-                            "preview": file_move_preview("source.py", "nested/renamed.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        output.status.success(),
-        "move into existing nested directory should succeed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    assert!(
-        !workspace.path().join("source.py").exists(),
-        "source should be moved away on successful nested move"
-    );
-    assert!(
-        workspace.path().join("nested/renamed.py").exists(),
-        "nested destination file should exist after move"
-    );
-}
-
-#[test]
-fn apply_json_mode_move_to_path_under_file_parent_returns_io_error() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_path = workspace.path().join("source.py");
-    let parent_file = workspace.path().join("not_a_directory");
-    fs::write(&source_path, "def keep():\n    return 1\n")
-        .expect("source fixture write should succeed");
-    fs::write(&parent_file, "occupied by file\n")
-        .expect("parent-file fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": source_path.to_string_lossy().to_string(),
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_path),
-                            "op": {
-                                "type": "move",
-                                "to": workspace.path().join("not_a_directory/renamed.py").to_string_lossy().to_string()
-                            },
-                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), workspace.path().join("not_a_directory/renamed.py").to_string_lossy().to_string())
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "destination under non-directory parent should fail with io error"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
-    assert!(
-        source_path.exists(),
-        "source should remain in place on io failure"
-    );
-}
-
-#[test]
-fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_a = workspace.path().join("a.py");
-    let source_b = workspace.path().join("b.py");
-    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
-    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "a.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_a),
-                            "op": {
-                                "type": "move",
-                                "to": "renamed.py"
-                            },
-                            "preview": file_move_preview("a.py", "renamed.py")
-                        }
-                    ]
-                },
-                {
-                    "file": "b.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_b),
-                            "op": {
-                                "type": "move",
-                                "to": "./renamed.py"
-                            },
-                            "preview": file_move_preview("b.py", "./renamed.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        !output.status.success(),
-        "destination alias collision should be rejected"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("Duplicate move destination")),
-        "expected duplicate destination rejection for alias paths"
-    );
-    assert!(workspace.path().join("a.py").exists());
-    assert!(workspace.path().join("b.py").exists());
-    assert!(
-        !workspace.path().join("renamed.py").exists(),
-        "no destination should be created on validation failure"
-    );
-}
-
-#[test]
-fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_a = workspace.path().join("a.py");
-    let source_b = workspace.path().join("b.py");
-    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
-    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "a.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_a),
-                            "op": {
-                                "type": "move",
-                                "to": "./b.py"
-                            },
-                            "preview": file_move_preview("a.py", "./b.py")
-                        }
-                    ]
-                },
-                {
-                    "file": "b.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_b),
-                            "op": {
-                                "type": "move",
-                                "to": "nested/../a.py"
-                            },
-                            "preview": file_move_preview("b.py", "nested/../a.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        !output.status.success(),
-        "relative alias cycle should be rejected"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("Move graph contains a cycle")),
-        "expected cycle rejection for alias-based cycle"
-    );
-}
-
-#[test]
-fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_a = workspace.path().join("a.py");
-    let source_b = workspace.path().join("b.py");
-    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
-    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "a.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_a),
-                            "op": {
-                                "type": "move",
-                                "to": "./b.py"
-                            },
-                            "preview": file_move_preview("a.py", "./b.py")
-                        }
-                    ]
-                },
-                {
-                    "file": "b.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_b),
-                            "op": {
-                                "type": "move",
-                                "to": "./c.py"
-                            },
-                            "preview": file_move_preview("b.py", "./c.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        output.status.success(),
-        "relative-alias move chain should execute successfully: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    assert!(!workspace.path().join("a.py").exists());
-    assert!(workspace.path().join("b.py").exists());
-    assert!(workspace.path().join("c.py").exists());
-}
-
-#[test]
-fn apply_json_mode_executes_move_with_non_self_dot_segment_destination() {
-    let workspace = tempdir().expect("tempdir should be created");
-    let source_path = workspace.path().join("source.py");
-    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
-
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "files": [
-                {
-                    "file": "source.py",
-                    "operations": [
-                        {
-                            "target": file_move_target(&source_path),
-                            "op": {
-                                "type": "move",
-                                "to": "nested/../renamed.py"
-                            },
-                            "preview": file_move_preview("source.py", "nested/../renamed.py")
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        }
-    });
-
-    let output = run_identedit_with_stdin_in_dir(
-        workspace.path(),
-        &["apply", "--json"],
-        &request.to_string(),
-    );
-    assert!(
-        output.status.success(),
-        "non-self dot-segment destination should still execute move: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(!workspace.path().join("source.py").exists());
-    assert!(workspace.path().join("renamed.py").exists());
-}
-
-#[test]
-fn apply_json_mode_rejects_unknown_span_field() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let handle = select_named_handle(&file_path, "process_*");
-    let span = &handle["span"];
-    let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = crate::common::hash_text(old_text);
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "file": file_path.to_string_lossy().to_string(),
-            "operations": [
-                {
-                    "target": {
-                        "identity": handle["identity"],
-                        "kind": handle["kind"],
-                        "expected_old_hash": expected_hash,
-                        "span_hint": {
-                            "start": span["start"],
-                            "end": span["end"],
-                            "unexpected": 0
-                        }
-                    },
-                    "op": {
-                        "type": "replace",
-                        "new_text": "def process_data(value):\n    return value + 3"
-                    },
-                    "preview": {
-                        "old_text": old_text,
-                        "new_text": "def process_data(value):\n    return value + 3",
-                        "matched_span": {
-                            "start": span["start"],
-                            "end": span["end"]
-                        }
-                    }
-                }
-            ]
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should reject unknown span fields"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("unknown field `unexpected`")),
-        "expected unknown span field message"
-    );
-}
-
-#[test]
-fn apply_json_mode_rejects_operations_null_type() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "file": file_path.to_string_lossy().to_string(),
-            "operations": Value::Null
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should reject null operations payload"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_json_mode_treats_env_token_file_path_as_literal() {
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "file": format!("${{IDENTEDIT_APPLY_JSON_PATH_{}}}/example.py", std::process::id()),
-            "operations": []
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "json-mode apply path should not expand env tokens"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
-}
-
-#[test]
-fn apply_json_mode_rejects_non_apply_command() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let request = json!({
-        "command": "edit",
-        "changeset": {
-            "file": file_path.to_string_lossy().to_string(),
-            "operations": []
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should reject command mismatch in JSON mode"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("expected 'apply'")),
-        "expected command mismatch message"
-    );
-}
-
-#[test]
-fn apply_json_mode_rejects_missing_command_field() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let request = json!({
-        "changeset": {
-            "file": file_path.to_string_lossy().to_string(),
-            "operations": []
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should reject missing command field in JSON mode"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("missing field `command`")),
-        "expected missing command field message"
-    );
-}
-
-#[test]
-fn apply_json_mode_rejects_non_string_command_type() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let payloads = [
-        json!({
-            "command": 123,
-            "changeset": {
-                "file": file_path.to_string_lossy().to_string(),
-                "operations": []
-            }
-        }),
-        json!({
-            "command": null,
-            "changeset": {
-                "file": file_path.to_string_lossy().to_string(),
-                "operations": []
-            }
-        }),
-        json!({
-            "command": {"value": "apply"},
-            "changeset": {
-                "file": file_path.to_string_lossy().to_string(),
-                "operations": []
-            }
-        }),
-    ];
-
-    for payload in payloads {
-        let output = run_identedit_with_stdin(&["apply", "--json"], &payload.to_string());
-        assert!(
-            !output.status.success(),
-            "apply should reject non-string command in JSON mode: {payload}"
-        );
-
-        let response: Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        assert_eq!(response["error"]["type"], "invalid_request");
-        assert!(
-            response["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("invalid type")),
-            "expected invalid type command diagnostic"
-        );
-    }
-}
-
-#[test]
-fn apply_json_mode_rejects_command_with_trailing_whitespace() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let request = json!({
-        "command": "apply ",
-        "changeset": {
-            "file": file_path.to_string_lossy().to_string(),
-            "operations": []
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should reject trailing-whitespace command token"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_json_mode_rejects_uppercase_command_token() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let request = json!({
-        "command": "APPLY",
-        "changeset": {
-            "file": file_path.to_string_lossy().to_string(),
-            "operations": []
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should reject uppercase command token"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_changeset_argument_directory_returns_io_error() {
-    let directory = tempdir().expect("tempdir should be created");
-    let output = run_identedit(&[
-        "apply",
-        directory.path().to_str().expect("path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should fail when CHANGESET argument is a directory"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
-}
-
-#[test]
-fn apply_json_mode_directory_target_returns_io_error() {
-    let directory = tempdir().expect("tempdir should be created");
-    let request = json!({
-        "command": "apply",
-        "changeset": {
-            "file": directory.path().to_string_lossy().to_string(),
-            "operations": []
-        }
-    });
-
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "apply JSON mode should fail when changeset file target is a directory"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
-}
-
 #[test]
 fn apply_multi_file_stdin_mode_applies_all_files_in_deterministic_order() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -902,7 +108,6 @@ fn apply_multi_file_stdin_mode_applies_all_files_in_deterministic_order() {
     assert!(after_a.contains("return value * 99"));
     assert!(after_b.contains("return value * 98"));
 }
-
 #[test]
 fn apply_multi_file_json_mode_applies_cross_language_changes() {
     let file_py = copy_fixture_to_temp_python("example.py");
@@ -1015,7 +220,6 @@ fn apply_multi_file_json_mode_applies_cross_language_changes() {
     assert!(after_py.contains("return value * 77"));
     assert!(after_json.contains("\"tool\": \"identedit\""));
 }
-
 #[test]
 fn apply_same_file_stale_identity_resolves_by_unique_kind_and_expected_hash() {
     let source =
@@ -1115,7 +319,6 @@ fn apply_same_file_stale_identity_resolves_by_unique_kind_and_expected_hash() {
         "beta replacement should apply after identity fallback"
     );
 }
-
 #[test]
 fn apply_multi_file_stale_target_fails_without_writing_other_files() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -1194,7 +397,6 @@ fn apply_multi_file_stale_target_fails_without_writing_other_files() {
     assert_eq!(after_a, before_a, "preflight failure must not write file_a");
     assert_eq!(after_b, before_b, "preflight failure must not write file_b");
 }
-
 #[test]
 fn apply_inject_failure_flag_requires_experimental_env_gate() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -1276,7 +478,6 @@ fn apply_inject_failure_flag_requires_experimental_env_gate() {
         "expected gate error message to reference env gate and hidden flag"
     );
 }
-
 #[test]
 fn apply_inject_failure_after_one_write_rolls_back_prior_commits() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -1369,7 +570,6 @@ fn apply_inject_failure_after_one_write_rolls_back_prior_commits() {
     assert_eq!(after_a, before_a, "rollback should restore file_a");
     assert_eq!(after_b, before_b, "rollback should restore file_b");
 }
-
 #[test]
 fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -1477,7 +677,6 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
         "rollback should restore destination file after cross-file move failure"
     );
 }
-
 #[test]
 fn apply_inject_failure_after_one_write_rolls_back_in_json_mode() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -1573,7 +772,6 @@ fn apply_inject_failure_after_one_write_rolls_back_in_json_mode() {
     assert_eq!(after_a, before_a, "rollback should restore file_a");
     assert_eq!(after_b, before_b, "rollback should restore file_b");
 }
-
 #[test]
 fn apply_inject_failure_count_above_commit_count_is_noop() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -1817,7 +1015,6 @@ fn apply_multi_file_same_logical_path_variants_still_reject_without_mutation() {
     let after = fs::read_to_string(&target).expect("target should remain readable");
     assert_eq!(before, after, "target content should remain unchanged");
 }
-
 #[test]
 fn apply_accepts_empty_changeset_as_noop() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1844,7 +1041,6 @@ fn apply_accepts_empty_changeset_as_noop() {
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(before, after, "empty apply must not modify file contents");
 }
-
 #[test]
 fn apply_response_omits_applied_by_default() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1868,7 +1064,6 @@ fn apply_response_omits_applied_by_default() {
         "compact apply response should omit detailed per-file entries"
     );
 }
-
 #[test]
 fn apply_response_verbose_includes_transaction_and_file_status_fields() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1889,7 +1084,6 @@ fn apply_response_verbose_includes_transaction_and_file_status_fields() {
     assert_eq!(response["transaction"]["status"], "committed");
     assert_eq!(response["applied"][0]["status"], "applied");
 }
-
 #[test]
 fn apply_empty_changeset_missing_file_returns_io_error() {
     let missing_path =
@@ -1912,7 +1106,6 @@ fn apply_empty_changeset_missing_file_returns_io_error() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_relative_changeset_path_depends_on_current_working_directory() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -1952,7 +1145,6 @@ fn apply_relative_changeset_path_depends_on_current_working_directory() {
         serde_json::from_slice(&workspace_output.stdout).expect("stdout should be valid JSON");
     assert_eq!(workspace_response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_file_mode_relative_changeset_target_depends_on_caller_cwd() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -1992,7 +1184,6 @@ fn apply_file_mode_relative_changeset_target_depends_on_caller_cwd() {
         serde_json::from_slice(&nested_output.stdout).expect("stdout should be valid JSON");
     assert_eq!(nested_response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_empty_changeset_unsupported_extension_is_noop_success() {
     let mut temp_file = Builder::new()

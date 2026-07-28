@@ -21,7 +21,6 @@ fn apply_noop_on_read_only_file_returns_io_error() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn apply_applies_multiple_non_overlapping_operations() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -94,7 +93,6 @@ fn apply_applies_multiple_non_overlapping_operations() {
     assert!(modified.contains("return value + 10"));
     assert!(modified.contains("return \"updated\""));
 }
-
 #[test]
 fn apply_non_overlapping_operations_are_order_independent() {
     let process_replacement = "def process_data(value):\n    return value + 10";
@@ -213,7 +211,6 @@ fn apply_non_overlapping_operations_are_order_independent() {
         "operation ordering should not change final file content for non-overlapping targets"
     );
 }
-
 #[test]
 fn apply_precondition_failure_is_order_independent_when_one_target_is_stale() {
     let stale_hash = "0000000000000000";
@@ -331,7 +328,6 @@ fn apply_precondition_failure_is_order_independent_when_one_target_is_stale() {
         "precondition failure message should stay deterministic regardless of operation order"
     );
 }
-
 #[test]
 fn apply_is_atomic_when_any_operation_fails_precondition() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -393,7 +389,6 @@ fn apply_is_atomic_when_any_operation_fails_precondition() {
         "apply must be atomic: file content should remain unchanged on failure"
     );
 }
-
 #[test]
 fn apply_returns_resource_busy_when_lock_is_already_held() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -421,7 +416,6 @@ fn apply_returns_resource_busy_when_lock_is_already_held() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "resource_busy");
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_non_utf8_changeset_path_argument_returns_io_error_without_panicking() {
@@ -439,7 +433,6 @@ fn apply_non_utf8_changeset_path_argument_returns_io_error_without_panicking() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_rejects_symbolic_link_target_path() {

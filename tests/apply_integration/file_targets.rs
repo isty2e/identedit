@@ -124,7 +124,6 @@ fn apply_multi_file_boundary_conflict_fails_without_mutating_other_files() {
         "other files must remain unchanged after failed multi-file preflight"
     );
 }
-
 #[test]
 fn apply_multi_file_alias_path_boundary_conflict_fails_without_mutating_other_files() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -246,7 +245,6 @@ fn apply_multi_file_alias_path_boundary_conflict_fails_without_mutating_other_fi
         "other files must remain unchanged after failed alias conflict preflight"
     );
 }
-
 #[test]
 fn apply_multi_file_alias_boundary_conflict_error_is_order_independent() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -352,7 +350,6 @@ fn apply_multi_file_alias_boundary_conflict_error_is_order_independent() {
         "alias boundary conflict message should be deterministic across operation order"
     );
 }
-
 #[test]
 fn apply_multi_file_alias_path_file_end_collision_fails_without_mutating_other_files() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -475,7 +472,6 @@ fn apply_multi_file_alias_path_file_end_collision_fails_without_mutating_other_f
         "other files must remain unchanged after failed alias conflict preflight"
     );
 }
-
 #[test]
 fn apply_multi_file_json_mode_alias_boundary_conflict_fails_without_mutating_other_files() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -603,7 +599,6 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_fails_without_mutating_oth
         "other files must remain unchanged after failed alias conflict preflight"
     );
 }
-
 #[test]
 fn apply_multi_file_json_mode_alias_boundary_conflict_error_is_order_independent() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -718,7 +713,6 @@ fn apply_multi_file_json_mode_alias_boundary_conflict_error_is_order_independent
         "alias boundary conflict message should be deterministic across operation order in --json mode"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_and_file_end_inserts_on_bom_only_css_file() {
     let mut temp_file = Builder::new()
@@ -781,7 +775,6 @@ fn apply_rejects_file_start_and_file_end_inserts_on_bom_only_css_file() {
     let after_bytes = fs::read(&file_path).expect("file bytes should be readable");
     assert_eq!(after_bytes, vec![0xEF, 0xBB, 0xBF]);
 }
-
 #[test]
 fn apply_multi_file_css_conflict_rolls_back_unrelated_html_file() {
     let mut conflict_temp = Builder::new()
@@ -906,7 +899,6 @@ fn apply_multi_file_css_conflict_rolls_back_unrelated_html_file() {
         "unrelated html file should remain unchanged after failed transaction"
     );
 }
-
 #[test]
 fn apply_multi_file_json_mode_alias_file_end_conflict_error_is_order_independent() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -1020,7 +1012,6 @@ fn apply_multi_file_json_mode_alias_file_end_conflict_error_is_order_independent
         "alias file_end conflict message should be deterministic across operation order in --json mode"
     );
 }
-
 #[test]
 fn apply_multi_file_hardlink_alias_entries_are_rejected_as_duplicates_without_mutation() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -1100,7 +1091,6 @@ fn apply_multi_file_hardlink_alias_entries_are_rejected_as_duplicates_without_mu
         "alias content should remain unchanged after duplicate alias rejection"
     );
 }
-
 #[test]
 fn apply_multi_file_hardlink_alias_with_middle_file_is_rejected_without_mutation() {
     let workspace = tempdir().expect("tempdir should be created");
@@ -1219,7 +1209,6 @@ fn apply_multi_file_hardlink_alias_with_middle_file_is_rejected_without_mutation
         "alias content should remain unchanged after duplicate alias rejection"
     );
 }
-
 #[test]
 fn apply_rejects_file_end_insert_and_insert_after_on_bom_css_source() {
     let mut temp_file = Builder::new()
@@ -1298,7 +1287,6 @@ fn apply_rejects_file_end_insert_and_insert_after_on_bom_css_source() {
         "failed apply must leave BOM css source untouched"
     );
 }
-
 #[test]
 fn apply_json_mode_rejects_unknown_file_level_target_type() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1346,7 +1334,6 @@ fn apply_json_mode_rejects_unknown_file_level_target_type() {
         "expected unknown variant parse message"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_insert_preview_span_mismatch_on_bom_file() {
     let mut temp_file = Builder::new()
@@ -1394,7 +1381,6 @@ fn apply_rejects_file_start_insert_preview_span_mismatch_on_bom_file() {
         "expected preview span mismatch diagnostic"
     );
 }
-
 #[test]
 fn apply_rejects_file_end_insert_preview_span_mismatch_on_bom_file() {
     let mut temp_file = Builder::new()
@@ -1442,7 +1428,6 @@ fn apply_rejects_file_end_insert_preview_span_mismatch_on_bom_file() {
         "expected preview span mismatch diagnostic"
     );
 }
-
 #[test]
 fn apply_rejects_file_start_insert_preview_old_text_tamper() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1483,7 +1468,6 @@ fn apply_rejects_file_start_insert_preview_old_text_tamper() {
         "expected preview old_text mismatch diagnostic"
     );
 }
-
 #[test]
 fn apply_rejects_file_end_insert_preview_old_text_tamper() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1525,7 +1509,6 @@ fn apply_rejects_file_end_insert_preview_old_text_tamper() {
         "expected preview old_text mismatch diagnostic"
     );
 }
-
 #[test]
 fn apply_rejects_file_end_insert_when_file_hash_is_stale() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1560,7 +1543,6 @@ fn apply_rejects_file_end_insert_when_file_hash_is_stale() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "precondition_failed");
 }
-
 #[test]
 fn apply_rejects_file_end_replace_combo() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1601,7 +1583,6 @@ fn apply_rejects_file_end_replace_combo() {
         "expected target/op compatibility message"
     );
 }
-
 #[test]
 fn apply_supports_delete_for_anchor_span() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1654,7 +1635,6 @@ fn apply_supports_delete_for_anchor_span() {
         "delete should not remove unrelated nodes"
     );
 }
-
 #[test]
 fn apply_delete_and_empty_replace_are_semantically_equivalent() {
     let file_path_delete = copy_fixture_to_temp_python("example.py");
@@ -1751,7 +1731,6 @@ fn apply_delete_and_empty_replace_are_semantically_equivalent() {
         "delete and empty replace should produce identical file contents"
     );
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_delete_whole_file_span_results_in_empty_file_and_preserves_mode() {
@@ -1820,7 +1799,6 @@ fn apply_delete_whole_file_span_results_in_empty_file_and_preserves_mode() {
         & 0o777;
     assert_eq!(mode, 0o640, "whole-file delete should preserve mode bits");
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_delete_whole_file_span_with_crlf_results_in_empty_file_and_preserves_mode() {
@@ -1895,7 +1873,6 @@ fn apply_delete_whole_file_span_with_crlf_results_in_empty_file_and_preserves_mo
         "whole-file CRLF delete should preserve mode bits"
     );
 }
-
 #[cfg(unix)]
 #[test]
 fn apply_delete_single_function_in_bom_prefixed_file_preserves_bom_prefix() {
@@ -1969,7 +1946,6 @@ fn apply_delete_single_function_in_bom_prefixed_file_preserves_bom_prefix() {
         & 0o777;
     assert_eq!(mode, 0o640, "delete should preserve mode bits in BOM files");
 }
-
 #[test]
 fn apply_rejects_delete_and_insert_on_same_anchor() {
     let file_path = copy_fixture_to_temp_python("example.py");

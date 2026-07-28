@@ -269,15 +269,17 @@ fn create_large_python_file(function_count: usize) -> PathBuf {
     common::create_large_python_file(function_count)
 }
 
-#[path = "apply_integration/scenario_01_core_and_line_endings.rs"]
-mod scenario_01_core_and_line_endings;
-#[path = "apply_integration/scenario_02_file_target_and_alias_conflicts.rs"]
-mod scenario_02_file_target_and_alias_conflicts;
-#[path = "apply_integration/scenario_03_operation_conflicts_and_preview_guard.rs"]
-mod scenario_03_operation_conflicts_and_preview_guard;
-#[path = "apply_integration/scenario_04_payload_validation.rs"]
-mod scenario_04_payload_validation;
-#[path = "apply_integration/scenario_05_move_and_transactions.rs"]
-mod scenario_05_move_and_transactions;
-#[path = "apply_integration/scenario_06_permissions_and_fs_edges.rs"]
-mod scenario_06_permissions_and_fs_edges;
+#[path = "apply_integration/atomicity_and_filesystem.rs"]
+mod atomicity_and_filesystem;
+#[path = "apply_integration/content_edits.rs"]
+mod content_edits;
+#[path = "apply_integration/file_moves.rs"]
+mod file_moves;
+#[path = "apply_integration/file_targets.rs"]
+mod file_targets;
+#[path = "apply_integration/operation_validation.rs"]
+mod operation_validation;
+#[path = "apply_integration/request_validation.rs"]
+mod request_validation;
+#[path = "apply_integration/transactions.rs"]
+mod transactions;
