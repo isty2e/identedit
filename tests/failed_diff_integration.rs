@@ -391,6 +391,39 @@ fn from_diff_rejects_ordinary_edit_and_patch_flags_consistently() {
 }
 
 #[test]
+fn edit_from_diff_rejects_json_and_verbose_modes() {
+    let original = "old\n";
+    let source = create_temp_source(original);
+    let diff = create_temp_diff("@@\n-old\n+new\n");
+    let source_arg = source.to_string_lossy();
+    let diff_arg = diff.to_string_lossy();
+
+    for option in ["--json", "--verbose"] {
+        let output = common::run_identedit(&[
+            "edit",
+            "--from-diff",
+            diff_arg.as_ref(),
+            option,
+            source_arg.as_ref(),
+        ]);
+        let value = error(&output);
+
+        assert_eq!(
+            value["error"]["type"], "invalid_request",
+            "option should be rejected: {option}"
+        );
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("preview-only"),
+            "unexpected error for {option}: {value}"
+        );
+        assert_source_unchanged(&source, original);
+    }
+}
+
+#[test]
 fn from_diff_rejects_patch_execution_options() {
     let source = create_temp_source("old\n");
     let diff = create_temp_diff("@@\n-old\n+new\n");
@@ -410,6 +443,35 @@ fn from_diff_rejects_patch_execution_options() {
             "invalid_request",
             "option should be rejected: {option}"
         );
+    }
+}
+
+#[test]
+fn apply_patch_file_lifecycle_headers_are_rejected_at_cli_boundary() {
+    let original = "old\n";
+    let source = create_temp_source(original);
+    let source_label = source.to_string_lossy();
+    let unsupported = [
+        format!("*** Begin Patch\n*** Add File: {source_label}\n+new\n*** End Patch\n"),
+        format!("*** Begin Patch\n*** Delete File: {source_label}\n-old\n*** End Patch\n"),
+        format!(
+            "*** Begin Patch\n*** Update File: {source_label}\n*** Move to: moved.txt\n@@\n-old\n+new\n*** End Patch\n"
+        ),
+    ];
+
+    for diff_text in unsupported {
+        let diff = create_temp_diff(&diff_text);
+        let value = error(&run_from_diff("patch", &diff, None));
+
+        assert_eq!(value["error"]["type"], "invalid_request");
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .expect("message should be a string")
+                .contains("creation, deletion, and rename"),
+            "unexpected error: {value}"
+        );
+        assert_source_unchanged(&source, original);
     }
 }
 

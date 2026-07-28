@@ -1676,6 +1676,37 @@ fn apply_mixed_newline_source_preserves_untouched_line_endings() {
 }
 
 #[test]
+fn apply_large_alternating_newline_source_preserves_every_untouched_terminator() {
+    let line_count = 10_000usize;
+    let target_line = 5_001usize;
+    let mut source = String::new();
+
+    for index in 0..line_count {
+        source.push_str(&format!("line-{index}"));
+        source.push_str(match index % 3 {
+            0 => "\r\n",
+            1 => "\r",
+            _ => "\n",
+        });
+    }
+
+    let old_text = format!("line-{}", target_line - 1);
+    let new_text = "updated";
+    let anchor = line_anchor(target_line, compute_line_hash(&old_text));
+    let payload = format!(
+        r#"[
+  {{ "set_line": {{ "anchor": "{anchor}", "new_text": "{new_text}" }} }}
+]"#
+    );
+    let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
+    let expected = source.replacen(&format!("{old_text}\n"), &format!("{new_text}\n"), 1);
+
+    let applied = apply_hashline_edits(&source, &edits).expect("apply should succeed");
+
+    assert_eq!(applied.content, expected);
+}
+
+#[test]
 fn apply_mixed_newline_range_uses_local_style_and_preserves_boundaries() {
     let source = "a\r\nb\nc\r\nd\r";
     let payload = format!(
