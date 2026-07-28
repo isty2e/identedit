@@ -24,6 +24,14 @@ fn write_json_file(value: &Value) -> tempfile::NamedTempFile {
     file
 }
 
+fn file_move_target(path: &Path) -> Value {
+    let source_bytes = std::fs::read(path).expect("move source should be readable");
+    json!({
+        "type": "file",
+        "expected_file_hash": identedit::changeset::hash_bytes(&source_bytes)
+    })
+}
+
 fn build_replace_changeset(file: &Path, identity: &str, replacement: &str) -> Value {
     let output = run_identedit(&[
         "edit",
@@ -208,12 +216,7 @@ fn changeset_merge_rejects_move_with_content_edit_on_same_file() {
                 "file": file.to_string_lossy().to_string(),
                 "operations": [
                     {
-                        "target": {
-                            "type": "node",
-                            "identity": "move-placeholder",
-                            "kind": "file",
-                            "expected_old_hash": "move-placeholder"
-                        },
+                        "target": file_move_target(&file),
                         "op": {
                             "type": "move",
                             "to": destination.to_string_lossy().to_string()

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::apply::apply_resolved_text_update;
 use crate::error::IdenteditError;
 use crate::hashline::{
     HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult,
@@ -140,9 +141,14 @@ fn apply_hashline_patch_request(
             .map_err(map_hashline_apply_error)?;
     let changed = verified.source != applied.content;
 
-    if changed && !verified.dry_run {
-        fs::write(&verified.file, applied.content.as_bytes())
-            .map_err(|error| IdenteditError::io(&verified.file, error))?;
+    if changed {
+        apply_resolved_text_update(
+            &verified.file,
+            &verified.source,
+            applied.content.clone(),
+            applied.operations_total,
+            verified.dry_run,
+        )?;
     }
 
     let response = HashlinePatchResponse {

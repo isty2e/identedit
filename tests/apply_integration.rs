@@ -1,7 +1,6 @@
 #[cfg(unix)]
 use std::ffi::OsString;
 use std::fs;
-use std::fs::FileTimes;
 use std::fs::OpenOptions;
 use std::io::Write;
 #[cfg(unix)]
@@ -11,7 +10,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
@@ -46,6 +44,14 @@ fn run_identedit_in_dir(directory: &Path, arguments: &[&str]) -> Output {
 fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     let normalized_input = normalize_apply_input_payload(arguments, input);
     common::run_identedit_with_stdin(arguments, &normalized_input)
+}
+
+fn file_move_target(path: &Path) -> Value {
+    let source_bytes = fs::read(path).expect("move source should be readable");
+    json!({
+        "type": "file",
+        "expected_file_hash": identedit::changeset::hash_bytes(&source_bytes)
+    })
 }
 
 fn run_identedit_with_raw_stdin(arguments: &[&str], input: &[u8]) -> Output {

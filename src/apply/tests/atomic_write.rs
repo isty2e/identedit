@@ -149,6 +149,33 @@ fn atomic_write_preserves_existing_file_mode_bits() {
 
 #[cfg(unix)]
 #[test]
+fn atomic_write_supports_empty_mode_zero_file() {
+    let directory = tempdir().expect("tempdir should be created");
+    let file_path = directory.path().join("target.txt");
+    std::fs::write(&file_path, "").expect("fixture write should succeed");
+    std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o0))
+        .expect("fixture permissions should be set");
+
+    write_text_atomically_with_hook(&file_path, "", |_| Ok(()))
+        .expect("atomic write should not need to reopen the mode-zero temp file");
+
+    let mode = std::fs::metadata(&file_path)
+        .expect("metadata should be readable")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0, "atomic write should preserve mode zero");
+
+    std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o600))
+        .expect("fixture should be made readable for cleanup assertions");
+    assert_eq!(
+        std::fs::read_to_string(&file_path).expect("fixture should be readable"),
+        ""
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn atomic_write_failure_in_read_only_directory_preserves_file_and_cleans_temp() {
     let directory = tempdir().expect("tempdir should be created");
     let locked_directory = directory.path().join("locked");

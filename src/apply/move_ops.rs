@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::ffi::CString;
 use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::changeset::{ChangeOp, FileChange, OpKind};
+use crate::changeset::{ChangeOp, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 
 use super::io::{
@@ -15,12 +18,14 @@ use super::{ApplyFileResult, ApplyFileStatus};
 struct MoveEdge {
     source: PathBuf,
     destination: PathBuf,
+    expected_file_hash: String,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct NormalizedMoveEdge {
     pub(super) source: PathBuf,
     pub(super) destination: PathBuf,
+    pub(super) expected_file_hash: String,
 }
 
 pub(super) fn validate_move_operation_constraints(
@@ -87,11 +92,23 @@ fn validate_file_move_operation_constraints(
         OpKind::Move { to } => to.clone(),
         _ => unreachable!("move_operation must be move"),
     };
+    let expected_file_hash = match &move_operation.target {
+        TransformTarget::File { expected_file_hash } => expected_file_hash.clone(),
+        _ => {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Move operation requires a 'file' target with expected_file_hash: '{}'",
+                    changeset.file.display()
+                ),
+            });
+        }
+    };
     validate_move_preview(changeset, move_operation, &destination)?;
 
     Ok(Some(MoveEdge {
         source: changeset.file.clone(),
         destination,
+        expected_file_hash,
     }))
 }
 
@@ -200,6 +217,7 @@ fn normalize_move_edges(
         normalized.push(NormalizedMoveEdge {
             source,
             destination,
+            expected_file_hash: edge.expected_file_hash.clone(),
         });
     }
 
@@ -375,6 +393,27 @@ pub(super) struct MovePreflightPlan {
     pub(super) _lock_guard: ApplyFileLock,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MoveCommitState {
+    NotCommitted,
+    Committed,
+}
+
+#[derive(Debug)]
+struct MoveCommitFailure {
+    error: IdenteditError,
+    commit_state: MoveCommitState,
+}
+
+impl From<IdenteditError> for MoveCommitFailure {
+    fn from(error: IdenteditError) -> Self {
+        Self {
+            error,
+            commit_state: MoveCommitState::NotCommitted,
+        }
+    }
+}
+
 pub(super) fn preflight_move_plans(
     execution_order: &[NormalizedMoveEdge],
 ) -> Result<Vec<MovePreflightPlan>, IdenteditError> {
@@ -389,6 +428,12 @@ pub(super) fn preflight_move_plans(
     for edge in lock_order {
         let lock_guard = acquire_apply_lock(&edge.source)?;
         let guard_state = capture_apply_guard_state(&edge.source)?;
+        if guard_state.source_hash != edge.expected_file_hash {
+            return Err(IdenteditError::PreconditionFailed {
+                expected_hash: edge.expected_file_hash,
+                actual_hash: guard_state.source_hash,
+            });
+        }
         plans_by_source.insert(
             edge.source.clone(),
             MovePreflightPlan {
@@ -420,34 +465,62 @@ pub(super) fn preflight_move_plans(
 
 pub(super) fn commit_move_plans<After>(
     plans: &[MovePreflightPlan],
-    mut after_verify_hook: After,
+    after_verify_hook: After,
 ) -> Result<Vec<ApplyFileResult>, (IdenteditError, Vec<usize>)>
 where
     After: FnMut() -> Result<(), IdenteditError>,
 {
+    commit_move_plans_with_hooks(plans, after_verify_hook, || Ok(()), || Ok(()))
+}
+
+#[cfg(test)]
+pub(super) fn commit_move_plans_with_after_rename_hook<After, Renamed>(
+    plans: &[MovePreflightPlan],
+    after_verify_hook: After,
+    after_rename_hook: Renamed,
+) -> Result<Vec<ApplyFileResult>, (IdenteditError, Vec<usize>)>
+where
+    After: FnMut() -> Result<(), IdenteditError>,
+    Renamed: FnMut() -> Result<(), IdenteditError>,
+{
+    commit_move_plans_with_hooks(plans, after_verify_hook, || Ok(()), after_rename_hook)
+}
+
+fn commit_move_plans_with_hooks<After, BeforeRename, Renamed>(
+    plans: &[MovePreflightPlan],
+    mut after_verify_hook: After,
+    mut before_rename_hook: BeforeRename,
+    mut after_rename_hook: Renamed,
+) -> Result<Vec<ApplyFileResult>, (IdenteditError, Vec<usize>)>
+where
+    After: FnMut() -> Result<(), IdenteditError>,
+    BeforeRename: FnMut() -> Result<(), IdenteditError>,
+    Renamed: FnMut() -> Result<(), IdenteditError>,
+{
     let mut applied = Vec::with_capacity(plans.len());
     let mut committed_indices = Vec::new();
     for (index, plan) in plans.iter().enumerate() {
-        match commit_move_plan(plan, &mut after_verify_hook) {
+        match commit_move_plan_with_hooks(
+            plan,
+            &mut after_verify_hook,
+            &mut before_rename_hook,
+            &mut after_rename_hook,
+            rename_file_no_replace,
+        ) {
             Ok(result) => {
                 applied.push(result);
                 committed_indices.push(index);
             }
-            Err(error) => return Err((error, committed_indices)),
+            Err(commit_failure) => {
+                if commit_failure.commit_state == MoveCommitState::Committed {
+                    committed_indices.push(index);
+                }
+                return Err((commit_failure.error, committed_indices));
+            }
         }
     }
 
     Ok(applied)
-}
-
-fn commit_move_plan<After>(
-    plan: &MovePreflightPlan,
-    after_verify_hook: After,
-) -> Result<ApplyFileResult, IdenteditError>
-where
-    After: FnMut() -> Result<(), IdenteditError>,
-{
-    commit_move_plan_with_after_and_rename(plan, after_verify_hook, |from, to| fs::rename(from, to))
 }
 
 #[cfg(test)]
@@ -460,16 +533,41 @@ where
     After: FnMut() -> Result<(), IdenteditError>,
     R: FnMut(&Path, &Path) -> std::io::Result<()>,
 {
-    commit_move_plan_with_after_and_rename(plan, after_verify_hook, rename_file)
+    commit_move_plan_with_hooks(plan, after_verify_hook, || Ok(()), || Ok(()), rename_file)
+        .map_err(|failure| failure.error)
 }
 
-fn commit_move_plan_with_after_and_rename<After, R>(
+#[cfg(test)]
+pub(super) fn commit_move_plan_with_before_rename_hook<After, BeforeRename>(
     plan: &MovePreflightPlan,
-    mut after_verify_hook: After,
-    mut rename_file: R,
+    after_verify_hook: After,
+    before_rename_hook: BeforeRename,
 ) -> Result<ApplyFileResult, IdenteditError>
 where
     After: FnMut() -> Result<(), IdenteditError>,
+    BeforeRename: FnMut() -> Result<(), IdenteditError>,
+{
+    commit_move_plan_with_hooks(
+        plan,
+        after_verify_hook,
+        before_rename_hook,
+        || Ok(()),
+        rename_file_no_replace,
+    )
+    .map_err(|failure| failure.error)
+}
+
+fn commit_move_plan_with_hooks<After, BeforeRename, Renamed, R>(
+    plan: &MovePreflightPlan,
+    mut after_verify_hook: After,
+    mut before_rename_hook: BeforeRename,
+    mut after_rename_hook: Renamed,
+    mut rename_file: R,
+) -> Result<ApplyFileResult, MoveCommitFailure>
+where
+    After: FnMut() -> Result<(), IdenteditError>,
+    BeforeRename: FnMut() -> Result<(), IdenteditError>,
+    Renamed: FnMut() -> Result<(), IdenteditError>,
     R: FnMut(&Path, &Path) -> std::io::Result<()>,
 {
     verify_apply_guard_state(&plan.source, &plan.guard_state)?;
@@ -481,13 +579,31 @@ where
                 "Destination path already exists: '{}'",
                 plan.destination.display()
             ),
-        });
+        }
+        .into());
     }
 
-    rename_file(&plan.source, &plan.destination)
-        .map_err(|error| IdenteditError::io(&plan.source, error))?;
-    sync_parent_directory(&plan.source)?;
-    sync_parent_directory(&plan.destination)?;
+    before_rename_hook()?;
+    rename_file(&plan.source, &plan.destination).map_err(|error| {
+        let error = if error.kind() == io::ErrorKind::AlreadyExists {
+            IdenteditError::InvalidRequest {
+                message: format!(
+                    "Destination path already exists: '{}'",
+                    plan.destination.display()
+                ),
+            }
+        } else {
+            IdenteditError::io(&plan.source, error)
+        };
+        MoveCommitFailure::from(error)
+    })?;
+    let committed_failure = |error| MoveCommitFailure {
+        error,
+        commit_state: MoveCommitState::Committed,
+    };
+    after_rename_hook().map_err(committed_failure)?;
+    sync_parent_directory(&plan.source).map_err(committed_failure)?;
+    sync_parent_directory(&plan.destination).map_err(committed_failure)?;
 
     Ok(ApplyFileResult {
         file: plan.source.display().to_string(),
@@ -495,6 +611,177 @@ where
         operations_total: plan.operations_total,
         status: ApplyFileStatus::Applied,
     })
+}
+
+#[cfg(target_os = "linux")]
+fn rename_file_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    let source = path_to_c_string(source)?;
+    let destination = path_to_c_string(destination)?;
+    // SAFETY: both pointers reference live, NUL-terminated path buffers for the duration
+    // of the call, and renameat2 does not retain either pointer.
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn rename_file_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    let source = path_to_c_string(source)?;
+    let destination = path_to_c_string(destination)?;
+    // SAFETY: both pointers reference live, NUL-terminated path buffers for the duration
+    // of the call, and renamex_np does not retain either pointer.
+    let result =
+        unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn path_to_c_string(path: &Path) -> io::Result<CString> {
+    use std::os::unix::ffi::OsStrExt;
+
+    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Path contains an interior NUL byte: '{}'", path.display()),
+        )
+    })
+}
+
+#[cfg(windows)]
+fn rename_file_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+
+    let source = path_to_windows_wide(source)?;
+    let destination = path_to_windows_wide(destination)?;
+    // Omitting MOVEFILE_REPLACE_EXISTING makes destination creation an atomic failure.
+    // SAFETY: both pointers reference live, NUL-terminated UTF-16 buffers for the call.
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn path_to_windows_wide(path: &Path) -> io::Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const LEGACY_MAX_PATH: usize = 248;
+    const VERBATIM_PREFIX: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    const NT_PREFIX: &[u16] = &[b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
+    const DEVICE_PREFIX: &[u16] = &[b'\\' as u16, b'\\' as u16, b'.' as u16, b'\\' as u16];
+    const UNC_PREFIX: &[u16] = &[
+        b'\\' as u16,
+        b'\\' as u16,
+        b'?' as u16,
+        b'\\' as u16,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        b'\\' as u16,
+    ];
+    const UNC_PATH_PREFIX: &[u16] = &[b'\\' as u16, b'\\' as u16];
+
+    let absolute = std::path::absolute(path)?;
+    let mut encoded = absolute.as_os_str().encode_wide().collect::<Vec<_>>();
+    if encoded.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Path contains an interior NUL byte: '{}'", path.display()),
+        ));
+    }
+
+    if encoded.len() + 1 >= LEGACY_MAX_PATH
+        && !encoded.starts_with(VERBATIM_PREFIX)
+        && !encoded.starts_with(NT_PREFIX)
+    {
+        if encoded.starts_with(DEVICE_PREFIX) {
+            encoded.splice(..DEVICE_PREFIX.len(), VERBATIM_PREFIX.iter().copied());
+        } else if encoded.starts_with(UNC_PATH_PREFIX) {
+            encoded.splice(..UNC_PATH_PREFIX.len(), UNC_PREFIX.iter().copied());
+        } else {
+            encoded.splice(..0, VERBATIM_PREFIX.iter().copied());
+        }
+    }
+
+    encoded.push(0);
+    Ok(encoded)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::rename_file_no_replace;
+
+    #[test]
+    fn rename_file_no_replace_moves_to_missing_destination() {
+        let workspace = tempdir().expect("tempdir should be created");
+        let source = workspace.path().join("source.txt");
+        let destination = workspace.path().join("destination.txt");
+        fs::write(&source, "source").expect("source should be written");
+
+        rename_file_no_replace(&source, &destination).expect("move should succeed");
+
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read_to_string(&destination).expect("destination should be readable"),
+            "source"
+        );
+    }
+
+    #[test]
+    fn rename_file_no_replace_preserves_existing_destination() {
+        let workspace = tempdir().expect("tempdir should be created");
+        let source = workspace.path().join("source.txt");
+        let destination = workspace.path().join("destination.txt");
+        fs::write(&source, "source").expect("source should be written");
+        fs::write(&destination, "destination").expect("destination should be written");
+
+        rename_file_no_replace(&source, &destination)
+            .expect_err("existing destination must make the move fail");
+
+        assert_eq!(
+            fs::read_to_string(&source).expect("source should remain readable"),
+            "source"
+        );
+        assert_eq!(
+            fs::read_to_string(&destination).expect("destination should remain readable"),
+            "destination"
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn rename_file_no_replace(_source: &Path, _destination: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "atomic no-replace file moves are unsupported on this platform",
+    ))
 }
 
 pub(super) fn rollback_committed_moves(
@@ -510,8 +797,27 @@ pub(super) fn rollback_committed_moves(
                 ),
             })?;
 
-        fs::rename(&plan.destination, &plan.source)
-            .map_err(|error| IdenteditError::io(&plan.destination, error))?;
+        verify_apply_guard_state(&plan.destination, &plan.guard_state)?;
+        if move_path_exists(&plan.source)? {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Move rollback source path already exists: '{}'",
+                    plan.source.display()
+                ),
+            });
+        }
+        rename_file_no_replace(&plan.destination, &plan.source).map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Move rollback source path already exists: '{}'",
+                        plan.source.display()
+                    ),
+                }
+            } else {
+                IdenteditError::io(&plan.destination, error)
+            }
+        })?;
         sync_parent_directory(&plan.source)?;
         sync_parent_directory(&plan.destination)?;
     }

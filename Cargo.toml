@@ -9,6 +9,7 @@ clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
 glob = "0.3"
 libloading = "0.8"
+libc = "0.2"
 miette = { version = "7", features = ["fancy"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -48,6 +49,9 @@ tree-sitter-toml = { package = "tree-sitter-toml-ng", version = "0.7.0" }
 tree-sitter-typescript = "0.23.2"
 tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 proptest = "1"

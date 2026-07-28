@@ -963,11 +963,7 @@ fn apply_json_mode_rejects_multiple_move_operations_per_file() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": destination_a.to_string_lossy().to_string()
@@ -982,11 +978,7 @@ fn apply_json_mode_rejects_multiple_move_operations_per_file() {
                             }
                         },
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": destination_b.to_string_lossy().to_string()
@@ -1043,11 +1035,7 @@ fn apply_json_mode_rejects_move_mixed_with_content_edits_for_same_file() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-move",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-move"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
@@ -1111,6 +1099,92 @@ fn apply_json_mode_rejects_move_mixed_with_content_edits_for_same_file() {
 }
 
 #[test]
+fn apply_json_mode_rejects_edit_and_move_split_across_duplicate_file_entries() {
+    let workspace = tempdir().expect("tempdir should be created");
+    let source_path = workspace.path().join("source.py");
+    let original = "def keep():\n    return 1\n";
+    fs::write(&source_path, original).expect("fixture write should succeed");
+    let destination = workspace.path().join("renamed.py");
+    let move_target = file_move_target(&source_path);
+    let expected_file_hash = move_target["expected_file_hash"].clone();
+
+    let request = json!({
+        "command": "apply",
+        "changeset": {
+            "files": [
+                {
+                    "file": source_path.to_string_lossy().to_string(),
+                    "operations": [
+                        {
+                            "target": {
+                                "type": "file_start",
+                                "expected_file_hash": expected_file_hash
+                            },
+                            "op": {
+                                "type": "insert",
+                                "new_text": "# header\n"
+                            },
+                            "preview": {
+                                "old_text": "",
+                                "new_text": "# header\n",
+                                "matched_span": {
+                                    "start": 0,
+                                    "end": 0
+                                }
+                            }
+                        }
+                    ]
+                },
+                {
+                    "file": source_path.to_string_lossy().to_string(),
+                    "operations": [
+                        {
+                            "target": move_target,
+                            "op": {
+                                "type": "move",
+                                "to": destination.to_string_lossy().to_string()
+                            },
+                            "preview": {
+                                "old_text": "",
+                                "new_text": "",
+                                "matched_span": {
+                                    "start": 0,
+                                    "end": 0
+                                }
+                            }
+                        }
+                    ]
+                }
+            ],
+            "transaction": {
+                "mode": "all_or_nothing"
+            }
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["apply", "--json", "--dry-run"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "apply should reject duplicate file entries before preflight locking"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Duplicate file entry in changeset.files")),
+        "expected duplicate file entry diagnostic, got: {response}"
+    );
+    assert_eq!(
+        fs::read_to_string(&source_path).expect("source should remain readable"),
+        original
+    );
+    assert!(!destination.exists());
+}
+
+#[test]
 fn apply_json_mode_executes_single_move_operation() {
     let workspace = tempdir().expect("tempdir should be created");
     let source_path = workspace.path().join("source.py");
@@ -1125,11 +1199,7 @@ fn apply_json_mode_executes_single_move_operation() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-move",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-move"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
@@ -1191,11 +1261,7 @@ fn apply_json_mode_move_graph_rejects_self_move() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-move",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-move"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": source_path.to_string_lossy().to_string()
@@ -1252,11 +1318,7 @@ fn apply_json_mode_move_graph_rejects_duplicate_destination_paths() {
                     "file": source_a.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
@@ -1276,11 +1338,7 @@ fn apply_json_mode_move_graph_rejects_duplicate_destination_paths() {
                     "file": source_b.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
@@ -1337,11 +1395,7 @@ fn apply_json_mode_move_graph_rejects_existing_destination_when_not_chain() {
                     "file": source.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-source",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-source"
-                            },
+                            "target": file_move_target(&source),
                             "op": {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
@@ -1397,11 +1451,7 @@ fn apply_json_mode_move_graph_rejects_cycle() {
                     "file": source_a.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": source_b.to_string_lossy().to_string()
@@ -1421,11 +1471,7 @@ fn apply_json_mode_move_graph_rejects_cycle() {
                     "file": source_b.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": source_a.to_string_lossy().to_string()
@@ -1486,11 +1532,7 @@ fn apply_json_mode_move_graph_executes_chain_in_reverse_topological_order() {
                     "file": source_a.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": source_b.to_string_lossy().to_string()
@@ -1510,11 +1552,7 @@ fn apply_json_mode_move_graph_executes_chain_in_reverse_topological_order() {
                     "file": source_b.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": destination_c.to_string_lossy().to_string()
@@ -1592,11 +1630,7 @@ fn apply_json_mode_move_rejects_duplicate_source_alias_paths() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "renamed_a.py"
@@ -1616,11 +1650,7 @@ fn apply_json_mode_move_rejects_duplicate_source_alias_paths() {
                     "file": "./source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "renamed_b.py"

@@ -16,6 +16,7 @@ enum TransformTargetType {
     Node,
     FileStart,
     FileEnd,
+    File,
     Line,
 }
 
@@ -83,6 +84,13 @@ impl<'de> Deserialize<'de> for TransformTarget {
                     .expected_file_hash
                     .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
                 Ok(TransformTarget::FileEnd { expected_file_hash })
+            }
+            TransformTargetType::File => {
+                reject_node_or_line_fields_for_file_target(&wire)?;
+                let expected_file_hash = wire
+                    .expected_file_hash
+                    .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
+                Ok(TransformTarget::File { expected_file_hash })
             }
             TransformTargetType::Line => {
                 reject_node_or_file_fields_for_line_target(&wire)?;

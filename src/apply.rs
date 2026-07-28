@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::Path;
 
 use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransactionMode};
 use crate::error::IdenteditError;
@@ -14,20 +15,26 @@ use move_ops::{
     validate_move_operation_constraints,
 };
 use preflight::{
-    commit_preflight_batch, preflight_changesets_in_order, prepare_commit_batch,
-    rollback_committed_files,
+    CommittedEditBatch, commit_preflight_batch, preflight_changesets_in_order,
+    preflight_resolved_text_update, prepare_commit_batch, rollback_committed_files,
+    validate_unique_changeset_files,
 };
 
 #[cfg(test)]
 use io::{
-    ApplyGuardState, AtomicWritePhase, acquire_apply_lock, capture_path_fingerprint,
-    verify_apply_guard_state, write_text_atomically_with_hook,
+    ApplyGuardState, AtomicWritePhase, acquire_apply_lock, capture_apply_guard_state,
+    capture_path_fingerprint, verify_apply_guard_state, write_text_atomically_with_hook,
     write_text_atomically_with_hook_and_rename,
 };
 #[cfg(test)]
-use move_ops::commit_move_plan_with_rename;
+use move_ops::{
+    commit_move_plan_with_before_rename_hook, commit_move_plan_with_rename,
+    commit_move_plans_with_after_rename_hook,
+};
 #[cfg(test)]
-use preflight::FileRollbackSnapshot;
+use preflight::{
+    CommittedFileRollback, FileRollbackSnapshot, commit_preflight_batch_with_write_hook,
+};
 #[cfg(test)]
 use replacements::{ResolvedReplacement, apply_replacements_to_text, ensure_non_overlapping};
 
@@ -166,6 +173,23 @@ pub fn apply_multi_file_changeset(
     apply_multi_file_changeset_with_injection(changeset, None)
 }
 
+pub(crate) fn apply_resolved_text_update(
+    file: &Path,
+    expected_source: &str,
+    updated_text: String,
+    operations_total: usize,
+    dry_run: bool,
+) -> Result<(), IdenteditError> {
+    let plan =
+        preflight_resolved_text_update(file, expected_source, updated_text, operations_total)?;
+    if dry_run {
+        return Ok(());
+    }
+
+    let batch = prepare_commit_batch(vec![plan]);
+    commit_preflight_batch(batch, || Ok(()), || Ok(())).map(|_| ())
+}
+
 pub fn dry_run_multi_file_changeset(
     changeset: &MultiFileChangeset,
 ) -> Result<ApplyResponse, IdenteditError> {
@@ -176,6 +200,7 @@ pub fn dry_run_multi_file_changeset(
     }
 
     let move_execution_order = validate_move_operation_constraints(&changeset.files)?;
+    validate_unique_changeset_files(&changeset.files)?;
     let edit_changesets = changeset
         .files
         .iter()
@@ -290,6 +315,7 @@ where
     After: FnMut() -> Result<(), IdenteditError>,
 {
     let move_execution_order = validate_move_operation_constraints(changesets)?;
+    validate_unique_changeset_files(changesets)?;
     let edit_changesets = changesets
         .iter()
         .filter(|changeset| !changeset_has_move(changeset))
@@ -299,17 +325,25 @@ where
     let context = ExecutionContext::new();
     let preflight_plans = preflight_changesets_in_order(&edit_changesets, context.registry())?;
     let commit_batch = prepare_commit_batch(preflight_plans);
-    let edit_rollback_snapshots = commit_batch.rollback_snapshots.clone();
     let move_plans = preflight_move_plans(&move_execution_order)?;
 
-    let mut applied = if commit_batch.preflight_plans.is_empty() {
+    let committed_edits = if commit_batch.preflight_plans.is_empty() {
         if !move_plans.is_empty() {
             before_write_hook()?;
         }
-        Vec::new()
+        CommittedEditBatch {
+            applied: Vec::new(),
+            rollback_snapshots: Vec::new(),
+            committed_files: Vec::new(),
+        }
     } else {
         commit_preflight_batch(commit_batch, &mut before_write_hook, &mut after_verify_hook)?
     };
+    let CommittedEditBatch {
+        mut applied,
+        rollback_snapshots: edit_rollback_snapshots,
+        committed_files: committed_edit_files,
+    } = committed_edits;
 
     if !move_plans.is_empty() {
         match commit_move_plans(&move_plans, &mut after_verify_hook) {
@@ -317,10 +351,8 @@ where
             Err((commit_error, committed_move_indices)) => {
                 let move_rollback_error =
                     rollback_committed_moves(&move_plans, &committed_move_indices).err();
-                let committed_edit_indices = (0..edit_rollback_snapshots.len()).collect::<Vec<_>>();
                 let edit_rollback_error =
-                    rollback_committed_files(&edit_rollback_snapshots, &committed_edit_indices)
-                        .err();
+                    rollback_committed_files(&edit_rollback_snapshots, &committed_edit_files).err();
 
                 if move_rollback_error.is_none() && edit_rollback_error.is_none() {
                     return Err(commit_error);

@@ -173,6 +173,9 @@ fn canonicalize_operation_target(
         TransformTarget::FileEnd { expected_file_hash } => TransformTarget::FileEnd {
             expected_file_hash: expected_file_hash.clone(),
         },
+        TransformTarget::File { expected_file_hash } => TransformTarget::File {
+            expected_file_hash: expected_file_hash.clone(),
+        },
         TransformTarget::Line { anchor, end_anchor } => TransformTarget::Line {
             anchor: anchor.clone(),
             end_anchor: end_anchor.clone(),

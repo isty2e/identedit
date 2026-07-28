@@ -23,11 +23,7 @@ fn apply_json_mode_move_rejects_existing_symlink_destination() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-symlink",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-symlink"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": symlink_destination.to_string_lossy().to_string()
@@ -85,11 +81,7 @@ fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-rel",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-rel"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "./renamed.py"
@@ -139,11 +131,8 @@ fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
 #[test]
 fn apply_json_mode_move_rejects_dot_segment_self_move_in_relative_mode() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("source.py"),
-        "def keep():\n    return 1\n",
-    )
-    .expect("fixture write should succeed");
+    let source_path = workspace.path().join("source.py");
+    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -153,11 +142,7 @@ fn apply_json_mode_move_rejects_dot_segment_self_move_in_relative_mode() {
                     "file": "./source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-dot",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-dot"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "nested/../source.py"
@@ -217,11 +202,7 @@ fn apply_json_mode_executes_move_to_nested_existing_directory() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-nested",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-nested"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "nested/renamed.py"
@@ -283,11 +264,7 @@ fn apply_json_mode_move_to_path_under_file_parent_returns_io_error() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-parent-file",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-parent-file"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": workspace.path().join("not_a_directory/renamed.py").to_string_lossy().to_string()
@@ -328,16 +305,10 @@ fn apply_json_mode_move_to_path_under_file_parent_returns_io_error() {
 #[test]
 fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("a.py"),
-        "def from_a():\n    return 'a'\n",
-    )
-    .expect("fixture write should succeed");
-    fs::write(
-        workspace.path().join("b.py"),
-        "def from_b():\n    return 'b'\n",
-    )
-    .expect("fixture write should succeed");
+    let source_a = workspace.path().join("a.py");
+    let source_b = workspace.path().join("b.py");
+    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
+    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -347,11 +318,7 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
                     "file": "a.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": "renamed.py"
@@ -371,11 +338,7 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
                     "file": "b.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": "./renamed.py"
@@ -428,16 +391,10 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
 #[test]
 fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("a.py"),
-        "def from_a():\n    return 'a'\n",
-    )
-    .expect("fixture write should succeed");
-    fs::write(
-        workspace.path().join("b.py"),
-        "def from_b():\n    return 'b'\n",
-    )
-    .expect("fixture write should succeed");
+    let source_a = workspace.path().join("a.py");
+    let source_b = workspace.path().join("b.py");
+    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
+    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -447,11 +404,7 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
                     "file": "a.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": "./b.py"
@@ -471,11 +424,7 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
                     "file": "b.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": "nested/../a.py"
@@ -522,16 +471,10 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
 #[test]
 fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("a.py"),
-        "def from_a():\n    return 'a'\n",
-    )
-    .expect("fixture write should succeed");
-    fs::write(
-        workspace.path().join("b.py"),
-        "def from_b():\n    return 'b'\n",
-    )
-    .expect("fixture write should succeed");
+    let source_a = workspace.path().join("a.py");
+    let source_b = workspace.path().join("b.py");
+    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
+    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -541,11 +484,7 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
                     "file": "a.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": "./b.py"
@@ -565,11 +504,7 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
                     "file": "b.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": "./c.py"
@@ -611,11 +546,8 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
 #[test]
 fn apply_json_mode_executes_move_with_non_self_dot_segment_destination() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("source.py"),
-        "def keep():\n    return 1\n",
-    )
-    .expect("fixture write should succeed");
+    let source_path = workspace.path().join("source.py");
+    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -625,11 +557,7 @@ fn apply_json_mode_executes_move_with_non_self_dot_segment_destination() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-dot-nonself",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-dot-nonself"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "nested/../renamed.py"
@@ -1819,164 +1747,6 @@ fn apply_inject_failure_count_above_commit_count_is_noop() {
     assert!(after_a.contains("return value * 701"));
     assert!(after_b.contains("return value * 702"));
 }
-
-#[test]
-fn apply_multi_file_mid_commit_guard_failure_rolls_back_already_committed_files() {
-    let mut saw_expected_failure = false;
-    let mut last_attempt_message = String::new();
-
-    for attempt in 1..=6 {
-        let file_a = copy_fixture_to_temp_python("example.py");
-        let file_b = copy_fixture_to_temp_python("example.py");
-        let before_a = fs::read_to_string(&file_a).expect("file_a should be readable");
-        let before_b = fs::read_to_string(&file_b).expect("file_b should be readable");
-        let original_mtime_b = fs::metadata(&file_b)
-            .expect("file_b metadata should be readable")
-            .modified()
-            .expect("file_b mtime should be readable");
-
-        let handle_a = select_named_handle(&file_a, "process_*");
-        let handle_b = select_named_handle(&file_b, "process_*");
-        let span_a = &handle_a["span"];
-        let span_b = &handle_b["span"];
-        let new_text_a =
-            "def process_data(value):\n    return value * 401\n# rollback_probe_mid_commit";
-        let new_text_b = "def process_data(value):\n    return value * 402";
-        let expected_hash_a = identedit::changeset::hash_text(
-            handle_a["text"].as_str().expect("text should be string"),
-        );
-        let expected_hash_b = identedit::changeset::hash_text(
-            handle_b["text"].as_str().expect("text should be string"),
-        );
-
-        let payload = json!({
-            "files": [
-                {
-                    "file": file_a.to_string_lossy().to_string(),
-                    "operations": [
-                        {
-                            "target": {
-                                "identity": handle_a["identity"],
-                                "kind": handle_a["kind"],
-                                "span_hint": {"start": span_a["start"], "end": span_a["end"]},
-                                "expected_old_hash": expected_hash_a
-                            },
-                            "op": {"type": "replace", "new_text": new_text_a},
-                            "preview": {
-                                "old_text": handle_a["text"],
-                                "new_text": new_text_a,
-                                "matched_span": {"start": span_a["start"], "end": span_a["end"]}
-                            }
-                        }
-                    ]
-                },
-                {
-                    "file": file_b.to_string_lossy().to_string(),
-                    "operations": [
-                        {
-                            "target": {
-                                "identity": handle_b["identity"],
-                                "kind": handle_b["kind"],
-                                "span_hint": {"start": span_b["start"], "end": span_b["end"]},
-                                "expected_old_hash": expected_hash_b
-                            },
-                            "op": {"type": "replace", "new_text": new_text_b},
-                            "preview": {
-                                "old_text": handle_b["text"],
-                                "new_text": new_text_b,
-                                "matched_span": {"start": span_b["start"], "end": span_b["end"]}
-                            }
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        });
-        let payload_bytes = payload.to_string().into_bytes();
-
-        let stale_text_b = before_b.replace("value + 1", "value + 2");
-        assert_eq!(
-            stale_text_b.len(),
-            before_b.len(),
-            "stale mutation should preserve byte length to exercise hash guard path"
-        );
-        let stale_text_for_thread = stale_text_b.clone();
-        let file_a_for_thread = file_a.clone();
-        let file_b_for_thread = file_b.clone();
-        let sabotage = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline {
-                if let Ok(contents) = fs::read_to_string(&file_a_for_thread)
-                    && contents.contains("rollback_probe_mid_commit")
-                {
-                    fs::write(&file_b_for_thread, &stale_text_for_thread)
-                        .expect("sabotage should rewrite second file");
-                    let handle = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(&file_b_for_thread)
-                        .expect("sabotage should reopen second file");
-                    handle
-                        .set_times(FileTimes::new().set_modified(original_mtime_b))
-                        .expect("sabotage should restore second file mtime");
-                    return true;
-                }
-                thread::sleep(Duration::from_millis(2));
-            }
-            false
-        });
-
-        let output = run_identedit_with_raw_stdin(&["apply"], &payload_bytes);
-        let sabotage_triggered = sabotage.join().expect("sabotage thread should not panic");
-
-        if !sabotage_triggered {
-            last_attempt_message = format!("attempt {attempt}: sabotage did not trigger");
-            continue;
-        }
-
-        if output.status.success() {
-            last_attempt_message = format!("attempt {attempt}: apply succeeded unexpectedly");
-            continue;
-        }
-
-        let response: Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        let error_type = response["error"]["type"]
-            .as_str()
-            .expect("error.type should be string");
-        if error_type != "precondition_failed" && error_type != "path_changed" {
-            last_attempt_message = format!(
-                "attempt {attempt}: expected precondition/path guard failure, got {error_type}"
-            );
-            continue;
-        }
-
-        let after_a = fs::read_to_string(&file_a).expect("file_a should remain readable");
-        let after_b = fs::read_to_string(&file_b).expect("file_b should remain readable");
-        if after_a != before_a {
-            last_attempt_message =
-                format!("attempt {attempt}: file_a rollback did not restore original text");
-            continue;
-        }
-        if after_b != stale_text_b {
-            last_attempt_message = format!(
-                "attempt {attempt}: file_b expected external stale content after guard failure"
-            );
-            continue;
-        }
-
-        saw_expected_failure = true;
-        break;
-    }
-
-    assert!(
-        saw_expected_failure,
-        "mid-commit guard rollback scenario did not materialize within retry budget: {last_attempt_message}"
-    );
-}
-
 #[test]
 fn apply_multi_file_lock_contention_fails_without_writing_unlocked_files() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -2066,141 +1836,6 @@ fn apply_multi_file_lock_contention_fails_without_writing_unlocked_files() {
     assert_eq!(after_a, before_a, "lock contention must not write file_a");
     assert_eq!(after_b, before_b, "lock contention must not write file_b");
 }
-
-#[test]
-fn apply_multi_file_commit_io_failure_rolls_back_already_committed_files() {
-    let mut saw_expected_failure = false;
-    let mut last_attempt_message = String::new();
-
-    for attempt in 1..=12 {
-        let file_a = copy_fixture_to_temp_python("example.py");
-        let file_b = copy_fixture_to_temp_python("example.py");
-        let before_a = fs::read_to_string(&file_a).expect("file_a should be readable");
-
-        let handle_a = select_named_handle(&file_a, "process_*");
-        let handle_b = select_named_handle(&file_b, "process_*");
-        let span_a = &handle_a["span"];
-        let span_b = &handle_b["span"];
-        let new_text_a = "def process_data(value):\n    return value * 301\n# rollback_probe";
-        let new_text_b = "def process_data(value):\n    return value * 302";
-        let expected_hash_a = identedit::changeset::hash_text(
-            handle_a["text"].as_str().expect("text should be string"),
-        );
-        let expected_hash_b = identedit::changeset::hash_text(
-            handle_b["text"].as_str().expect("text should be string"),
-        );
-
-        let payload = json!({
-            "files": [
-                {
-                    "file": file_a.to_string_lossy().to_string(),
-                    "operations": [
-                        {
-                            "target": {
-                                "identity": handle_a["identity"],
-                                "kind": handle_a["kind"],
-                                "span_hint": {"start": span_a["start"], "end": span_a["end"]},
-                                "expected_old_hash": expected_hash_a
-                            },
-                            "op": {"type": "replace", "new_text": new_text_a},
-                            "preview": {
-                                "old_text": handle_a["text"],
-                                "new_text": new_text_a,
-                                "matched_span": {"start": span_a["start"], "end": span_a["end"]}
-                            }
-                        }
-                    ]
-                },
-                {
-                    "file": file_b.to_string_lossy().to_string(),
-                    "operations": [
-                        {
-                            "target": {
-                                "identity": handle_b["identity"],
-                                "kind": handle_b["kind"],
-                                "span_hint": {"start": span_b["start"], "end": span_b["end"]},
-                                "expected_old_hash": expected_hash_b
-                            },
-                            "op": {"type": "replace", "new_text": new_text_b},
-                            "preview": {
-                                "old_text": handle_b["text"],
-                                "new_text": new_text_b,
-                                "matched_span": {"start": span_b["start"], "end": span_b["end"]}
-                            }
-                        }
-                    ]
-                }
-            ],
-            "transaction": {
-                "mode": "all_or_nothing"
-            }
-        });
-        let payload_bytes = payload.to_string().into_bytes();
-
-        let file_a_for_thread = file_a.clone();
-        let file_b_for_thread = file_b.clone();
-        let sabotage = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(4);
-            while Instant::now() < deadline {
-                if let Ok(contents) = fs::read_to_string(&file_a_for_thread)
-                    && contents.contains("rollback_probe")
-                {
-                    fs::remove_file(&file_b_for_thread)
-                        .expect("sabotage should remove second file before second commit");
-                    return true;
-                }
-                thread::sleep(Duration::from_millis(2));
-            }
-            false
-        });
-
-        let output = run_identedit_with_raw_stdin(&["apply"], &payload_bytes);
-        let sabotage_triggered = sabotage.join().expect("sabotage thread should not panic");
-
-        if !sabotage_triggered {
-            last_attempt_message = format!("attempt {attempt}: sabotage did not trigger");
-            continue;
-        }
-
-        if output.status.success() {
-            last_attempt_message = format!("attempt {attempt}: apply succeeded unexpectedly");
-            continue;
-        }
-
-        let response: Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        if response["error"]["type"] != "io_error" {
-            last_attempt_message = format!(
-                "attempt {attempt}: expected io_error, got {}",
-                response["error"]["type"]
-            );
-            continue;
-        }
-
-        let after_a = fs::read_to_string(&file_a).expect("file_a should remain readable");
-        if after_a != before_a {
-            last_attempt_message =
-                format!("attempt {attempt}: file_a rollback did not restore original text");
-            continue;
-        }
-
-        if file_b.exists() {
-            last_attempt_message = format!(
-                "attempt {attempt}: file_b still exists; sabotage/commit timing unexpected"
-            );
-            continue;
-        }
-
-        saw_expected_failure = true;
-        break;
-    }
-
-    assert!(
-        saw_expected_failure,
-        "commit-stage io failure scenario did not materialize within retry budget: {last_attempt_message}"
-    );
-}
-
 #[test]
 fn apply_multi_file_same_logical_path_variants_still_reject_without_mutation() {
     let workspace = tempdir().expect("tempdir should be created");

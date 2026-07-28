@@ -13,9 +13,12 @@ use crate::transform::conflict::validate_change_conflicts;
 use crate::transform::parse::parse_handles_for_source_with_registry;
 
 use super::io::{
-    ApplyFileLock, ApplyGuardState, acquire_apply_lock, capture_apply_guard_state,
-    verify_apply_guard_state, write_text_atomically,
+    ApplyFileLock, ApplyGuardState, AtomicWriteFailure, acquire_apply_lock,
+    capture_apply_guard_state, verify_apply_guard_state, write_text_atomically,
+    write_text_atomically_tracked,
 };
+#[cfg(test)]
+use super::io::{AtomicWritePhase, write_text_atomically_tracked_with_hook};
 use super::replacements::{
     apply_replacements_to_text, matched_changes_to_replacements, validate_preview_consistency,
 };
@@ -45,6 +48,42 @@ pub(super) fn preflight_changesets_in_order(
     }
 
     Ok(plans)
+}
+
+pub(super) fn validate_unique_changeset_files(
+    changesets: &[FileChange],
+) -> Result<(), IdenteditError> {
+    order_changesets_for_preflight(changesets).map(|_| ())
+}
+
+pub(super) fn preflight_resolved_text_update(
+    file: &Path,
+    expected_source: &str,
+    updated_text: String,
+    operations_total: usize,
+) -> Result<PreflightFilePlan, IdenteditError> {
+    let lock_guard = acquire_apply_lock(file)?;
+    let guard_state = capture_apply_guard_state(file)?;
+    let source_text = fs::read_to_string(file).map_err(|error| IdenteditError::io(file, error))?;
+    if source_text != expected_source {
+        return Err(IdenteditError::PreconditionFailed {
+            expected_hash: hash_bytes(expected_source.as_bytes()),
+            actual_hash: hash_bytes(source_text.as_bytes()),
+        });
+    }
+    let original_permissions = fs::metadata(file)
+        .map_err(|error| IdenteditError::io(file, error))?
+        .permissions();
+
+    Ok(PreflightFilePlan {
+        file: file.to_path_buf(),
+        operations_total,
+        original_text: source_text,
+        original_permissions,
+        updated_text,
+        guard_state,
+        _lock_guard: lock_guard,
+    })
 }
 
 #[derive(Debug)]
@@ -173,6 +212,19 @@ pub(super) struct CommitBatch {
     pub(super) rollback_snapshots: Vec<FileRollbackSnapshot>,
 }
 
+#[derive(Debug)]
+pub(super) struct CommittedEditBatch {
+    pub(super) applied: Vec<ApplyFileResult>,
+    pub(super) rollback_snapshots: Vec<FileRollbackSnapshot>,
+    pub(super) committed_files: Vec<CommittedFileRollback>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CommittedFileRollback {
+    pub(super) snapshot_index: usize,
+    pub(super) expected_guard: ApplyGuardState,
+}
+
 pub(super) fn prepare_commit_batch(preflight_plans: Vec<PreflightFilePlan>) -> CommitBatch {
     let rollback_snapshots = preflight_plans
         .iter()
@@ -230,34 +282,83 @@ fn validate_commit_batch_invariants(batch: &CommitBatch) -> Result<(), Identedit
 
 pub(super) fn commit_preflight_batch<Before, After>(
     batch: CommitBatch,
-    mut before_write_hook: Before,
-    mut after_verify_hook: After,
-) -> Result<Vec<ApplyFileResult>, IdenteditError>
+    before_write_hook: Before,
+    after_verify_hook: After,
+) -> Result<CommittedEditBatch, IdenteditError>
 where
     Before: FnMut() -> Result<(), IdenteditError>,
     After: FnMut() -> Result<(), IdenteditError>,
+{
+    commit_preflight_batch_with_writer(batch, before_write_hook, after_verify_hook, |plan| {
+        write_text_atomically_tracked(&plan.file, &plan.updated_text, Some(&plan.guard_state))
+    })
+}
+
+#[cfg(test)]
+pub(super) fn commit_preflight_batch_with_write_hook<Before, After, Phase>(
+    batch: CommitBatch,
+    before_write_hook: Before,
+    after_verify_hook: After,
+    mut phase_hook: Phase,
+) -> Result<CommittedEditBatch, IdenteditError>
+where
+    Before: FnMut() -> Result<(), IdenteditError>,
+    After: FnMut() -> Result<(), IdenteditError>,
+    Phase: FnMut(AtomicWritePhase) -> std::io::Result<()>,
+{
+    commit_preflight_batch_with_writer(batch, before_write_hook, after_verify_hook, |plan| {
+        write_text_atomically_tracked_with_hook(
+            &plan.file,
+            &plan.updated_text,
+            Some(&plan.guard_state),
+            &mut phase_hook,
+        )
+    })
+}
+
+fn commit_preflight_batch_with_writer<Before, After, Write>(
+    batch: CommitBatch,
+    mut before_write_hook: Before,
+    mut after_verify_hook: After,
+    mut write_plan: Write,
+) -> Result<CommittedEditBatch, IdenteditError>
+where
+    Before: FnMut() -> Result<(), IdenteditError>,
+    After: FnMut() -> Result<(), IdenteditError>,
+    Write: FnMut(&PreflightFilePlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
 {
     validate_commit_batch_invariants(&batch)?;
     before_write_hook()?;
 
     let rollback_snapshots = batch.rollback_snapshots;
     let mut applied = Vec::with_capacity(batch.preflight_plans.len());
-    let mut committed_indices = Vec::new();
+    let mut committed_files = Vec::with_capacity(batch.preflight_plans.len());
     for (index, plan) in batch.preflight_plans.into_iter().enumerate() {
-        match commit_preflight_plan(plan, &mut after_verify_hook) {
-            Ok(applied_result) => {
+        match commit_preflight_plan(plan, &mut after_verify_hook, &mut write_plan) {
+            Ok((applied_result, expected_guard)) => {
                 applied.push(applied_result);
-                committed_indices.push(index);
+                committed_files.push(CommittedFileRollback {
+                    snapshot_index: index,
+                    expected_guard,
+                });
             }
-            Err(commit_error) => {
+            Err(commit_failure) => {
+                let (commit_error, committed_guard) = commit_failure.into_parts();
+                if let Some(expected_guard) = committed_guard {
+                    committed_files.push(CommittedFileRollback {
+                        snapshot_index: index,
+                        expected_guard,
+                    });
+                }
                 let rollback_result =
-                    rollback_committed_files(&rollback_snapshots, &committed_indices);
+                    rollback_committed_files(&rollback_snapshots, &committed_files);
                 match rollback_result {
                     Ok(()) => return Err(commit_error),
                     Err(rollback_error) => {
                         return Err(IdenteditError::RollbackFailed {
                             message: format!(
-                                "Commit failed ({commit_error}); rollback failed ({rollback_error})"
+                                "Commit failed ({}); rollback failed ({rollback_error})",
+                                commit_error
                             ),
                         });
                     }
@@ -266,23 +367,43 @@ where
         }
     }
 
-    Ok(applied)
+    Ok(CommittedEditBatch {
+        applied,
+        rollback_snapshots,
+        committed_files,
+    })
 }
 
 pub(super) fn rollback_committed_files(
     rollback_snapshots: &[FileRollbackSnapshot],
-    committed_indices: &[usize],
+    committed_files: &[CommittedFileRollback],
 ) -> Result<(), IdenteditError> {
-    for index in committed_indices.iter().rev() {
-        let snapshot =
-            rollback_snapshots
-                .get(*index)
-                .ok_or_else(|| IdenteditError::InvalidRequest {
-                    message: format!(
-                        "Internal rollback error: missing snapshot for committed index {index}"
-                    ),
-                })?;
-        write_text_atomically(&snapshot.file, &snapshot.original_text, None)?;
+    for committed_file in committed_files.iter().rev() {
+        let snapshot = rollback_snapshots
+            .get(committed_file.snapshot_index)
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: format!(
+                    "Internal rollback error: missing snapshot for committed index {}",
+                    committed_file.snapshot_index
+                ),
+            })?;
+        verify_apply_guard_state(&snapshot.file, &committed_file.expected_guard)?;
+    }
+
+    for committed_file in committed_files.iter().rev() {
+        let snapshot = rollback_snapshots
+            .get(committed_file.snapshot_index)
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: format!(
+                    "Internal rollback error: missing snapshot for committed index {}",
+                    committed_file.snapshot_index
+                ),
+            })?;
+        write_text_atomically(
+            &snapshot.file,
+            &snapshot.original_text,
+            Some(&committed_file.expected_guard),
+        )?;
         fs::set_permissions(&snapshot.file, snapshot.original_permissions.clone())
             .map_err(|error| IdenteditError::io(&snapshot.file, error))?;
     }
@@ -290,21 +411,26 @@ pub(super) fn rollback_committed_files(
     Ok(())
 }
 
-fn commit_preflight_plan<After>(
+fn commit_preflight_plan<After, Write>(
     plan: PreflightFilePlan,
     mut after_verify_hook: After,
-) -> Result<ApplyFileResult, IdenteditError>
+    mut write_plan: Write,
+) -> Result<(ApplyFileResult, ApplyGuardState), AtomicWriteFailure>
 where
     After: FnMut() -> Result<(), IdenteditError>,
+    Write: FnMut(&PreflightFilePlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
 {
-    verify_apply_guard_state(&plan.file, &plan.guard_state)?;
-    after_verify_hook()?;
-    write_text_atomically(&plan.file, &plan.updated_text, Some(&plan.guard_state))?;
+    verify_apply_guard_state(&plan.file, &plan.guard_state).map_err(AtomicWriteFailure::from)?;
+    after_verify_hook().map_err(AtomicWriteFailure::from)?;
+    let expected_guard = write_plan(&plan)?;
 
-    Ok(ApplyFileResult {
-        file: plan.file.display().to_string(),
-        operations_applied: plan.operations_total,
-        operations_total: plan.operations_total,
-        status: ApplyFileStatus::Applied,
-    })
+    Ok((
+        ApplyFileResult {
+            file: plan.file.display().to_string(),
+            operations_applied: plan.operations_total,
+            operations_total: plan.operations_total,
+            status: ApplyFileStatus::Applied,
+        },
+        expected_guard,
+    ))
 }

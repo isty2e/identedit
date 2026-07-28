@@ -152,6 +152,9 @@ pub(super) fn resolve_operation_view(
                 anchor_span: Span { start: end, end },
             })
         }
+        TransformTarget::File { .. } => Err(IdenteditError::InvalidRequest {
+            message: "File target is only valid for whole-file move operations".to_string(),
+        }),
         TransformTarget::Line { anchor, end_anchor } => {
             resolve_line_operation_view(source_text, anchor, end_anchor.as_deref(), op)
         }
@@ -297,6 +300,9 @@ fn resolve_destination_offset(
             verify_file_target_precondition(source_text, expected_file_hash)?;
             Ok(source_text.len())
         }
+        TransformTarget::File { .. } => Err(IdenteditError::InvalidRequest {
+            message: "File target cannot be used as an in-file move destination".to_string(),
+        }),
         TransformTarget::Line { anchor, end_anchor } => {
             if end_anchor.is_some() {
                 return Err(IdenteditError::InvalidRequest {
@@ -380,6 +386,7 @@ fn validate_target_op_compatibility(
         TransformTarget::FileStart { .. } | TransformTarget::FileEnd { .. } => {
             matches!(op, OpKind::Insert { .. })
         }
+        TransformTarget::File { .. } => matches!(op, OpKind::Move { .. }),
         TransformTarget::Line { .. } => {
             matches!(op, OpKind::Replace { .. } | OpKind::InsertAfter { .. })
         }
@@ -403,6 +410,7 @@ fn target_kind_name(target: &TransformTarget) -> &'static str {
         TransformTarget::Node { .. } => "node",
         TransformTarget::FileStart { .. } => "file_start",
         TransformTarget::FileEnd { .. } => "file_end",
+        TransformTarget::File { .. } => "file",
         TransformTarget::Line { .. } => "line",
     }
 }
@@ -441,7 +449,9 @@ fn resolve_target_in_handles_with_index(
             span_hint,
             expected_old_hash,
         } => (identity, kind, *span_hint, expected_old_hash),
-        TransformTarget::FileStart { .. } | TransformTarget::FileEnd { .. } => {
+        TransformTarget::FileStart { .. }
+        | TransformTarget::FileEnd { .. }
+        | TransformTarget::File { .. } => {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Target type '{}' is not resolvable against syntax handles",

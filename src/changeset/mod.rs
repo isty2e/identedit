@@ -24,6 +24,9 @@ pub enum TransformTarget {
     FileEnd {
         expected_file_hash: String,
     },
+    File {
+        expected_file_hash: String,
+    },
     Line {
         anchor: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +61,7 @@ impl TransformTarget {
             Self::FileStart { expected_file_hash } | Self::FileEnd { expected_file_hash } => {
                 expected_file_hash
             }
+            Self::File { expected_file_hash } => expected_file_hash,
             Self::Line { anchor, .. } => anchor
                 .split_once(':')
                 .map(|(_, hash)| hash)
@@ -265,9 +269,8 @@ mod tests {
     fn change_op_deserializes_move_kind() {
         let payload = r#"{
             "target": {
-                "identity": "id-1",
-                "kind": "function_definition",
-                "expected_old_hash": "hash-1"
+                "type": "file",
+                "expected_file_hash": "0123456789abcdef"
             },
             "op": {
                 "type": "move",
@@ -288,6 +291,12 @@ mod tests {
         }"#;
 
         let parsed: ChangeOp = serde_json::from_str(payload).expect("move op should deserialize");
+        assert_eq!(
+            parsed.target,
+            TransformTarget::File {
+                expected_file_hash: "0123456789abcdef".to_string(),
+            }
+        );
         match parsed.op {
             OpKind::Move { to } => assert_eq!(to.as_os_str(), "renamed.py"),
             other => panic!("expected move op, got {other:?}"),
@@ -302,12 +311,24 @@ mod tests {
     }
 
     #[test]
-    fn change_op_deserializes_legacy_move_preview_placeholder_shape() {
+    fn transform_target_file_requires_expected_file_hash() {
+        let payload = r#"{"type":"file"}"#;
+
+        let error = serde_json::from_str::<TransformTarget>(payload)
+            .expect_err("file target without a precondition must be rejected");
+        assert!(
+            error.to_string().contains("expected_file_hash"),
+            "missing precondition diagnostic should name the field: {error}"
+        );
+    }
+
+    #[test]
+    fn change_op_rejects_move_target_with_node_fields_on_file_target() {
         let payload = r#"{
             "target": {
+                "type": "file",
                 "identity": "id-1",
-                "kind": "function_definition",
-                "expected_old_hash": "hash-1"
+                "expected_file_hash": "0123456789abcdef"
             },
             "op": {
                 "type": "move",
@@ -327,14 +348,11 @@ mod tests {
             }
         }"#;
 
-        let parsed: ChangeOp =
-            serde_json::from_str(payload).expect("legacy move preview should deserialize");
-        assert_eq!(
-            parsed.preview,
-            ChangePreview::move_operation(Some(MovePreview {
-                from: PathBuf::from("fixture.py"),
-                to: PathBuf::from("renamed.py"),
-            }))
+        let error = serde_json::from_str::<ChangeOp>(payload)
+            .expect_err("file target must reject node-only fields");
+        assert!(
+            error.to_string().contains("identity"),
+            "error should identify the invalid field: {error}"
         );
     }
 
