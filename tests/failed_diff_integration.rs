@@ -429,6 +429,21 @@ fn unique_candidate_target_and_op_feed_directly_into_patch_json() {
 }
 
 #[test]
+fn failed_diff_candidate_preserves_unrelated_mixed_line_endings() {
+    let source = create_temp_source("before\r\nold\nafter\r");
+    let diff = create_temp_diff("@@\n-old\n+new\n");
+    let handoff = response(&run_from_diff("edit", &diff, Some(&source)));
+    let applied = apply_handoff_candidate(&handoff, 0, 0);
+
+    assert!(
+        applied.status.success(),
+        "candidate apply failed: {}",
+        String::from_utf8_lossy(&applied.stdout)
+    );
+    assert_source_unchanged(&source, "before\r\nnew\nafter\r");
+}
+
+#[test]
 fn line_insertion_candidate_feeds_directly_into_patch_json() {
     let source = create_temp_source("before\nafter\n");
     let diff = create_temp_diff("@@\n before\n+inserted\n after\n");

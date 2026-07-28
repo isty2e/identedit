@@ -4,10 +4,9 @@ use super::{
 };
 
 pub(super) fn resolve_edits(
-    lines: &[String],
+    line_count: usize,
     edits: &[HashlineEdit],
 ) -> Result<Vec<ResolvedEdit>, HashlineApplyError> {
-    let line_count = lines.len();
     let mut resolved = Vec::with_capacity(edits.len());
 
     for (edit_index, edit) in edits.iter().enumerate() {
