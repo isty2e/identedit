@@ -264,3 +264,113 @@ pub(super) fn line_ending_literal(source_text: &str) -> &'static str {
     }
     "\n"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        SiblingEntry, group_aware_insertion_offset, leading_comment_block_start,
+        line_end_with_ending_after_offset, line_ending_literal, previous_line_bounds,
+    };
+
+    fn sibling_entry(source_text: &str, key: &str) -> SiblingEntry {
+        let insertion_start = source_text
+            .find(key)
+            .unwrap_or_else(|| panic!("fixture should contain key '{key}'"));
+        let end = line_end_with_ending_after_offset(source_text, insertion_start);
+        SiblingEntry {
+            key: key.to_string(),
+            insertion_start,
+            end,
+        }
+    }
+
+    #[test]
+    fn sorted_single_group_inserts_before_the_next_key() {
+        let source = "alpha = 1\nbeta = 2\ndelta = 4\n";
+        let entries = ["alpha", "beta", "delta"]
+            .map(|key| sibling_entry(source, key))
+            .to_vec();
+
+        let offset = group_aware_insertion_offset(source, entries, source.len(), "charlie");
+
+        assert_eq!(offset, source.find("delta").unwrap());
+    }
+
+    #[test]
+    fn prefix_family_takes_precedence_over_unrelated_siblings() {
+        let source = "zeta = 1\napi_host = \"localhost\"\napi_port = 8080\nalpha = 2\n";
+        let entries = ["zeta", "api_host", "api_port", "alpha"]
+            .map(|key| sibling_entry(source, key))
+            .to_vec();
+        let api_port_end = line_end_with_ending_after_offset(
+            source,
+            source
+                .find("api_port")
+                .expect("fixture should contain api_port"),
+        );
+
+        let offset = group_aware_insertion_offset(source, entries, source.len(), "api_timeout");
+
+        assert_eq!(offset, api_port_end);
+    }
+
+    #[test]
+    fn blank_lines_bound_sorted_group_insertion() {
+        let source = "alpha = 1\ncharlie = 3\n\nomega = 4\nzulu = 5\n";
+        let entries = ["alpha", "charlie", "omega", "zulu"]
+            .map(|key| sibling_entry(source, key))
+            .to_vec();
+
+        let offset = group_aware_insertion_offset(source, entries, source.len(), "beta");
+
+        assert_eq!(offset, source.find("charlie").unwrap());
+    }
+
+    #[test]
+    fn unsorted_siblings_preserve_the_caller_fallback() {
+        let source = "beta = 2\nalpha = 1\ngamma = 3\n";
+        let entries = ["beta", "alpha", "gamma"]
+            .map(|key| sibling_entry(source, key))
+            .to_vec();
+        let fallback = source.len();
+
+        assert_eq!(
+            group_aware_insertion_offset(source, entries, fallback, "delta"),
+            fallback
+        );
+    }
+
+    #[test]
+    fn leading_comment_block_respects_blank_lines_and_indentation() {
+        let source = "root = 1\n\n  # first\n  # second\n  child = 2\n";
+        let key_start = source
+            .find("  child")
+            .expect("fixture should contain child");
+        let comment_start = source
+            .find("  # first")
+            .expect("fixture should contain comment");
+
+        assert_eq!(
+            leading_comment_block_start(source, key_start, 2),
+            comment_start
+        );
+        assert_eq!(leading_comment_block_start(source, key_start, 3), key_start);
+    }
+
+    #[test]
+    fn line_helpers_preserve_crlf_and_cr_boundaries() {
+        let source = "alpha\r\nbeta\rgamma";
+        let beta_start = source.find("beta").expect("fixture should contain beta");
+        let gamma_start = source.find("gamma").expect("fixture should contain gamma");
+
+        assert_eq!(
+            line_end_with_ending_after_offset(source, beta_start),
+            gamma_start
+        );
+        assert_eq!(
+            previous_line_bounds(source, gamma_start),
+            Some((beta_start, beta_start + "beta".len()))
+        );
+        assert_eq!(line_ending_literal(source), "\r\n");
+    }
+}
