@@ -204,7 +204,10 @@ fn resolve_line_operation_view(
             })
         }
         OpKind::InsertAfter { .. } => {
-            debug_assert!(end_anchor.is_none());
+            assert!(
+                end_anchor.is_none(),
+                "EditOperation guarantees line insert_after targets omit end_anchor"
+            );
             let insert_at = start_line.full_end;
             Ok(ResolvedOperationView {
                 expected_hash: start_line.expected_hash,
@@ -294,7 +297,10 @@ fn resolve_destination_offset(
             unreachable!("EditOperation rejects whole-file move destinations")
         }
         TransformTarget::Line { anchor, end_anchor } => {
-            debug_assert!(end_anchor.is_none());
+            assert!(
+                end_anchor.is_none(),
+                "EditOperation guarantees line move destinations omit end_anchor"
+            );
             let ranges = compute_line_ranges(source_text);
             let destination_line = resolve_line_anchor(anchor, &ranges)?;
             Ok(if insert_before {

@@ -260,12 +260,7 @@ impl ChangePreviewWire {
                 }));
             }
 
-            if self.old_text.is_none()
-                && self.old_hash.is_none()
-                && self.old_len.is_none()
-                && self.new_text.is_none()
-                && self.matched_span.is_none()
-            {
+            if self.has_no_preview_fields() || self.is_legacy_empty_move_placeholder() {
                 return Ok(ChangePreview::Move(MoveChangePreview {
                     move_preview: None,
                 }));
@@ -287,6 +282,24 @@ impl ChangePreviewWire {
                 .matched_span
                 .ok_or_else(|| de::Error::missing_field("matched_span"))?,
         }))
+    }
+
+    fn has_no_preview_fields(&self) -> bool {
+        self.old_text.is_none()
+            && self.old_hash.is_none()
+            && self.old_len.is_none()
+            && self.new_text.is_none()
+            && self.matched_span.is_none()
+    }
+
+    fn is_legacy_empty_move_placeholder(&self) -> bool {
+        self.old_text.as_deref().unwrap_or_default().is_empty()
+            && self.old_hash.is_none()
+            && self.old_len.is_none()
+            && self.new_text.as_deref() == Some("")
+            && self
+                .matched_span
+                .is_some_and(|span| span.start == 0 && span.end == 0)
     }
 }
 

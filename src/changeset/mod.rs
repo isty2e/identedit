@@ -432,13 +432,6 @@ fn normalize_preview_family(
 ) -> Result<ChangePreview, OperationModelError> {
     match (op, preview) {
         (OpKind::Move { .. }, ChangePreview::Move(preview)) => Ok(ChangePreview::Move(preview)),
-        (OpKind::Move { .. }, ChangePreview::Text(preview))
-            if is_legacy_empty_move_preview(&preview) =>
-        {
-            Ok(ChangePreview::Move(MoveChangePreview {
-                move_preview: None,
-            }))
-        }
         (OpKind::Move { .. }, ChangePreview::Text(_)) => {
             Err(OperationModelError::InvalidPreviewFamily {
                 operation: "move",
@@ -451,15 +444,6 @@ fn normalize_preview_family(
             expected: "text",
         }),
     }
-}
-
-fn is_legacy_empty_move_preview(preview: &TextChangePreview) -> bool {
-    preview.old_text.as_deref().unwrap_or_default().is_empty()
-        && preview.old_hash.is_none()
-        && preview.old_len.is_none()
-        && preview.new_text.is_empty()
-        && preview.matched_span.start == 0
-        && preview.matched_span.end == 0
 }
 
 #[cfg(test)]
@@ -950,6 +934,42 @@ mod tests {
         assert_eq!(serialized["preview"], json!({}));
         serde_json::from_value::<ChangeOp>(serialized)
             .expect("canonical empty move preview should reparse");
+    }
+
+    #[test]
+    fn change_op_rejects_legacy_empty_text_move_preview_inside_canonical_model() {
+        let error = ChangeOp::from_parts(
+            TransformTarget::File {
+                expected_file_hash: "0123456789abcdef".to_string(),
+            },
+            OpKind::Move {
+                to: PathBuf::from("renamed.py"),
+            },
+            ChangePreview::text(
+                Some(String::new()),
+                None,
+                None,
+                String::new(),
+                Span { start: 0, end: 0 },
+            ),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("expected move preview fields"));
+    }
+
+    #[test]
+    fn change_op_rejects_incomplete_legacy_empty_move_preview() {
+        let wire = json!({
+            "target": wire_target("file"),
+            "op": wire_op("move"),
+            "preview": {
+                "old_text": ""
+            }
+        });
+
+        let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+        assert!(error.to_string().contains("missing field `new_text`"));
     }
 
     #[test]
