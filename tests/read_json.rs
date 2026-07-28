@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
@@ -13,7 +13,7 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn run_read(arguments: &[&str], file: &PathBuf) -> Output {
+fn run_read(arguments: &[&str], file: &Path) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.arg("read").arg("--mode").arg("ast").arg("--json");
 
@@ -45,6 +45,44 @@ fn run_read_json(arguments: &[&str], payload: &str) -> Output {
     child
         .wait_with_output()
         .expect("failed to read process output")
+}
+
+fn read_unique_named_handle(file: &Path, kind: &str, name: &str) -> Value {
+    let output = run_read(&["--verbose", "--kind", kind], file);
+    assert!(
+        output.status.success(),
+        "read should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    let matching_handles = response["handles"]
+        .as_array()
+        .expect("handles should be an array")
+        .iter()
+        .filter(|handle| handle["name"] == name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching_handles.len(),
+        1,
+        "expected exactly one {kind} handle named '{name}'"
+    );
+    matching_handles[0].clone()
+}
+
+fn patch_handle(file: &Path, identity: &str, replacement: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_identedit"))
+        .args([
+            "patch",
+            "--at",
+            identity,
+            "--replace",
+            replacement,
+            file.to_str().expect("path should be utf-8"),
+        ])
+        .output()
+        .expect("failed to run identedit binary")
 }
 
 #[test]
@@ -238,7 +276,53 @@ fn returns_precise_json_spans_for_keys() {
 
     assert_eq!(config_key["span"]["start"], expected_start);
     assert_eq!(config_key["span"]["end"], expected_end);
-    assert_eq!(config_key["text"], "config");
+    assert_eq!(config_key["text"], "\"config\"");
+}
+
+#[test]
+fn freshly_read_json_string_handle_can_be_patched() {
+    let temporary_directory = tempdir().expect("tempdir should be created");
+    let file_path = temporary_directory.path().join("string.json");
+    fs::write(&file_path, r#"{"name":"identedit"}"#).expect("fixture file should be written");
+
+    let handle = read_unique_named_handle(&file_path, "string", "name");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let output = patch_handle(&file_path, identity, "\"changed\"");
+
+    assert!(
+        output.status.success(),
+        "fresh string handle should satisfy its own precondition: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("patched JSON should be readable"),
+        r#"{"name":"changed"}"#
+    );
+}
+
+#[test]
+fn freshly_read_json_key_handle_can_be_patched() {
+    let temporary_directory = tempdir().expect("tempdir should be created");
+    let file_path = temporary_directory.path().join("key.json");
+    fs::write(&file_path, r#"{"name":"identedit"}"#).expect("fixture file should be written");
+
+    let handle = read_unique_named_handle(&file_path, "key", "name");
+    let identity = handle["identity"]
+        .as_str()
+        .expect("identity should be present");
+    let output = patch_handle(&file_path, identity, "\"title\"");
+
+    assert!(
+        output.status.success(),
+        "fresh key handle should satisfy its own precondition: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("patched JSON should be readable"),
+        r#"{"title":"identedit"}"#
+    );
 }
 
 #[test]
