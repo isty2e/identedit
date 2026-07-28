@@ -1,7 +1,6 @@
 #[cfg(unix)]
 use std::ffi::OsString;
 use std::fs;
-use std::fs::FileTimes;
 use std::fs::OpenOptions;
 use std::io::Write;
 #[cfg(unix)]
@@ -11,7 +10,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
