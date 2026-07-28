@@ -360,7 +360,7 @@ fn apply_reports_parse_failure_for_nul_in_fish_source() {
                     "type": "node",
                     "identity": "deadbeef",
                     "kind": "function_definition",
-                    "expected_old_hash": "00",
+                    "expected_old_hash": "0000000000000000",
                     "span_hint": {"start": 0, "end": 1}
                 },
                 "op": {"type": "replace", "new_text": "function run\n  echo updated\nend"},

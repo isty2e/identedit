@@ -15,7 +15,7 @@ use super::fail_on_phase;
 
 fn replacement(
     index: usize,
-    expected_hash: &str,
+    _label: &str,
     old_text: String,
     start: usize,
     end: usize,
@@ -23,7 +23,6 @@ fn replacement(
 ) -> ResolvedReplacement {
     ResolvedReplacement {
         index,
-        expected_hash: expected_hash.to_string(),
         old_text,
         start,
         end,

@@ -1,6 +1,6 @@
 use super::{
     HashlineApplyError, HashlineCheckError, HashlineEdit, LineSpan, LineSpanKind, ResolvedEdit,
-    ResolvedOperation, parse_line_ref,
+    ResolvedOperation,
 };
 
 pub(super) fn resolve_edits(
@@ -13,46 +13,37 @@ pub(super) fn resolve_edits(
     for (edit_index, edit) in edits.iter().enumerate() {
         match edit {
             HashlineEdit::SetLine { set_line } => {
-                let anchor = parse_line_ref(&set_line.anchor)?;
-                ensure_line_exists(anchor.line, line_count, &set_line.anchor)?;
+                let anchor = &set_line.anchor;
+                ensure_line_exists(anchor.line(), line_count, anchor)?;
                 let replacement_lines = super::show::split_set_line_text(&set_line.new_text);
                 resolved.push(ResolvedEdit {
                     edit_index,
                     span: LineSpan {
                         kind: LineSpanKind::Replace,
-                        start_line: anchor.line,
-                        end_line: anchor.line,
+                        start_line: anchor.line(),
+                        end_line: anchor.line(),
                     },
                     operation: ResolvedOperation::ReplaceRange {
-                        start_line: anchor.line,
-                        end_line: anchor.line,
+                        start_line: anchor.line(),
+                        end_line: anchor.line(),
                         replacement_lines,
                     },
                 });
             }
             HashlineEdit::ReplaceLines { replace_lines } => {
-                let start = parse_line_ref(&replace_lines.start_anchor)?;
-                let end = if let Some(end_anchor) = &replace_lines.end_anchor {
-                    parse_line_ref(end_anchor)?
-                } else {
-                    start.clone()
-                };
+                let start = &replace_lines.start_anchor;
+                let end = replace_lines.end_anchor.as_ref().unwrap_or(start);
 
-                ensure_line_exists(start.line, line_count, &replace_lines.start_anchor)?;
-                ensure_line_exists(
-                    end.line,
-                    line_count,
-                    replace_lines
-                        .end_anchor
-                        .as_deref()
-                        .unwrap_or(&replace_lines.start_anchor),
-                )?;
+                ensure_line_exists(start.line(), line_count, start)?;
+                ensure_line_exists(end.line(), line_count, end)?;
 
-                if end.line < start.line {
+                if end.line() < start.line() {
                     return Err(HashlineCheckError::InvalidRequest {
                         message: format!(
                             "Invalid replace_lines edit #{}: end line {} must be >= start line {}",
-                            edit_index, end.line, start.line
+                            edit_index,
+                            end.line(),
+                            start.line()
                         ),
                     }
                     .into());
@@ -64,19 +55,19 @@ pub(super) fn resolve_edits(
                     edit_index,
                     span: LineSpan {
                         kind: LineSpanKind::Replace,
-                        start_line: start.line,
-                        end_line: end.line,
+                        start_line: start.line(),
+                        end_line: end.line(),
                     },
                     operation: ResolvedOperation::ReplaceRange {
-                        start_line: start.line,
-                        end_line: end.line,
+                        start_line: start.line(),
+                        end_line: end.line(),
                         replacement_lines,
                     },
                 });
             }
             HashlineEdit::InsertAfter { insert_after } => {
-                let anchor = parse_line_ref(&insert_after.anchor)?;
-                ensure_line_exists(anchor.line, line_count, &insert_after.anchor)?;
+                let anchor = &insert_after.anchor;
+                ensure_line_exists(anchor.line(), line_count, anchor)?;
                 if insert_after.text.is_empty() {
                     return Err(HashlineCheckError::InvalidRequest {
                         message: format!(
@@ -92,11 +83,11 @@ pub(super) fn resolve_edits(
                     edit_index,
                     span: LineSpan {
                         kind: LineSpanKind::InsertAfter,
-                        start_line: anchor.line,
-                        end_line: anchor.line,
+                        start_line: anchor.line(),
+                        end_line: anchor.line(),
                     },
                     operation: ResolvedOperation::InsertAfter {
-                        anchor_line: anchor.line,
+                        anchor_line: anchor.line(),
                         insert_lines,
                     },
                 });
@@ -181,7 +172,7 @@ fn edits_conflict(left: &ResolvedEdit, right: &ResolvedEdit) -> bool {
 fn ensure_line_exists(
     line: usize,
     line_count: usize,
-    anchor: &str,
+    anchor: &super::LineAnchor,
 ) -> Result<(), HashlineCheckError> {
     if line == 0 || line > line_count {
         return Err(HashlineCheckError::InvalidRequest {

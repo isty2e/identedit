@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 
-use crate::hash::{hash_text, shorten_hex};
+use crate::hash::{ContentHash, hash_text, shorten_hex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,7 +19,7 @@ pub struct SelectionHandle {
     pub kind: String,
     pub name: Option<String>,
     pub identity: String,
-    pub expected_old_hash: String,
+    pub expected_old_hash: ContentHash,
     pub text: String,
 }
 

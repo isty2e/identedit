@@ -1,7 +1,7 @@
 use super::{
-    HASHLINE_DEFAULT_HEX_LEN, HASHLINE_MIN_HEX_LEN, HashlineApplyError, HashlineApplyMode,
-    HashlineEdit, HashlineMismatchStatus, apply_hashline_edits, apply_hashline_edits_with_mode,
-    check_hashline_edits, check_hashline_refs, compute_line_hash, format_line_ref, parse_line_ref,
+    HASHLINE_PUBLIC_HEX_LEN, HashlineApplyError, HashlineApplyMode, HashlineEdit,
+    HashlineMismatchStatus, LineAnchor, LineHash, apply_hashline_edits,
+    apply_hashline_edits_with_mode, check_hashline_edits, check_hashline_refs, compute_line_hash,
 };
 
 fn line_ref(source: &str, line: usize) -> String {
@@ -9,7 +9,13 @@ fn line_ref(source: &str, line: usize) -> String {
         .lines()
         .nth(line - 1)
         .expect("line should exist for anchor");
-    format_line_ref(line, &compute_line_hash(line_text))
+    line_anchor(line, compute_line_hash(line_text))
+}
+
+fn line_anchor(line: usize, hash: LineHash) -> String {
+    LineAnchor::try_new(line, hash)
+        .expect("test anchors use positive line numbers")
+        .to_string()
 }
 
 fn hashline_display(line: usize, content: &str) -> String {
@@ -19,7 +25,7 @@ fn hashline_display(line: usize, content: &str) -> String {
 #[test]
 fn compute_line_hash_uses_fixed_hex_length() {
     let hash = compute_line_hash("project = \"identedit\"");
-    assert_eq!(hash.len(), HASHLINE_DEFAULT_HEX_LEN);
+    assert_eq!(hash.len(), HASHLINE_PUBLIC_HEX_LEN);
 }
 
 #[test]
@@ -37,68 +43,96 @@ fn show_hashed_lines_returns_empty_for_empty_source() {
 }
 
 #[test]
-fn parse_line_ref_accepts_display_suffix_and_upper_hex() {
-    let parsed = parse_line_ref("12:ABCDEF123456|source text").expect("anchor should parse");
-    assert_eq!(parsed.line, 12);
-    assert_eq!(parsed.hash, "abcdef123456");
+fn line_anchor_normalizes_display_suffix_and_upper_hex() {
+    let parsed = LineAnchor::parse("12:ABCDEF123456|source text").expect("anchor should parse");
+    assert_eq!(parsed.line(), 12);
+    assert_eq!(parsed.hash().as_str(), "abcdef123456");
+    assert_eq!(parsed.to_string(), "12:abcdef123456");
 }
 
 #[test]
-fn parse_line_ref_rejects_short_hash() {
-    let error = parse_line_ref("3:abcd").expect_err("short hash should fail");
+fn line_anchor_rejects_short_hash() {
+    let error = LineAnchor::parse("3:abcd").expect_err("short hash should fail");
     let message = error.to_string();
-    assert!(message.contains(&HASHLINE_MIN_HEX_LEN.to_string()));
+    assert!(message.contains(&HASHLINE_PUBLIC_HEX_LEN.to_string()));
 }
 
 #[test]
-fn parse_line_ref_rejects_zero_and_non_numeric_line_number() {
-    let valid_hash = "a".repeat(HASHLINE_DEFAULT_HEX_LEN);
-    let zero_error = parse_line_ref(&format!("0:{valid_hash}")).expect_err("line 0 should fail");
+fn line_anchor_rejects_zero_non_numeric_and_overflowing_line_numbers() {
+    let valid_hash = "a".repeat(HASHLINE_PUBLIC_HEX_LEN);
+    let zero_error = LineAnchor::parse(&format!("0:{valid_hash}")).expect_err("line 0 should fail");
     assert!(
         zero_error.to_string().contains("line number must be >= 1"),
         "unexpected error: {zero_error}"
     );
 
     let text_error =
-        parse_line_ref(&format!("x:{valid_hash}")).expect_err("non numeric line should fail");
+        LineAnchor::parse(&format!("x:{valid_hash}")).expect_err("non numeric line should fail");
     assert!(
         text_error
             .to_string()
             .contains("line number must be a positive integer"),
         "unexpected error: {text_error}"
     );
+
+    let overflow_error = LineAnchor::parse(&format!("{}0:{valid_hash}", usize::MAX))
+        .expect_err("overflowing line number should fail");
+    assert!(
+        overflow_error
+            .to_string()
+            .contains("line number must be a positive integer"),
+        "unexpected error: {overflow_error}"
+    );
 }
 
 #[test]
-fn parse_line_ref_rejects_hash_longer_than_max() {
-    let too_long_hash = "a".repeat(super::HASHLINE_MAX_HEX_LEN + 1);
+fn line_anchor_rejects_hash_longer_than_the_public_contract() {
+    let too_long_hash = "a".repeat(HASHLINE_PUBLIC_HEX_LEN + 1);
     let anchor = format!("1:{too_long_hash}");
-    let error = parse_line_ref(&anchor).expect_err("too-long hash should fail");
+    let error = LineAnchor::parse(&anchor).expect_err("too-long hash should fail");
     assert!(
-        error.to_string().contains("at most") || error.to_string().contains("exactly"),
+        error.to_string().contains("exactly"),
         "unexpected error: {error}"
     );
 }
 
 #[test]
-fn parse_line_ref_accepts_public_hash_length() {
-    let hash = "a".repeat(super::HASHLINE_MAX_HEX_LEN);
+fn line_anchor_accepts_exact_public_hash_length() {
+    let hash = "a".repeat(HASHLINE_PUBLIC_HEX_LEN);
     let anchor = format!("7:{hash}");
-    let parsed = parse_line_ref(&anchor).expect("public hash length should parse");
-    assert_eq!(parsed.line, 7);
-    assert_eq!(parsed.hash, hash);
+    let parsed = LineAnchor::parse(&anchor).expect("public hash length should parse");
+    assert_eq!(parsed.line(), 7);
+    assert_eq!(parsed.hash().as_str(), hash);
 }
 
 #[test]
-fn parse_line_ref_rejects_non_hex_hash_at_max_length() {
-    let mut hash = "a".repeat(super::HASHLINE_MAX_HEX_LEN);
+fn line_anchor_rejects_non_hex_and_unicode_hashes() {
+    let mut hash = "a".repeat(HASHLINE_PUBLIC_HEX_LEN);
     hash.replace_range(10..11, "z");
     let anchor = format!("7:{hash}");
-    let error = parse_line_ref(&anchor).expect_err("non-hex hash should fail");
+    let error = LineAnchor::parse(&anchor).expect_err("non-hex hash should fail");
     assert!(
         error.to_string().contains("only hex characters"),
         "unexpected error: {error}"
     );
+
+    let unicode_error = LineAnchor::parse("7:éééééé").expect_err("Unicode hash text should fail");
+    assert!(
+        unicode_error.to_string().contains("only hex characters")
+            || unicode_error.to_string().contains("exactly"),
+        "unexpected error: {unicode_error}"
+    );
+}
+
+#[test]
+fn line_anchor_serde_round_trip_uses_the_canonical_wire_string() {
+    let parsed = LineAnchor::parse("  7:ABCDEF012345|display text  ").expect("anchor should parse");
+    let serialized = serde_json::to_string(&parsed).expect("anchor should serialize");
+    assert_eq!(serialized, "\"7:abcdef012345\"");
+
+    let reparsed: LineAnchor =
+        serde_json::from_str(&serialized).expect("anchor should deserialize");
+    assert_eq!(reparsed, parsed);
 }
 
 #[test]
@@ -148,7 +182,7 @@ fn check_hashline_edits_collects_edit_index_per_anchor() {
     let source = "alpha\nbeta\ngamma";
     let alpha = line_ref(source, 1);
     let beta = line_ref(source, 2);
-    let stale_alpha = format_line_ref(1, &compute_line_hash("stale-alpha"));
+    let stale_alpha = line_anchor(1, compute_line_hash("stale-alpha"));
 
     let payload = format!(
         r#"
@@ -165,7 +199,7 @@ fn check_hashline_edits_collects_edit_index_per_anchor() {
     assert!(!result.ok);
     assert_eq!(result.mismatches.len(), 1);
     assert_eq!(result.mismatches[0].edit_index, 1);
-    assert_eq!(result.mismatches[0].anchor, stale_alpha);
+    assert_eq!(result.mismatches[0].anchor.to_string(), stale_alpha);
 }
 
 #[test]
@@ -222,7 +256,7 @@ fn apply_set_line_replaces_single_line() {
 #[test]
 fn apply_repair_remaps_unique_mismatch_and_succeeds() {
     let source = "a\nb\na";
-    let stale_anchor = format_line_ref(1, &compute_line_hash("b"));
+    let stale_anchor = line_anchor(1, compute_line_hash("b"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_anchor}", "new_text": "B" }} }}
@@ -245,8 +279,8 @@ fn apply_repair_remaps_unique_mismatch_and_succeeds() {
 #[test]
 fn apply_repair_remaps_replace_lines_start_and_end_anchors() {
     let source = "h\nstart\nmid\nend\n";
-    let stale_start = format_line_ref(1, &compute_line_hash("start"));
-    let stale_end = format_line_ref(3, &compute_line_hash("end"));
+    let stale_start = line_anchor(1, compute_line_hash("start"));
+    let stale_end = line_anchor(3, compute_line_hash("end"));
     let payload = format!(
         r#"[
   {{
@@ -268,7 +302,7 @@ fn apply_repair_remaps_replace_lines_start_and_end_anchors() {
 #[test]
 fn apply_repair_remaps_insert_after_anchor() {
     let source = "top\nmiddle\nbottom";
-    let stale_anchor = format_line_ref(1, &compute_line_hash("middle"));
+    let stale_anchor = line_anchor(1, compute_line_hash("middle"));
     let payload = format!(
         r#"[
   {{ "insert_after": {{ "anchor": "{stale_anchor}", "text": "M2" }} }}
@@ -284,8 +318,8 @@ fn apply_repair_remaps_insert_after_anchor() {
 #[test]
 fn apply_repair_is_order_independent_for_multiple_unique_remaps() {
     let source = "head\na\nb\ntail";
-    let stale_a = format_line_ref(99, &compute_line_hash("a"));
-    let stale_b = format_line_ref(98, &compute_line_hash("b"));
+    let stale_a = line_anchor(99, compute_line_hash("a"));
+    let stale_b = line_anchor(98, compute_line_hash("b"));
     let forward_payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_a}", "new_text": "A" }} }},
@@ -317,7 +351,7 @@ fn apply_repair_is_order_independent_for_multiple_unique_remaps() {
 #[test]
 fn apply_repair_rejects_ambiguous_insert_after_remap() {
     let source = "top\nmiddle\ntop";
-    let stale_anchor = format_line_ref(2, &compute_line_hash("top"));
+    let stale_anchor = line_anchor(2, compute_line_hash("top"));
     let payload = format!(
         r#"[
   {{ "insert_after": {{ "anchor": "{stale_anchor}", "text": "X" }} }}
@@ -336,7 +370,7 @@ fn apply_repair_rejects_ambiguous_insert_after_remap() {
 #[test]
 fn apply_repair_remaps_only_stale_end_anchor_for_replace_lines() {
     let source = "A\nB\nC\nD";
-    let stale_end = format_line_ref(3, &compute_line_hash("D"));
+    let stale_end = line_anchor(3, compute_line_hash("D"));
     let payload = format!(
         r#"[
   {{
@@ -359,8 +393,8 @@ fn apply_repair_remaps_only_stale_end_anchor_for_replace_lines() {
 #[test]
 fn apply_repair_rejects_overlap_introduced_by_remap() {
     let source = "w\nx\ny\nz";
-    let stale_start = format_line_ref(1, &compute_line_hash("x"));
-    let stale_end = format_line_ref(2, &compute_line_hash("y"));
+    let stale_start = line_anchor(1, compute_line_hash("x"));
+    let stale_end = line_anchor(2, compute_line_hash("y"));
     let payload = format!(
         r#"[
   {{
@@ -389,8 +423,8 @@ fn apply_repair_rejects_overlap_introduced_by_remap() {
 #[test]
 fn apply_repair_rejects_when_any_anchor_is_non_remappable() {
     let source = "one\ntwo\nthree";
-    let stale_unique = format_line_ref(1, &compute_line_hash("two"));
-    let stale_missing = format_line_ref(2, &compute_line_hash("does-not-exist"));
+    let stale_unique = line_anchor(1, compute_line_hash("two"));
+    let stale_missing = line_anchor(2, compute_line_hash("does-not-exist"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_unique}", "new_text": "TWO" }} }},
@@ -413,8 +447,8 @@ fn apply_repair_rejects_when_any_anchor_is_non_remappable() {
 #[test]
 fn apply_repair_reports_invalid_reverse_range_after_remap() {
     let source = "a\nb\nc";
-    let stale_start = format_line_ref(1, &compute_line_hash("c"));
-    let stale_end = format_line_ref(3, &compute_line_hash("a"));
+    let stale_start = line_anchor(1, compute_line_hash("c"));
+    let stale_end = line_anchor(3, compute_line_hash("a"));
     let payload = format!(
         r#"[
   {{
@@ -458,7 +492,7 @@ fn apply_repair_remaps_anchor_with_display_suffix() {
 #[test]
 fn apply_repair_rejects_ambiguous_remap() {
     let source = "x\ny\nx";
-    let stale_anchor = format_line_ref(2, &compute_line_hash("x"));
+    let stale_anchor = line_anchor(2, compute_line_hash("x"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_anchor}", "new_text": "X" }} }}
@@ -752,7 +786,7 @@ fn apply_repair_does_not_expand_without_continuation_hint() {
 #[test]
 fn apply_repair_expands_merge_with_remapped_anchor() {
     let source = "header\nfoo &&\nbar\ntail";
-    let stale_anchor = format_line_ref(1, &compute_line_hash("foo &&"));
+    let stale_anchor = line_anchor(1, compute_line_hash("foo &&"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_anchor}", "new_text": "foo && bar" }} }}
@@ -768,7 +802,7 @@ fn apply_repair_expands_merge_with_remapped_anchor() {
 #[test]
 fn apply_repair_does_not_remap_nfc_and_nfd_variants() {
     let source = "x\ncafe\u{301}\ny";
-    let stale_anchor = format_line_ref(1, &compute_line_hash("café"));
+    let stale_anchor = line_anchor(1, compute_line_hash("café"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_anchor}", "new_text": "CAFE" }} }}
@@ -1030,7 +1064,7 @@ fn show_hashed_lines_keeps_empty_line_before_trailing_cr_newline() {
 #[test]
 fn check_hashline_refs_accepts_cr_only_source() {
     let source = "a\rb\rc";
-    let refs = vec![format_line_ref(2, &compute_line_hash("b"))];
+    let refs = vec![line_anchor(2, compute_line_hash("b"))];
     let check = check_hashline_refs(source, &refs).expect("check should succeed");
     assert!(check.ok);
     assert_eq!(check.summary.total, 1);
@@ -1040,7 +1074,7 @@ fn check_hashline_refs_accepts_cr_only_source() {
 #[test]
 fn apply_set_line_preserves_cr_only_newlines() {
     let source = "a\rb\rc\r";
-    let anchor = format_line_ref(2, &compute_line_hash("b"));
+    let anchor = line_anchor(2, compute_line_hash("b"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{anchor}", "new_text": "B" }} }}
@@ -1055,7 +1089,7 @@ fn apply_set_line_preserves_cr_only_newlines() {
 #[test]
 fn apply_set_line_normalizes_mixed_crlf_and_cr_source_to_lf() {
     let source = "a\r\nb\rc\r\n";
-    let anchor = format_line_ref(2, &compute_line_hash("b"));
+    let anchor = line_anchor(2, compute_line_hash("b"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{anchor}", "new_text": "B" }} }}
@@ -1294,23 +1328,15 @@ fn apply_replace_lines_rejects_end_before_start() {
 }
 
 #[test]
-fn apply_invalid_anchor_format_returns_check_error() {
-    let source = "a\nb\nc";
+fn hashline_edit_rejects_invalid_anchor_format_at_ingress() {
     let payload = r#"
 [
   { "set_line": { "anchor": "oops", "new_text": "x" } }
 ]
 "#;
-    let edits: Vec<HashlineEdit> = serde_json::from_str(payload).expect("edits should parse");
-
-    let error = apply_hashline_edits(source, &edits).expect_err("invalid anchor should fail");
-    let HashlineApplyError::Check(check_error) = error else {
-        panic!("expected check error");
-    };
-    assert!(
-        check_error.to_string().contains("expected format"),
-        "unexpected error: {check_error}"
-    );
+    let error =
+        serde_json::from_str::<Vec<HashlineEdit>>(payload).expect_err("invalid anchor should fail");
+    assert!(!error.to_string().is_empty());
 }
 
 #[test]
@@ -1432,7 +1458,7 @@ fn apply_replace_lines_normalizes_crlf_payload_text() {
 #[test]
 fn apply_returns_precondition_failed_with_check_diagnostics() {
     let source = "alpha\nbeta";
-    let stale_anchor = format_line_ref(2, &compute_line_hash("BETA"));
+    let stale_anchor = line_anchor(2, compute_line_hash("BETA"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{stale_anchor}", "new_text": "new" }} }}
@@ -1455,7 +1481,7 @@ fn apply_returns_precondition_failed_with_check_diagnostics() {
 #[test]
 fn apply_mixed_valid_and_stale_edits_fails_precondition_for_all() {
     let source = "alpha\nbeta\ngamma";
-    let stale_beta = format_line_ref(2, &compute_line_hash("BETA"));
+    let stale_beta = line_anchor(2, compute_line_hash("BETA"));
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{}", "new_text": "ALPHA" }} }},
@@ -1616,8 +1642,8 @@ fn apply_rejects_insert_after_touching_replace_start_boundary() {
 #[test]
 fn check_hashline_edits_counts_multiple_stale_anchors_in_one_edit() {
     let source = "a\nb\nc";
-    let stale_a = format_line_ref(1, &compute_line_hash("stale-a"));
-    let stale_b = format_line_ref(2, &compute_line_hash("stale-b"));
+    let stale_a = line_anchor(1, compute_line_hash("stale-a"));
+    let stale_b = line_anchor(2, compute_line_hash("stale-b"));
     let payload = format!(
         r#"[
   {{ "replace_lines": {{ "start_anchor": "{stale_a}", "end_anchor": "{stale_b}", "new_text": "x" }} }}

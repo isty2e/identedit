@@ -4,7 +4,7 @@ use tree_sitter::Tree;
 
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
-use crate::hash::hash_bytes;
+use crate::hash::{ContentHash, hash_bytes};
 use crate::transform::parse::parse_handles_for_source;
 
 mod render;
@@ -67,7 +67,7 @@ struct CreateMissingSetRequest<'a> {
 pub fn resolve_config_path_operation(
     file: &Path,
     raw_path: &str,
-    expected_file_hash: Option<&str>,
+    expected_file_hash: Option<&ContentHash>,
     document_index: Option<usize>,
     operation: ConfigPathOperation,
 ) -> Result<EditOperation, IdenteditError> {
@@ -81,10 +81,10 @@ pub fn resolve_config_path_operation(
 
     if let Some(expected_hash) = expected_file_hash {
         let actual_hash = hash_bytes(&source);
-        if actual_hash != expected_hash {
+        if &actual_hash != expected_hash {
             return Err(IdenteditError::PreconditionFailed {
                 expected_hash: expected_hash.to_string(),
-                actual_hash,
+                actual_hash: actual_hash.to_string(),
             });
         }
     }

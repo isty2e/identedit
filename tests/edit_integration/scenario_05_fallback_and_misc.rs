@@ -436,7 +436,7 @@ fn transform_json_mode_insert_returns_parse_failure_for_nul_python_source() {
                     "start": 0,
                     "end": 1
                 },
-                "expected_old_hash": "placeholder-hash",
+                "expected_old_hash": "ffffffffffffffff",
                 "op": {
                     "type": "insert_before",
                     "new_text": "# should not apply\n"
@@ -711,7 +711,7 @@ fn transform_json_mode_operation_against_empty_json_returns_target_missing() {
             {
                 "identity": "non-existent-identity",
                 "kind": "object",
-                "expected_old_hash": "deadbeef",
+                "expected_old_hash": "deadbeefdeadbeef",
                 "op": {
                     "type": "replace",
                     "new_text": "{}"

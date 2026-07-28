@@ -1,29 +1,23 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod anchor;
 mod apply;
 mod check;
 mod repair;
 mod show;
 
+pub use anchor::{LineAnchor, LineHash};
+
 pub const HASHLINE_PUBLIC_HEX_LEN: usize = 12;
-pub const HASHLINE_MIN_HEX_LEN: usize = HASHLINE_PUBLIC_HEX_LEN;
-pub const HASHLINE_MAX_HEX_LEN: usize = HASHLINE_PUBLIC_HEX_LEN;
-pub const HASHLINE_DEFAULT_HEX_LEN: usize = HASHLINE_PUBLIC_HEX_LEN;
 const HASHLINE_DISPLAY_MIN_HEX_LEN: usize = 8;
 const HASHLINE_DISPLAY_MAX_HEX_LEN: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HashedLine {
     pub line: usize,
-    pub hash: String,
+    pub hash: LineHash,
     pub content: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LineRef {
-    pub line: usize,
-    pub hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -37,17 +31,17 @@ pub enum HashlineMismatchStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HashlineRemapTarget {
     pub line: usize,
-    pub hash: String,
+    pub hash: LineHash,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HashlineMismatch {
     pub edit_index: usize,
-    pub anchor: String,
+    pub anchor: LineAnchor,
     pub line: usize,
-    pub expected_hash: String,
+    pub expected_hash: LineHash,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual_hash: Option<String>,
+    pub actual_hash: Option<LineHash>,
     pub status: HashlineMismatchStatus,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub remaps: Vec<HashlineRemapTarget>,
@@ -72,23 +66,23 @@ pub struct HashlineCheckResult {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetLineEdit {
-    pub anchor: String,
+    pub anchor: LineAnchor,
     pub new_text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceLinesEdit {
-    pub start_anchor: String,
+    pub start_anchor: LineAnchor,
     #[serde(default)]
-    pub end_anchor: Option<String>,
+    pub end_anchor: Option<LineAnchor>,
     pub new_text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InsertAfterEdit {
-    pub anchor: String,
+    pub anchor: LineAnchor,
     pub text: String,
 }
 
@@ -183,7 +177,7 @@ pub enum HashlineApplyMode {
 #[derive(Debug, Clone)]
 struct AnchorCheckRequest {
     edit_index: usize,
-    anchor: String,
+    anchor: LineAnchor,
 }
 
 #[derive(Debug, Clone)]
@@ -215,54 +209,8 @@ enum ResolvedOperation {
     },
 }
 
-pub fn compute_line_hash(line: &str) -> String {
-    let full_hex = compute_line_hash_full(line);
-    full_hex[..HASHLINE_DEFAULT_HEX_LEN].to_string()
-}
-
-pub fn format_line_ref(line: usize, hash: &str) -> String {
-    format!("{line}:{hash}")
-}
-
-pub fn parse_line_ref(value: &str) -> Result<LineRef, HashlineCheckError> {
-    let raw = value.trim();
-    let without_display_suffix = raw.split_once('|').map_or(raw, |(prefix, _)| prefix).trim();
-    let (line_raw, hash_raw) = without_display_suffix.split_once(':').ok_or_else(|| {
-        HashlineCheckError::InvalidRequest {
-            message: format!(
-                "Invalid hashline anchor '{}': expected format '<line>:<hex-hash>'",
-                value
-            ),
-        }
-    })?;
-
-    let line =
-        line_raw
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| HashlineCheckError::InvalidRequest {
-                message: format!(
-                    "Invalid hashline anchor '{}': line number must be a positive integer",
-                    value
-                ),
-            })?;
-
-    if line == 0 {
-        return Err(HashlineCheckError::InvalidRequest {
-            message: format!(
-                "Invalid hashline anchor '{}': line number must be >= 1",
-                value
-            ),
-        });
-    }
-
-    let normalized_hash = hash_raw.trim().to_ascii_lowercase();
-    validate_hash_segment(value, &normalized_hash)?;
-
-    Ok(LineRef {
-        line,
-        hash: normalized_hash,
-    })
+pub fn compute_line_hash(line: &str) -> LineHash {
+    LineHash::from_content(line)
 }
 
 pub fn show_hashed_lines(source: &str) -> Vec<HashedLine> {
@@ -281,17 +229,31 @@ pub fn check_hashline_edits(
     check::check_hashline_anchors(source, &anchors)
 }
 
+#[cfg(test)]
 pub fn check_hashline_refs(
     source: &str,
     refs: &[String],
 ) -> Result<HashlineCheckResult, HashlineCheckError> {
     let anchors = refs
         .iter()
-        .enumerate()
-        .map(|(edit_index, anchor)| AnchorCheckRequest {
-            edit_index,
-            anchor: anchor.clone(),
+        .map(|anchor| {
+            LineAnchor::parse(anchor).map_err(|error| HashlineCheckError::InvalidRequest {
+                message: error.to_string(),
+            })
         })
+        .collect::<Result<Vec<_>, HashlineCheckError>>()?;
+    check_line_anchors(source, &anchors)
+}
+
+pub(crate) fn check_line_anchors(
+    source: &str,
+    anchors: &[LineAnchor],
+) -> Result<HashlineCheckResult, HashlineCheckError> {
+    let anchors = anchors
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(edit_index, anchor)| AnchorCheckRequest { edit_index, anchor })
         .collect::<Vec<_>>();
     check::check_hashline_anchors(source, &anchors)
 }
@@ -360,52 +322,6 @@ pub fn apply_hashline_edits_with_mode(
         operations_total: prepared_edits.len(),
         operations_applied: prepared_edits.len(),
     })
-}
-
-fn compute_line_hash_full(line: &str) -> String {
-    blake3::hash(line.as_bytes()).to_hex().to_string()
-}
-
-fn validate_hash_segment(anchor: &str, hash: &str) -> Result<(), HashlineCheckError> {
-    if HASHLINE_MIN_HEX_LEN == HASHLINE_MAX_HEX_LEN {
-        if hash.len() != HASHLINE_MIN_HEX_LEN {
-            return Err(HashlineCheckError::InvalidRequest {
-                message: format!(
-                    "Invalid hashline anchor '{}': hash must be exactly {} hex chars",
-                    anchor, HASHLINE_MIN_HEX_LEN
-                ),
-            });
-        }
-    } else {
-        if hash.len() < HASHLINE_MIN_HEX_LEN {
-            return Err(HashlineCheckError::InvalidRequest {
-                message: format!(
-                    "Invalid hashline anchor '{}': hash must be at least {} hex chars",
-                    anchor, HASHLINE_MIN_HEX_LEN
-                ),
-            });
-        }
-
-        if hash.len() > HASHLINE_MAX_HEX_LEN {
-            return Err(HashlineCheckError::InvalidRequest {
-                message: format!(
-                    "Invalid hashline anchor '{}': hash must be at most {} hex chars",
-                    anchor, HASHLINE_MAX_HEX_LEN
-                ),
-            });
-        }
-    }
-
-    if !hash.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return Err(HashlineCheckError::InvalidRequest {
-            message: format!(
-                "Invalid hashline anchor '{}': hash must contain only hex characters",
-                anchor
-            ),
-        });
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 
 use crate::handle::Span;
+use crate::hash::ContentHash;
+use crate::hashline::LineAnchor;
 
 use super::{
     ChangeOp, ChangePreview, EditOperation, MoveChangePreview, MovePreview, OpKind,
@@ -68,7 +70,7 @@ impl<'de> Deserialize<'de> for TransformTarget {
                     identity,
                     kind,
                     span_hint: wire.span_hint,
-                    expected_old_hash,
+                    expected_old_hash: parse_content_hash("expected_old_hash", &expected_old_hash)?,
                 })
             }
             TransformTargetType::FileStart => {
@@ -76,21 +78,36 @@ impl<'de> Deserialize<'de> for TransformTarget {
                 let expected_file_hash = wire
                     .expected_file_hash
                     .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
-                Ok(TransformTarget::FileStart { expected_file_hash })
+                Ok(TransformTarget::FileStart {
+                    expected_file_hash: parse_content_hash(
+                        "expected_file_hash",
+                        &expected_file_hash,
+                    )?,
+                })
             }
             TransformTargetType::FileEnd => {
                 reject_node_or_line_fields_for_file_target(&wire)?;
                 let expected_file_hash = wire
                     .expected_file_hash
                     .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
-                Ok(TransformTarget::FileEnd { expected_file_hash })
+                Ok(TransformTarget::FileEnd {
+                    expected_file_hash: parse_content_hash(
+                        "expected_file_hash",
+                        &expected_file_hash,
+                    )?,
+                })
             }
             TransformTargetType::File => {
                 reject_node_or_line_fields_for_file_target(&wire)?;
                 let expected_file_hash = wire
                     .expected_file_hash
                     .ok_or_else(|| de::Error::missing_field("expected_file_hash"))?;
-                Ok(TransformTarget::File { expected_file_hash })
+                Ok(TransformTarget::File {
+                    expected_file_hash: parse_content_hash(
+                        "expected_file_hash",
+                        &expected_file_hash,
+                    )?,
+                })
             }
             TransformTargetType::Line => {
                 reject_node_or_file_fields_for_line_target(&wire)?;
@@ -98,12 +115,29 @@ impl<'de> Deserialize<'de> for TransformTarget {
                     .anchor
                     .ok_or_else(|| de::Error::missing_field("anchor"))?;
                 Ok(TransformTarget::Line {
-                    anchor,
-                    end_anchor: wire.end_anchor,
+                    anchor: parse_line_anchor("anchor", &anchor)?,
+                    end_anchor: wire
+                        .end_anchor
+                        .map(|anchor| parse_line_anchor("end_anchor", &anchor))
+                        .transpose()?,
                 })
             }
         }
     }
+}
+
+fn parse_content_hash<E>(field: &str, value: &str) -> result::Result<ContentHash, E>
+where
+    E: de::Error,
+{
+    ContentHash::parse(value).map_err(|error| E::custom(format!("invalid {field}: {error}")))
+}
+
+fn parse_line_anchor<E>(field: &str, value: &str) -> result::Result<LineAnchor, E>
+where
+    E: de::Error,
+{
+    LineAnchor::parse(value).map_err(|error| E::custom(format!("invalid {field}: {error}")))
 }
 
 fn reject_node_or_line_fields_for_file_target<E>(
@@ -273,7 +307,10 @@ impl ChangePreviewWire {
 
         Ok(ChangePreview::Text(TextChangePreview {
             old_text: self.old_text,
-            old_hash: self.old_hash,
+            old_hash: self
+                .old_hash
+                .map(|hash| parse_content_hash("old_hash", &hash))
+                .transpose()?,
             old_len: self.old_len,
             new_text: self
                 .new_text

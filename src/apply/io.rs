@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fs2::FileExt;
 
 use crate::error::IdenteditError;
-use crate::hash::hash_bytes;
+use crate::hash::{ContentHash, hash_bytes};
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -63,7 +63,7 @@ impl AtomicWriteFailure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ApplyGuardState {
     pub(super) path_fingerprint: PathFingerprint,
-    pub(super) source_hash: String,
+    pub(super) source_hash: ContentHash,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,8 +150,8 @@ pub(super) fn verify_apply_guard_state(
     let current_hash = hash_bytes(&current_bytes);
     if current_hash != expected.source_hash {
         return Err(IdenteditError::PreconditionFailed {
-            expected_hash: expected.source_hash.clone(),
-            actual_hash: current_hash,
+            expected_hash: expected.source_hash.to_string(),
+            actual_hash: current_hash.to_string(),
         });
     }
 

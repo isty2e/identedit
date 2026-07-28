@@ -674,7 +674,7 @@ fn transform_json_mode_rejects_file_start_insert_with_stale_file_hash() {
             {
                 "target": {
                     "type": "file_start",
-                    "expected_file_hash": "stale-file-hash"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {
                     "type": "insert",
@@ -752,7 +752,7 @@ fn transform_json_mode_rejects_node_target_with_expected_file_hash_field() {
                         "end": handle["span"]["end"]
                     },
                     "expected_old_hash": crate::common::hash_text(old_text),
-                    "expected_file_hash": "not-allowed"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {
                     "type": "replace",
@@ -796,7 +796,7 @@ fn transform_json_mode_rejects_mixed_target_and_legacy_fields_in_operation() {
                 },
                 "identity": "legacy-identity",
                 "kind": "function_definition",
-                "expected_old_hash": "legacy-hash",
+                "expected_old_hash": "ffffffffffffffff",
                 "op": {
                     "type": "insert",
                     "new_text": "# invalid-mixed-input\n"
@@ -926,7 +926,7 @@ fn transform_json_mode_rejects_file_end_insert_with_stale_file_hash() {
             {
                 "target": {
                     "type": "file_end",
-                    "expected_file_hash": "stale-file-hash"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {
                     "type": "insert",

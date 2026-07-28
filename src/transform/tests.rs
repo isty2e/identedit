@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use crate::changeset::OpKind;
+use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind};
 use crate::hash::hash_text;
+use crate::hashline::{LineAnchor, compute_line_hash};
 
 use super::MatchedChange;
+use super::build::resolve_changeset_targets_in_handles;
 use super::conflict::{reject_move_operation, validate_change_conflicts};
 use super::resolve::resolve_target_in_handles;
 use crate::changeset::TransformTarget;
@@ -30,13 +32,101 @@ fn matched_change(
     MatchedChange {
         index,
         op,
-        expected_hash: "hash".to_string(),
         old_text: String::new(),
         matched_span,
         move_insert_at: None,
         anchor_kind: anchor_kind.to_string(),
         anchor_span,
     }
+}
+
+#[test]
+fn zero_width_operations_resolve_empty_old_text() {
+    let source = "def process_data():\n    pass\n";
+    let node = handle(
+        Span {
+            start: 0,
+            end: source.len(),
+        },
+        "function_definition",
+        Some("process_data"),
+        source,
+    );
+    let empty_span_at_start = Span { start: 0, end: 0 };
+    let empty_span_at_end = Span {
+        start: source.len(),
+        end: source.len(),
+    };
+    let line_end = source.find('\n').expect("source should contain a newline") + 1;
+    let line_anchor = LineAnchor::parse(&format!("1:{}", compute_line_hash("def process_data():")))
+        .expect("line anchor should be valid");
+
+    let changeset = FileChange {
+        file: PathBuf::from("fixture.py"),
+        operations: vec![
+            ChangeOp::from_parts(
+                TransformTarget::node(
+                    node.identity.clone(),
+                    node.kind.clone(),
+                    Some(node.span),
+                    node.expected_old_hash.clone(),
+                ),
+                OpKind::InsertBefore {
+                    new_text: "# before\n".to_string(),
+                },
+                ChangePreview::text(
+                    Some(String::new()),
+                    None,
+                    None,
+                    "# before\n".to_string(),
+                    empty_span_at_start,
+                ),
+            )
+            .expect("node insert should be valid"),
+            ChangeOp::from_parts(
+                TransformTarget::FileEnd {
+                    expected_file_hash: hash_text(source),
+                },
+                OpKind::Insert {
+                    new_text: "# end\n".to_string(),
+                },
+                ChangePreview::text(
+                    Some(String::new()),
+                    None,
+                    None,
+                    "# end\n".to_string(),
+                    empty_span_at_end,
+                ),
+            )
+            .expect("file insert should be valid"),
+            ChangeOp::from_parts(
+                TransformTarget::Line {
+                    anchor: line_anchor,
+                    end_anchor: None,
+                },
+                OpKind::InsertAfter {
+                    new_text: "# after line\n".to_string(),
+                },
+                ChangePreview::text(
+                    Some(String::new()),
+                    None,
+                    None,
+                    "# after line\n".to_string(),
+                    Span {
+                        start: line_end,
+                        end: line_end,
+                    },
+                ),
+            )
+            .expect("line insert should be valid"),
+        ],
+    };
+
+    let matched =
+        resolve_changeset_targets_in_handles(&changeset, source, std::slice::from_ref(&node))
+            .expect("zero-width operations should resolve");
+    assert_eq!(matched.len(), 3);
+    assert!(matched.iter().all(|change| change.old_text.is_empty()));
 }
 
 #[test]
@@ -51,7 +141,7 @@ fn resolve_target_returns_target_missing_when_span_hint_hits_wrong_kind_only() {
         "missing-identity".to_string(),
         "function_definition".to_string(),
         Some(Span { start: 4, end: 28 }),
-        "irrelevant".to_string(),
+        hash_text("irrelevant"),
     );
 
     let error = resolve_target_in_handles(Path::new("fixture.py"), &handles, &target)
@@ -75,11 +165,12 @@ fn resolve_target_returns_precondition_failed_for_unique_stale_span_hint_candida
         "def process_data(): pass",
     );
     let handles = vec![stale.clone()];
+    let stale_hash = hash_text("stale");
     let target = TransformTarget::node(
         "stale-identity".to_string(),
         "function_definition".to_string(),
         Some(stale.span),
-        "stale-hash".to_string(),
+        stale_hash.clone(),
     );
 
     let error = resolve_target_in_handles(Path::new("fixture.py"), &handles, &target)
@@ -90,8 +181,8 @@ fn resolve_target_returns_precondition_failed_for_unique_stale_span_hint_candida
             expected_hash,
             actual_hash,
         } => {
-            assert_eq!(expected_hash, "stale-hash");
-            assert_eq!(actual_hash, hash_text(&stale.text));
+            assert_eq!(expected_hash, stale_hash.to_string());
+            assert_eq!(actual_hash, hash_text(&stale.text).to_string());
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -117,7 +208,7 @@ fn resolve_target_returns_ambiguous_when_stale_span_hint_matches_multiple_candid
         "missing-identity".to_string(),
         "function_definition".to_string(),
         Some(Span { start: 0, end: 20 }),
-        "irrelevant".to_string(),
+        hash_text("irrelevant"),
     );
 
     let error = resolve_target_in_handles(Path::new("fixture.py"), &handles, &target)

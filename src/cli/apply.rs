@@ -15,8 +15,7 @@ use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_text;
 use crate::hashline::{
-    HashlineCheckError, HashlineCheckResult, HashlineMismatchStatus, check_hashline_refs,
-    format_line_ref,
+    HashlineCheckError, HashlineCheckResult, HashlineMismatchStatus, LineAnchor, check_line_anchors,
 };
 
 #[derive(Debug, Args)]
@@ -125,7 +124,7 @@ fn repair_line_targets_in_changeset(
     changeset: &mut MultiFileChangeset,
 ) -> Result<(), IdenteditError> {
     for file_change in &mut changeset.files {
-        let mut target_refs = Vec::<(usize, bool, String)>::new();
+        let mut target_refs = Vec::<(usize, bool, LineAnchor)>::new();
         for (operation_index, operation) in file_change.operations.iter().enumerate() {
             if let TransformTarget::Line { anchor, end_anchor } = operation.target() {
                 target_refs.push((operation_index, false, anchor.clone()));
@@ -141,11 +140,11 @@ fn repair_line_targets_in_changeset(
 
         let source = fs::read_to_string(&file_change.file)
             .map_err(|error| IdenteditError::io(&file_change.file, error))?;
-        let refs = target_refs
+        let anchors = target_refs
             .iter()
             .map(|(_, _, anchor)| anchor.clone())
             .collect::<Vec<_>>();
-        let check = check_hashline_refs(&source, &refs).map_err(map_hashline_check_error)?;
+        let check = check_line_anchors(&source, &anchors).map_err(map_hashline_check_error)?;
         if check.ok {
             continue;
         }
@@ -162,10 +161,11 @@ fn repair_line_targets_in_changeset(
                 let target = mismatch.remaps.first().expect("validated remap count");
                 (
                     mismatch.edit_index,
-                    format_line_ref(target.line, &target.hash),
+                    LineAnchor::try_new(target.line, target.hash.clone())
+                        .expect("hashline remaps always use positive source line numbers"),
                 )
             })
-            .collect::<std::collections::HashMap<usize, String>>();
+            .collect::<std::collections::HashMap<usize, LineAnchor>>();
 
         for (ref_index, (operation_index, is_end_anchor, _)) in target_refs.iter().enumerate() {
             let Some(new_anchor) = remapped.get(&ref_index) else {

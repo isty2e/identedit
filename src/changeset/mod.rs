@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::handle::Span;
+use crate::hash::ContentHash;
+use crate::hashline::LineAnchor;
 
 mod wire;
 
@@ -15,21 +17,21 @@ pub enum TransformTarget {
         kind: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         span_hint: Option<Span>,
-        expected_old_hash: String,
+        expected_old_hash: ContentHash,
     },
     FileStart {
-        expected_file_hash: String,
+        expected_file_hash: ContentHash,
     },
     FileEnd {
-        expected_file_hash: String,
+        expected_file_hash: ContentHash,
     },
     File {
-        expected_file_hash: String,
+        expected_file_hash: ContentHash,
     },
     Line {
-        anchor: String,
+        anchor: LineAnchor,
         #[serde(skip_serializing_if = "Option::is_none")]
-        end_anchor: Option<String>,
+        end_anchor: Option<LineAnchor>,
     },
 }
 
@@ -38,7 +40,7 @@ impl TransformTarget {
         identity: String,
         kind: String,
         span_hint: Option<Span>,
-        expected_old_hash: String,
+        expected_old_hash: ContentHash,
     ) -> Self {
         Self::Node {
             identity,
@@ -50,22 +52,6 @@ impl TransformTarget {
 
     pub fn requires_node_resolution(&self) -> bool {
         matches!(self, Self::Node { .. })
-    }
-
-    pub fn precondition_hash(&self) -> &str {
-        match self {
-            Self::Node {
-                expected_old_hash, ..
-            } => expected_old_hash,
-            Self::FileStart { expected_file_hash } | Self::FileEnd { expected_file_hash } => {
-                expected_file_hash
-            }
-            Self::File { expected_file_hash } => expected_file_hash,
-            Self::Line { anchor, .. } => anchor
-                .split_once(':')
-                .map(|(_, hash)| hash)
-                .unwrap_or_default(),
-        }
     }
 
     pub(crate) fn kind_name(&self) -> &'static str {
@@ -188,7 +174,7 @@ pub struct TextChangePreview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub old_hash: Option<String>,
+    pub old_hash: Option<ContentHash>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_len: Option<usize>,
     pub new_text: String,
@@ -211,7 +197,7 @@ pub struct MovePreview {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FileMoveOperationRef<'a> {
-    pub(crate) expected_file_hash: &'a str,
+    pub(crate) expected_file_hash: &'a ContentHash,
     pub(crate) destination: &'a std::path::Path,
     pub(crate) preview: &'a MoveChangePreview,
 }
@@ -319,7 +305,7 @@ impl ChangeOp {
 impl ChangePreview {
     pub(crate) fn text(
         old_text: Option<String>,
-        old_hash: Option<String>,
+        old_hash: Option<ContentHash>,
         old_len: Option<usize>,
         new_text: String,
         matched_span: Span,
@@ -457,7 +443,7 @@ mod tests {
         TransactionMode, TransformTarget,
     };
     use crate::handle::Span;
-    use crate::hash::{HASH_HEX_LEN, hash_text};
+    use crate::hash::{ContentHash, HASH_HEX_LEN, hash_text};
 
     #[test]
     fn multi_file_changeset_defaults_transaction_mode_to_all_or_nothing() {
@@ -548,7 +534,8 @@ mod tests {
         assert_eq!(
             parsed.target(),
             &TransformTarget::File {
-                expected_file_hash: "0123456789abcdef".to_string(),
+                expected_file_hash: ContentHash::parse("0123456789abcdef")
+                    .expect("test hash should be valid"),
             }
         );
         match parsed.op() {
@@ -615,7 +602,7 @@ mod tests {
         let payload = r#"{
             "identity": "id-1",
             "kind": "function_definition",
-            "expected_old_hash": "hash-1"
+            "expected_old_hash": "0123456789abcdef"
         }"#;
 
         let parsed: TransformTarget =
@@ -630,7 +617,7 @@ mod tests {
             } => {
                 assert_eq!(identity, "id-1");
                 assert_eq!(kind, "function_definition");
-                assert_eq!(expected_old_hash, "hash-1");
+                assert_eq!(expected_old_hash.as_str(), "0123456789abcdef");
                 assert!(span_hint.is_none());
             }
             other => panic!("expected node target, got {other:?}"),
@@ -641,7 +628,7 @@ mod tests {
     fn transform_target_deserializes_file_end_shape() {
         let payload = r#"{
             "type": "file_end",
-            "expected_file_hash": "file-hash-1"
+            "expected_file_hash": "0123456789abcdef"
         }"#;
 
         let parsed: TransformTarget =
@@ -649,7 +636,7 @@ mod tests {
 
         match parsed {
             TransformTarget::FileEnd { expected_file_hash } => {
-                assert_eq!(expected_file_hash, "file-hash-1");
+                assert_eq!(expected_file_hash.as_str(), "0123456789abcdef");
             }
             other => panic!("expected file_end target, got {other:?}"),
         }
@@ -660,7 +647,7 @@ mod tests {
         let payload = r##"{
             "target": {
                 "type": "file_start",
-                "expected_file_hash": "file-hash-2"
+                "expected_file_hash": "1111111111111111"
             },
             "op": {
                 "type": "insert",
@@ -697,7 +684,7 @@ mod tests {
     fn transform_target_rejects_file_start_with_identity_field_name_in_message() {
         let payload = r#"{
             "type": "file_start",
-            "expected_file_hash": "file-hash-3",
+            "expected_file_hash": "2222222222222222",
             "identity": "id-1"
         }"#;
 
@@ -712,7 +699,7 @@ mod tests {
     fn transform_target_rejects_file_end_with_multiple_node_fields_in_message() {
         let payload = r#"{
             "type": "file_end",
-            "expected_file_hash": "file-hash-4",
+            "expected_file_hash": "3333333333333333",
             "kind": "function_definition",
             "span_hint": { "start": 1, "end": 2 }
         }"#;
@@ -940,7 +927,8 @@ mod tests {
     fn change_op_rejects_legacy_empty_text_move_preview_inside_canonical_model() {
         let error = ChangeOp::from_parts(
             TransformTarget::File {
-                expected_file_hash: "0123456789abcdef".to_string(),
+                expected_file_hash: ContentHash::parse("0123456789abcdef")
+                    .expect("test hash should be canonical"),
             },
             OpKind::Move {
                 to: PathBuf::from("renamed.py"),
@@ -986,6 +974,101 @@ mod tests {
                 .to_string()
                 .contains("unsupported target/op combination"),
             "canonical target/op validation should not depend on preview shape: {error}"
+        );
+    }
+
+    #[test]
+    fn change_op_rejects_malformed_precondition_hashes_at_ingress() {
+        let malformed_hashes = [
+            "",
+            "0123456789abcde",
+            "0123456789abcdef0",
+            "0123456789abcdeg",
+            "éééééééé",
+        ];
+
+        for malformed_hash in malformed_hashes {
+            for target_type in ["node", "file_start", "file_end", "file"] {
+                let mut wire = wire_change_op(
+                    target_type,
+                    if target_type == "node" {
+                        "replace"
+                    } else if target_type == "file" {
+                        "move"
+                    } else {
+                        "insert"
+                    },
+                );
+                let field = if target_type == "node" {
+                    "expected_old_hash"
+                } else {
+                    "expected_file_hash"
+                };
+                wire["target"][field] = json!(malformed_hash);
+
+                let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+                assert!(
+                    error.to_string().contains(field),
+                    "{target_type} malformed hash diagnostic should name {field}: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn change_op_rejects_malformed_line_anchors_at_ingress() {
+        let malformed_anchors = [
+            "0:0123456789ab",
+            "1:0123456789a",
+            "1:0123456789abc",
+            "1:0123456789ag",
+            "1:éééééé",
+            "1:0123456789ab:tail",
+        ];
+
+        for anchor in malformed_anchors {
+            let mut wire = wire_change_op("line", "replace");
+            wire["target"]["anchor"] = json!(anchor);
+
+            let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+            assert!(
+                error.to_string().contains("anchor"),
+                "malformed line anchor should fail at ingress: {anchor}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn change_op_normalizes_hash_and_line_anchor_case_at_ingress() {
+        let mut node_wire = wire_change_op("node", "replace");
+        node_wire["target"]["expected_old_hash"] = json!("FEDCBA9876543210");
+        node_wire["preview"]["old_hash"] = json!("ABCDEF0123456789");
+        let node: ChangeOp =
+            serde_json::from_value(node_wire).expect("uppercase hashes should parse");
+        let serialized_node = serde_json::to_value(node).expect("node operation should serialize");
+        assert_eq!(
+            serialized_node["target"]["expected_old_hash"],
+            "fedcba9876543210"
+        );
+        assert_eq!(serialized_node["preview"]["old_hash"], "abcdef0123456789");
+
+        let mut line_wire = wire_change_op("line", "replace");
+        line_wire["target"]["anchor"] = json!(" 7:ABCDEF012345|display text ");
+        let line: ChangeOp =
+            serde_json::from_value(line_wire).expect("display-form line anchor should parse");
+        let serialized_line = serde_json::to_value(line).expect("line operation should serialize");
+        assert_eq!(serialized_line["target"]["anchor"], "7:abcdef012345");
+    }
+
+    #[test]
+    fn change_op_rejects_malformed_compact_preview_hash_at_ingress() {
+        let mut wire = wire_change_op("node", "replace");
+        wire["preview"]["old_hash"] = json!("deadbeef");
+
+        let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+        assert!(
+            error.to_string().contains("old_hash"),
+            "compact preview hash diagnostic should name old_hash: {error}"
         );
     }
 
@@ -1069,7 +1152,7 @@ mod tests {
             "0123456789abcdef".to_string(),
             "function_definition".to_string(),
             Some(Span { start: 0, end: 8 }),
-            "fedcba9876543210".to_string(),
+            ContentHash::parse("fedcba9876543210").expect("test hash should be valid"),
         );
         let original_preview = ChangePreview::text(
             Some("old".to_string()),
@@ -1089,7 +1172,8 @@ mod tests {
 
         operation
             .replace_target(TransformTarget::FileEnd {
-                expected_file_hash: "0123456789abcdef".to_string(),
+                expected_file_hash: ContentHash::parse("0123456789abcdef")
+                    .expect("test hash should be valid"),
             })
             .expect_err("replace cannot target file_end");
         operation

@@ -4,7 +4,7 @@ use crate::error::{IdenteditError, TargetCandidateContext};
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
 use crate::hash::HASH_HEX_LEN;
-use crate::hashline::{HASHLINE_PUBLIC_HEX_LEN, parse_line_ref};
+use crate::hashline::{HASHLINE_PUBLIC_HEX_LEN, LineAnchor};
 use crate::selector::Selector;
 
 use super::PatchArgs;
@@ -16,7 +16,7 @@ pub(super) enum PatchTargetIngress {
     NodeIdentity(String),
     NodeSelector { kind: String, name_pattern: String },
     NodeSymbol(String),
-    LineAnchor(String),
+    LineAnchor(LineAnchor),
     FileStart,
     FileEnd,
     ConfigPath(String),
@@ -80,7 +80,11 @@ pub(super) fn resolve_patch_target_ingress(
         args.symbol.clone(),
     ) {
         (Some(identity), None, None, None, None) => Ok(PatchTargetIngress::NodeIdentity(identity)),
-        (None, Some(anchor), None, None, None) => Ok(PatchTargetIngress::LineAnchor(anchor)),
+        (None, Some(anchor), None, None, None) => LineAnchor::parse(&anchor)
+            .map(PatchTargetIngress::LineAnchor)
+            .map_err(|error| IdenteditError::InvalidRequest {
+                message: error.to_string(),
+            }),
         (None, None, Some(kind), Some(name_pattern), None) => {
             Ok(PatchTargetIngress::NodeSelector { kind, name_pattern })
         }
@@ -115,15 +119,12 @@ fn parse_patch_at_target(raw: &str) -> Result<PatchTargetIngress, IdenteditError
         ));
     }
 
-    if is_line_anchor_with_hash_len(normalized, HASHLINE_PUBLIC_HEX_LEN) {
-        let parsed =
-            parse_line_ref(normalized).map_err(|error| IdenteditError::InvalidRequest {
+    if normalized.contains(':') {
+        let anchor =
+            LineAnchor::parse(normalized).map_err(|error| IdenteditError::InvalidRequest {
                 message: error.to_string(),
             })?;
-        return Ok(PatchTargetIngress::LineAnchor(format!(
-            "{}:{}",
-            parsed.line, parsed.hash
-        )));
+        return Ok(PatchTargetIngress::LineAnchor(anchor));
     }
 
     Err(IdenteditError::InvalidRequest {
@@ -136,16 +137,6 @@ fn parse_patch_at_target(raw: &str) -> Result<PatchTargetIngress, IdenteditError
 
 fn is_hex_with_len(value: &str, len: usize) -> bool {
     value.len() == len && value.as_bytes().iter().all(u8::is_ascii_hexdigit)
-}
-
-fn is_line_anchor_with_hash_len(value: &str, hash_len: usize) -> bool {
-    let Some((line, hash)) = value.split_once(':') else {
-        return false;
-    };
-    !line.is_empty()
-        && line.as_bytes().iter().all(u8::is_ascii_digit)
-        && hash.len() == hash_len
-        && hash.as_bytes().iter().all(u8::is_ascii_hexdigit)
 }
 
 fn resolve_unique_identity_handle_for_patch(
@@ -253,7 +244,7 @@ fn build_candidate_contexts(
         .iter()
         .map(|candidate| TargetCandidateContext {
             identity: candidate.identity.clone(),
-            expected_old_hash: candidate.expected_old_hash.clone(),
+            expected_old_hash: candidate.expected_old_hash.to_string(),
             kind: candidate.kind.clone(),
             name: candidate.name.clone(),
             qualified_name: qualified_symbol_name(candidate, all_handles),

@@ -10,7 +10,6 @@ pub(crate) mod resolve;
 pub struct MatchedChange {
     pub index: usize,
     pub op: OpKind,
-    pub expected_hash: String,
     pub old_text: String,
     pub matched_span: Span,
     pub move_insert_at: Option<usize>,

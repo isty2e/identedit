@@ -4,11 +4,10 @@ use std::path::Path;
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
-use crate::hash::hash_text;
-use crate::hashline::{compute_line_hash, parse_line_ref};
+use crate::hash::{ContentHash, hash_text};
+use crate::hashline::{LineAnchor, LineHash, compute_line_hash};
 
 pub(super) struct ResolvedOperationView {
-    pub(super) expected_hash: String,
     pub(super) old_text: String,
     pub(super) matched_span: Span,
     pub(super) move_insert_at: Option<usize>,
@@ -26,7 +25,7 @@ struct KindSpanKey<'a> {
 
 pub(super) struct HandleIndex<'a> {
     handles: &'a [SelectionHandle],
-    hashes: Vec<String>,
+    hashes: Vec<ContentHash>,
     by_identity: HashMap<&'a str, Vec<usize>>,
     by_kind_span: HashMap<KindSpanKey<'a>, Vec<usize>>,
 }
@@ -82,7 +81,7 @@ impl<'a> HandleIndex<'a> {
     fn handles_by_kind_and_hash(
         &self,
         kind: &str,
-        expected_hash: &str,
+        expected_hash: &ContentHash,
     ) -> Vec<&'a SelectionHandle> {
         self.handles
             .iter()
@@ -117,7 +116,6 @@ pub(super) fn resolve_operation_view(
             let anchor = resolve_target_in_handles_with_index(file, handle_index, target)?;
             let (old_text, matched_span) = edit_view_for_node_operation(op, &anchor);
             Ok(ResolvedOperationView {
-                expected_hash: target.precondition_hash().to_string(),
                 old_text,
                 matched_span,
                 move_insert_at: None,
@@ -130,7 +128,6 @@ pub(super) fn resolve_operation_view(
             verify_file_target_precondition(source_text, expected_file_hash)?;
             let start = file_content_start_offset(source_text);
             Ok(ResolvedOperationView {
-                expected_hash: expected_file_hash.clone(),
                 old_text: String::new(),
                 matched_span: Span { start, end: start },
                 move_insert_at: None,
@@ -143,7 +140,6 @@ pub(super) fn resolve_operation_view(
             verify_file_target_precondition(source_text, expected_file_hash)?;
             let end = source_text.len();
             Ok(ResolvedOperationView {
-                expected_hash: expected_file_hash.clone(),
                 old_text: String::new(),
                 matched_span: Span { start: end, end },
                 move_insert_at: None,
@@ -156,15 +152,15 @@ pub(super) fn resolve_operation_view(
             message: "File target is only valid for whole-file move operations".to_string(),
         }),
         TransformTarget::Line { anchor, end_anchor } => {
-            resolve_line_operation_view(source_text, anchor, end_anchor.as_deref(), op)
+            resolve_line_operation_view(source_text, anchor, end_anchor.as_ref(), op)
         }
     }
 }
 
 fn resolve_line_operation_view(
     source_text: &str,
-    anchor: &str,
-    end_anchor: Option<&str>,
+    anchor: &LineAnchor,
+    end_anchor: Option<&LineAnchor>,
     op: &OpKind,
 ) -> Result<ResolvedOperationView, IdenteditError> {
     let ranges = compute_line_ranges(source_text);
@@ -191,7 +187,6 @@ fn resolve_line_operation_view(
             };
             let old_text = source_text[matched_span.start..matched_span.end].to_string();
             Ok(ResolvedOperationView {
-                expected_hash: hash_text(&old_text),
                 old_text,
                 matched_span,
                 move_insert_at: None,
@@ -210,7 +205,6 @@ fn resolve_line_operation_view(
             );
             let insert_at = start_line.full_end;
             Ok(ResolvedOperationView {
-                expected_hash: start_line.expected_hash,
                 old_text: String::new(),
                 matched_span: Span {
                     start: insert_at,
@@ -258,7 +252,6 @@ fn resolve_same_file_move_view(
     }
 
     Ok(ResolvedOperationView {
-        expected_hash: source_target.precondition_hash().to_string(),
         old_text: source_anchor.text.clone(),
         matched_span: source_anchor.span,
         move_insert_at: Some(destination_offset),
@@ -342,13 +335,13 @@ fn edit_view_for_node_operation(op: &OpKind, anchor: &SelectionHandle) -> (Strin
 
 fn verify_file_target_precondition(
     source_text: &str,
-    expected_file_hash: &str,
+    expected_file_hash: &ContentHash,
 ) -> Result<(), IdenteditError> {
     let actual_hash = hash_text(source_text);
-    if actual_hash != expected_file_hash {
+    if &actual_hash != expected_file_hash {
         return Err(IdenteditError::PreconditionFailed {
             expected_hash: expected_file_hash.to_string(),
-            actual_hash,
+            actual_hash: actual_hash.to_string(),
         });
     }
 
@@ -426,8 +419,8 @@ fn resolve_target_in_handles_with_index(
 
             if stale_candidates.len() == 1 {
                 return Err(IdenteditError::PreconditionFailed {
-                    expected_hash: expected_old_hash.clone(),
-                    actual_hash: hash_text(&stale_candidates[0].text),
+                    expected_hash: expected_old_hash.to_string(),
+                    actual_hash: hash_text(&stale_candidates[0].text).to_string(),
                 });
             }
 
@@ -534,7 +527,7 @@ fn resolve_unique_kind_hash_candidate(
     handle_index: &HandleIndex<'_>,
     identity: &str,
     kind: &str,
-    expected_old_hash: &str,
+    expected_old_hash: &ContentHash,
 ) -> Result<Option<SelectionHandle>, IdenteditError> {
     let candidates = handle_index.handles_by_kind_and_hash(kind, expected_old_hash);
 
@@ -601,13 +594,13 @@ fn validate_span_hint_match(
 
 fn verify_precondition(
     matched_handle: &SelectionHandle,
-    expected_old_hash: &str,
+    expected_old_hash: &ContentHash,
 ) -> Result<SelectionHandle, IdenteditError> {
     let actual_hash = hash_text(&matched_handle.text);
-    if actual_hash != expected_old_hash {
+    if &actual_hash != expected_old_hash {
         return Err(IdenteditError::PreconditionFailed {
             expected_hash: expected_old_hash.to_string(),
-            actual_hash,
+            actual_hash: actual_hash.to_string(),
         });
     }
 
@@ -619,7 +612,7 @@ struct LineRange {
     line: usize,
     full_start: usize,
     full_end: usize,
-    expected_hash: String,
+    expected_hash: LineHash,
 }
 
 fn compute_line_ranges(source_text: &str) -> Vec<LineRange> {
@@ -683,26 +676,26 @@ fn compute_line_ranges(source_text: &str) -> Vec<LineRange> {
     ranges
 }
 
-fn resolve_line_anchor(anchor: &str, ranges: &[LineRange]) -> Result<LineRange, IdenteditError> {
-    let parsed = parse_line_ref(anchor).map_err(|error| IdenteditError::InvalidRequest {
-        message: error.to_string(),
-    })?;
-    if parsed.line == 0 || parsed.line > ranges.len() {
+fn resolve_line_anchor(
+    anchor: &LineAnchor,
+    ranges: &[LineRange],
+) -> Result<LineRange, IdenteditError> {
+    if anchor.line() > ranges.len() {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
                 "Invalid hashline anchor '{}': line {} is out of range for current file (1..={})",
                 anchor,
-                parsed.line,
+                anchor.line(),
                 ranges.len()
             ),
         });
     }
 
-    let range = ranges[parsed.line - 1].clone();
-    if range.expected_hash != parsed.hash {
+    let range = ranges[anchor.line() - 1].clone();
+    if &range.expected_hash != anchor.hash() {
         return Err(IdenteditError::PreconditionFailed {
-            expected_hash: parsed.hash,
-            actual_hash: range.expected_hash,
+            expected_hash: anchor.hash().to_string(),
+            actual_hash: range.expected_hash.to_string(),
         });
     }
 

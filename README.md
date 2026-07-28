@@ -157,7 +157,7 @@ Or via the `edit` pipeline with `jq --rawfile`:
 jq -n --rawfile new_text /tmp/new_block.py '{
   command:"edit", file:"src/example.py",
   operations:[{
-    target:{type:"node", identity:"<id>", kind:"function_definition", expected_old_hash:"<hash>"},
+    target:{type:"node", identity:"0123456789abcdef", kind:"function_definition", expected_old_hash:"fedcba9876543210"},
     op:{type:"replace", new_text:$new_text}
   }]
 }' | identedit edit --json | identedit apply
@@ -169,6 +169,9 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 - `patch --dry-run` validates and previews without writing files.
 - Line-anchored patch defaults to strict mode. `--auto-repair` is explicit opt-in.
 - `apply --dry-run` validates and returns a summary without writing.
+- Content precondition hashes use 16 hexadecimal characters; line anchors use `LINE:12-hex`.
+- Uppercase and surrounding whitespace are accepted at ingress and serialize canonically in lowercase. Display-form anchors such as `7:ABCDEF012345|content` are accepted and serialize as canonical `7:abcdef012345`.
+- Malformed hash and anchor values fail before target resolution.
 - Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
 - Config paths use dot-separated bare keys by default (`service.port`). For literal keys containing dots, spaces, slashes, colons, brackets, or quotes, use bracket-quoted JSON string segments: `services["sidecar.port"]`, `jobs["build/test"].steps[0]["run:script"]`, `root["quote\"key"]`.
 - Multi-document YAML requires an explicit `--document-index <N>` for `--create-missing`; indices are 0-based. Existing-path edits may still omit it only when the path resolves uniquely across documents.
