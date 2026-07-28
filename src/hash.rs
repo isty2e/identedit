@@ -15,11 +15,14 @@ pub struct ContentHashParseError;
 
 impl ContentHash {
     pub fn parse(value: &str) -> Result<Self, ContentHashParseError> {
-        if value.len() != HASH_HEX_LEN || !value.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        let normalized = value.trim();
+        if normalized.len() != HASH_HEX_LEN
+            || !normalized.as_bytes().iter().all(u8::is_ascii_hexdigit)
+        {
             return Err(ContentHashParseError);
         }
 
-        Ok(Self(value.to_ascii_lowercase()))
+        Ok(Self(normalized.to_ascii_lowercase()))
     }
 
     fn from_blake3(hash: blake3::Hash) -> Self {
@@ -92,7 +95,8 @@ mod tests {
 
     #[test]
     fn content_hash_normalizes_uppercase_and_round_trips_as_a_string() {
-        let parsed = ContentHash::parse("ABCDEF0123456789").expect("uppercase hash should parse");
+        let parsed: ContentHash = serde_json::from_value(json!("  ABCDEF0123456789  "))
+            .expect("surrounding whitespace and uppercase should normalize at ingress");
         assert_eq!(parsed.as_str(), "abcdef0123456789");
 
         let serialized = serde_json::to_value(&parsed).expect("hash should serialize");
@@ -109,6 +113,7 @@ mod tests {
             "0123456789abcde",
             "0123456789abcdef0",
             "0123456789abcdeg",
+            "01234567 89abcdef",
             "éééééééé",
         ] {
             assert!(
