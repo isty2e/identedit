@@ -968,14 +968,7 @@ fn apply_json_mode_rejects_multiple_move_operations_per_file() {
                                 "type": "move",
                                 "to": destination_a.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), destination_a.to_string_lossy().to_string())
                         },
                         {
                             "target": file_move_target(&source_path),
@@ -983,14 +976,7 @@ fn apply_json_mode_rejects_multiple_move_operations_per_file() {
                                 "type": "move",
                                 "to": destination_b.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), destination_b.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1040,14 +1026,7 @@ fn apply_json_mode_rejects_move_mixed_with_content_edits_for_same_file() {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), destination.to_string_lossy().to_string())
                         },
                         {
                             "target": {
@@ -1144,14 +1123,10 @@ fn apply_json_mode_rejects_edit_and_move_split_across_duplicate_file_entries() {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(
+                                source_path.to_string_lossy().to_string(),
+                                destination.to_string_lossy().to_string()
+                            )
                         }
                     ]
                 }
@@ -1204,14 +1179,7 @@ fn apply_json_mode_executes_single_move_operation() {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), destination.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1248,6 +1216,66 @@ fn apply_json_mode_executes_single_move_operation() {
 }
 
 #[test]
+fn apply_json_mode_rejects_legacy_move_preview_without_mutating_files() {
+    let workspace = tempdir().expect("tempdir should be created");
+    let source_path = workspace.path().join("source.py");
+    let source_text = "def keep():\n    return 1\n";
+    fs::write(&source_path, source_text).expect("fixture write should succeed");
+    let destination = workspace.path().join("renamed.py");
+
+    let request = json!({
+        "command": "apply",
+        "changeset": {
+            "files": [
+                {
+                    "file": source_path.to_string_lossy().to_string(),
+                    "operations": [
+                        {
+                            "target": file_move_target(&source_path),
+                            "op": {
+                                "type": "move",
+                                "to": destination.to_string_lossy().to_string()
+                            },
+                            "preview": {
+                                "old_text": "",
+                                "new_text": "",
+                                "matched_span": { "start": 0, "end": 0 }
+                            }
+                        }
+                    ]
+                }
+            ],
+            "transaction": {
+                "mode": "all_or_nothing"
+            }
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "legacy move preview must be rejected at the CLI boundary"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error should include a diagnostic message");
+    assert!(message.contains("requires 'move' with 'from' and 'to'"));
+    assert!(message.contains("regenerate the changeset"));
+    assert_eq!(
+        fs::read_to_string(&source_path).expect("source should remain readable"),
+        source_text
+    );
+    assert!(
+        !destination.exists(),
+        "rejected legacy input must not create the destination"
+    );
+}
+
+#[test]
 fn apply_json_mode_move_graph_rejects_self_move() {
     let workspace = tempdir().expect("tempdir should be created");
     let source_path = workspace.path().join("source.py");
@@ -1266,14 +1294,7 @@ fn apply_json_mode_move_graph_rejects_self_move() {
                                 "type": "move",
                                 "to": source_path.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), source_path.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1323,14 +1344,7 @@ fn apply_json_mode_move_graph_rejects_duplicate_destination_paths() {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_a.to_string_lossy().to_string(), destination.to_string_lossy().to_string())
                         }
                     ]
                 },
@@ -1343,14 +1357,7 @@ fn apply_json_mode_move_graph_rejects_duplicate_destination_paths() {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_b.to_string_lossy().to_string(), destination.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1400,14 +1407,7 @@ fn apply_json_mode_move_graph_rejects_existing_destination_when_not_chain() {
                                 "type": "move",
                                 "to": destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source.to_string_lossy().to_string(), destination.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1456,14 +1456,7 @@ fn apply_json_mode_move_graph_rejects_cycle() {
                                 "type": "move",
                                 "to": source_b.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_a.to_string_lossy().to_string(), source_b.to_string_lossy().to_string())
                         }
                     ]
                 },
@@ -1476,14 +1469,7 @@ fn apply_json_mode_move_graph_rejects_cycle() {
                                 "type": "move",
                                 "to": source_a.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_b.to_string_lossy().to_string(), source_a.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1537,14 +1523,7 @@ fn apply_json_mode_move_graph_executes_chain_in_reverse_topological_order() {
                                 "type": "move",
                                 "to": source_b.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_a.to_string_lossy().to_string(), source_b.to_string_lossy().to_string())
                         }
                     ]
                 },
@@ -1557,14 +1536,7 @@ fn apply_json_mode_move_graph_executes_chain_in_reverse_topological_order() {
                                 "type": "move",
                                 "to": destination_c.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_b.to_string_lossy().to_string(), destination_c.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -1635,14 +1607,7 @@ fn apply_json_mode_move_rejects_duplicate_source_alias_paths() {
                                 "type": "move",
                                 "to": "renamed_a.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("source.py", "renamed_a.py")
                         }
                     ]
                 },
@@ -1655,14 +1620,7 @@ fn apply_json_mode_move_rejects_duplicate_source_alias_paths() {
                                 "type": "move",
                                 "to": "renamed_b.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("./source.py", "renamed_b.py")
                         }
                     ]
                 }

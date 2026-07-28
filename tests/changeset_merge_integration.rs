@@ -32,6 +32,15 @@ fn file_move_target(path: &Path) -> Value {
     })
 }
 
+fn file_move_preview(from: &Path, to: &Path) -> Value {
+    json!({
+        "move": {
+            "from": from.to_string_lossy(),
+            "to": to.to_string_lossy()
+        }
+    })
+}
+
 fn build_replace_changeset(file: &Path, identity: &str, replacement: &str) -> Value {
     let output = run_identedit(&[
         "edit",
@@ -221,14 +230,7 @@ fn changeset_merge_rejects_move_with_content_edit_on_same_file() {
                             "type": "move",
                             "to": destination.to_string_lossy().to_string()
                         },
-                        "preview": {
-                            "old_text": "",
-                            "new_text": "",
-                            "matched_span": {
-                                "start": 0,
-                                "end": 0
-                            }
-                        }
+                        "preview": file_move_preview(&file, &destination)
                     }
                 ]
             }

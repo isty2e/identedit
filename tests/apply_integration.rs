@@ -54,6 +54,15 @@ fn file_move_target(path: &Path) -> Value {
     })
 }
 
+fn file_move_preview(from: impl Into<String>, to: impl Into<String>) -> Value {
+    json!({
+        "move": {
+            "from": from.into(),
+            "to": to.into()
+        }
+    })
+}
+
 fn run_identedit_with_raw_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.args(arguments);

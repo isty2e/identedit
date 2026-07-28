@@ -184,8 +184,8 @@ pub struct TextChangePreview {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MoveChangePreview {
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "move")]
-    pub move_preview: Option<MovePreview>,
+    #[serde(rename = "move")]
+    pub move_preview: MovePreview,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,7 +199,7 @@ pub struct MovePreview {
 pub(crate) struct FileMoveOperationRef<'a> {
     pub(crate) expected_file_hash: &'a ContentHash,
     pub(crate) destination: &'a std::path::Path,
-    pub(crate) preview: &'a MoveChangePreview,
+    pub(crate) preview: &'a MovePreview,
 }
 
 impl EditOperation {
@@ -278,7 +278,7 @@ impl ChangeOp {
             ) => Some(FileMoveOperationRef {
                 expected_file_hash,
                 destination: to.as_path(),
-                preview,
+                preview: &preview.move_preview,
             }),
             _ => None,
         }
@@ -320,7 +320,7 @@ impl ChangePreview {
     }
 
     #[cfg(test)]
-    pub(crate) fn move_operation(move_preview: Option<MovePreview>) -> Self {
+    pub(crate) fn move_operation(move_preview: MovePreview) -> Self {
         Self::Move(MoveChangePreview { move_preview })
     }
 
@@ -517,12 +517,6 @@ mod tests {
                 "to": "renamed.py"
             },
             "preview": {
-                "old_text": "",
-                "new_text": "",
-                "matched_span": {
-                    "start": 0,
-                    "end": 0
-                },
                 "move": {
                     "from": "fixture.py",
                     "to": "renamed.py"
@@ -544,10 +538,10 @@ mod tests {
         }
         assert_eq!(
             parsed.preview(),
-            &ChangePreview::move_operation(Some(MovePreview {
+            &ChangePreview::move_operation(MovePreview {
                 from: PathBuf::from("fixture.py"),
                 to: PathBuf::from("renamed.py"),
-            }))
+            })
         );
     }
 
@@ -903,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn change_op_normalizes_legacy_empty_text_move_preview() {
+    fn change_op_rejects_legacy_text_move_preview_with_actionable_diagnostic() {
         let wire = json!({
             "target": wire_target("file"),
             "op": wire_op("move"),
@@ -914,13 +908,38 @@ mod tests {
             }
         });
 
-        let parsed: ChangeOp =
-            serde_json::from_value(wire).expect("legacy empty move preview should remain accepted");
-        let serialized = serde_json::to_value(parsed).expect("normalized move should serialize");
+        let error = serde_json::from_value::<ChangeOp>(wire)
+            .expect_err("move preview must contain canonical move data");
+        let message = error.to_string();
+        assert!(message.contains("requires 'move' with 'from' and 'to'"));
+        assert!(message.contains("regenerate the changeset"));
+    }
 
-        assert_eq!(serialized["preview"], json!({}));
-        serde_json::from_value::<ChangeOp>(serialized)
-            .expect("canonical empty move preview should reparse");
+    #[test]
+    fn change_op_rejects_empty_move_preview_with_actionable_diagnostic() {
+        let wire = json!({
+            "target": wire_target("file"),
+            "op": wire_op("move"),
+            "preview": {}
+        });
+
+        let error = serde_json::from_value::<ChangeOp>(wire)
+            .expect_err("empty move preview must not enter the canonical model");
+        let message = error.to_string();
+        assert!(message.contains("requires 'move' with 'from' and 'to'"));
+        assert!(message.contains("regenerate the changeset"));
+    }
+
+    #[test]
+    fn change_op_rejects_move_preview_mixed_with_text_fields() {
+        let mut wire = wire_change_op("file", "move");
+        wire["preview"]["old_text"] = json!("");
+
+        let error = serde_json::from_value::<ChangeOp>(wire)
+            .expect_err("move preview must not retain text-preview fields");
+        let message = error.to_string();
+        assert!(message.contains("accepts only the 'move' field"));
+        assert!(message.contains("remove text preview fields"));
     }
 
     #[test]
@@ -947,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn change_op_rejects_incomplete_legacy_empty_move_preview() {
+    fn change_op_rejects_partial_legacy_text_move_preview() {
         let wire = json!({
             "target": wire_target("file"),
             "op": wire_op("move"),
@@ -957,7 +976,9 @@ mod tests {
         });
 
         let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
-        assert!(error.to_string().contains("missing field `new_text`"));
+        let message = error.to_string();
+        assert!(message.contains("requires 'move' with 'from' and 'to'"));
+        assert!(message.contains("regenerate the changeset"));
     }
 
     #[test]
@@ -1177,7 +1198,10 @@ mod tests {
             })
             .expect_err("replace cannot target file_end");
         operation
-            .replace_preview(ChangePreview::move_operation(None))
+            .replace_preview(ChangePreview::move_operation(MovePreview {
+                from: PathBuf::from("fixture.py"),
+                to: PathBuf::from("renamed.py"),
+            }))
             .expect_err("replace cannot use a move preview");
 
         assert_eq!(operation.target(), &original_target);

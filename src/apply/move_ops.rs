@@ -104,14 +104,9 @@ fn validate_file_move_operation_constraints(
 
 fn validate_move_preview(
     changeset: &FileChange,
-    preview: &crate::changeset::MoveChangePreview,
+    move_preview: &crate::changeset::MovePreview,
     destination: &Path,
 ) -> Result<(), IdenteditError> {
-    let Some(move_preview) = preview.move_preview.as_ref() else {
-        // Backward-compatible payloads are normalized to an absent move preview at ingress.
-        return Ok(());
-    };
-
     if move_preview.from != changeset.file || move_preview.to != destination {
         return Err(IdenteditError::InvalidRequest {
             message: format!(

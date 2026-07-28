@@ -287,22 +287,15 @@ impl ChangePreviewWire {
         E: de::Error,
     {
         if matches!(op, OpKind::Move { .. }) {
-            if let Some(move_preview) = self.move_preview.clone() {
-                reject_legacy_move_placeholder_fields(&self)?;
-                return Ok(ChangePreview::Move(MoveChangePreview {
-                    move_preview: Some(move_preview),
-                }));
-            }
-
-            if self.has_no_preview_fields() || self.is_legacy_empty_move_placeholder() {
-                return Ok(ChangePreview::Move(MoveChangePreview {
-                    move_preview: None,
-                }));
-            }
+            let move_preview = self.move_preview.clone().ok_or_else(|| {
+                E::custom(
+                    "move operation preview requires 'move' with 'from' and 'to'; regenerate the changeset with the current identedit version",
+                )
+            })?;
+            reject_text_fields_for_move_preview(&self)?;
+            return Ok(ChangePreview::Move(MoveChangePreview { move_preview }));
         } else if let Some(move_preview) = self.move_preview {
-            return Ok(ChangePreview::Move(MoveChangePreview {
-                move_preview: Some(move_preview),
-            }));
+            return Ok(ChangePreview::Move(MoveChangePreview { move_preview }));
         }
 
         Ok(ChangePreview::Text(TextChangePreview {
@@ -320,64 +313,21 @@ impl ChangePreviewWire {
                 .ok_or_else(|| de::Error::missing_field("matched_span"))?,
         }))
     }
-
-    fn has_no_preview_fields(&self) -> bool {
-        self.old_text.is_none()
-            && self.old_hash.is_none()
-            && self.old_len.is_none()
-            && self.new_text.is_none()
-            && self.matched_span.is_none()
-    }
-
-    fn is_legacy_empty_move_placeholder(&self) -> bool {
-        self.old_text.as_deref().unwrap_or_default().is_empty()
-            && self.old_hash.is_none()
-            && self.old_len.is_none()
-            && self.new_text.as_deref() == Some("")
-            && self
-                .matched_span
-                .is_some_and(|span| span.start == 0 && span.end == 0)
-    }
 }
 
-fn reject_legacy_move_placeholder_fields<E>(wire: &ChangePreviewWire) -> result::Result<(), E>
+fn reject_text_fields_for_move_preview<E>(wire: &ChangePreviewWire) -> result::Result<(), E>
 where
     E: de::Error,
 {
-    if wire.old_hash.is_some() || wire.old_len.is_some() {
-        return Err(E::custom(
-            "move preview does not accept old_hash/old_len placeholder fields",
-        ));
-    }
-
-    if wire
-        .old_text
-        .as_deref()
-        .is_some_and(|text| !text.is_empty())
+    if wire.old_text.is_some()
+        || wire.old_hash.is_some()
+        || wire.old_len.is_some()
+        || wire.new_text.is_some()
+        || wire.matched_span.is_some()
     {
         return Err(E::custom(
-            "move preview compatibility old_text field must be empty when provided",
+            "move operation preview accepts only the 'move' field with 'from' and 'to'; remove text preview fields",
         ));
     }
-
-    if wire
-        .new_text
-        .as_deref()
-        .is_some_and(|text| !text.is_empty())
-    {
-        return Err(E::custom(
-            "move preview compatibility new_text field must be empty when provided",
-        ));
-    }
-
-    if wire
-        .matched_span
-        .is_some_and(|span| span.start != 0 || span.end != 0)
-    {
-        return Err(E::custom(
-            "move preview compatibility matched_span field must be [0, 0) when provided",
-        ));
-    }
-
     Ok(())
 }

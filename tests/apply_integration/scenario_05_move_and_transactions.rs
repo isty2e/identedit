@@ -28,14 +28,7 @@ fn apply_json_mode_move_rejects_existing_symlink_destination() {
                                 "type": "move",
                                 "to": symlink_destination.to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), symlink_destination.to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -86,14 +79,7 @@ fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
                                 "type": "move",
                                 "to": "./renamed.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("source.py", "./renamed.py")
                         }
                     ]
                 }
@@ -147,14 +133,7 @@ fn apply_json_mode_move_rejects_dot_segment_self_move_in_relative_mode() {
                                 "type": "move",
                                 "to": "nested/../source.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("./source.py", "nested/../source.py")
                         }
                     ]
                 }
@@ -207,14 +186,7 @@ fn apply_json_mode_executes_move_to_nested_existing_directory() {
                                 "type": "move",
                                 "to": "nested/renamed.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("source.py", "nested/renamed.py")
                         }
                     ]
                 }
@@ -269,14 +241,7 @@ fn apply_json_mode_move_to_path_under_file_parent_returns_io_error() {
                                 "type": "move",
                                 "to": workspace.path().join("not_a_directory/renamed.py").to_string_lossy().to_string()
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview(source_path.to_string_lossy().to_string(), workspace.path().join("not_a_directory/renamed.py").to_string_lossy().to_string())
                         }
                     ]
                 }
@@ -323,14 +288,7 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
                                 "type": "move",
                                 "to": "renamed.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("a.py", "renamed.py")
                         }
                     ]
                 },
@@ -343,14 +301,7 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
                                 "type": "move",
                                 "to": "./renamed.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("b.py", "./renamed.py")
                         }
                     ]
                 }
@@ -409,14 +360,7 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
                                 "type": "move",
                                 "to": "./b.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("a.py", "./b.py")
                         }
                     ]
                 },
@@ -429,14 +373,7 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
                                 "type": "move",
                                 "to": "nested/../a.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("b.py", "nested/../a.py")
                         }
                     ]
                 }
@@ -489,14 +426,7 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
                                 "type": "move",
                                 "to": "./b.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("a.py", "./b.py")
                         }
                     ]
                 },
@@ -509,14 +439,7 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
                                 "type": "move",
                                 "to": "./c.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("b.py", "./c.py")
                         }
                     ]
                 }
@@ -562,14 +485,7 @@ fn apply_json_mode_executes_move_with_non_self_dot_segment_destination() {
                                 "type": "move",
                                 "to": "nested/../renamed.py"
                             },
-                            "preview": {
-                                "old_text": "",
-                                "new_text": "",
-                                "matched_span": {
-                                    "start": 0,
-                                    "end": 0
-                                }
-                            }
+                            "preview": file_move_preview("source.py", "nested/../renamed.py")
                         }
                     ]
                 }
