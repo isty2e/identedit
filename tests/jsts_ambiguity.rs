@@ -44,7 +44,7 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
 }
 
 fn hash_text(value: &str) -> String {
-    crate::common::hash_text(value)
+    common::hash_text(value)
 }
 
 #[test]

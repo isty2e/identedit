@@ -194,12 +194,12 @@ fn cli_mode_response_includes_expected_old_hash_for_each_handle() {
             .expect("select response must include expected_old_hash");
         assert_eq!(
             expected_old_hash.len(),
-            crate::common::PROTOCOL_HASH_HEX_LEN,
+            common::PROTOCOL_HASH_HEX_LEN,
             "expected_old_hash should use fixed-length hex prefix"
         );
         assert_eq!(
             expected_old_hash,
-            crate::common::hash_text(text),
+            common::hash_text(text),
             "expected_old_hash should match blake3(text)"
         );
     }
@@ -285,7 +285,7 @@ fn json_mode_response_includes_file_preconditions_for_all_scanned_files() {
             .expect("file precondition must include expected_file_hash");
         assert_eq!(
             hash.len(),
-            crate::common::PROTOCOL_HASH_HEX_LEN,
+            common::PROTOCOL_HASH_HEX_LEN,
             "expected_file_hash should use fixed-length hex prefix"
         );
         by_file.insert(file.to_string(), hash.to_string());
@@ -293,7 +293,7 @@ fn json_mode_response_includes_file_preconditions_for_all_scanned_files() {
 
     for file in [python_fixture, json_fixture] {
         let source = fs::read_to_string(&file).expect("fixture should be readable");
-        let expected_hash = crate::common::hash_text(&source);
+        let expected_hash = common::hash_text(&source);
         let file_key = file.to_string_lossy().to_string();
         assert_eq!(
             by_file.get(&file_key),
@@ -819,9 +819,8 @@ fn cli_mode_file_preconditions_follow_input_order_for_multi_file_success() {
     );
 
     for (entry, file) in file_preconditions.iter().zip([file_c, file_a, file_b]) {
-        let expected_hash = crate::common::hash_text(
-            &fs::read_to_string(&file).expect("fixture should be readable"),
-        );
+        let expected_hash =
+            common::hash_text(&fs::read_to_string(&file).expect("fixture should be readable"));
         assert_eq!(
             entry["expected_file_hash"].as_str(),
             Some(expected_hash.as_str()),
@@ -889,9 +888,8 @@ fn json_mode_file_preconditions_follow_input_order_for_multi_file_success() {
     );
 
     for (entry, file) in file_preconditions.iter().zip([file_c, file_a, file_b]) {
-        let expected_hash = crate::common::hash_text(
-            &fs::read_to_string(&file).expect("fixture should be readable"),
-        );
+        let expected_hash =
+            common::hash_text(&fs::read_to_string(&file).expect("fixture should be readable"));
         assert_eq!(
             entry["expected_file_hash"].as_str(),
             Some(expected_hash.as_str()),

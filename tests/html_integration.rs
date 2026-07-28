@@ -875,7 +875,7 @@ fn transform_json_span_hint_disambiguates_stress_html_duplicate_identity() {
     );
     assert_eq!(
         preview["old_hash"],
-        crate::common::hash_text(old_text),
+        common::hash_text(old_text),
         "compact preview old_hash should match selected duplicate node text"
     );
     assert_eq!(

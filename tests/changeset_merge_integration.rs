@@ -28,7 +28,7 @@ fn file_move_target(path: &Path) -> Value {
     let source_bytes = std::fs::read(path).expect("move source should be readable");
     json!({
         "type": "file",
-        "expected_file_hash": crate::common::hash_bytes(&source_bytes)
+        "expected_file_hash": common::hash_bytes(&source_bytes)
     })
 }
 

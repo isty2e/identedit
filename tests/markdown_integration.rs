@@ -610,7 +610,7 @@ fn transform_replace_and_apply_preserve_crlf_markdown_source_segments() {
         .as_u64()
         .expect("preview old_len should be number");
     assert!(
-        preview_old_hash == crate::common::hash_text(expected_old_text),
+        preview_old_hash == common::hash_text(expected_old_text),
         "preview old_hash should match original heading text"
     );
     assert_eq!(

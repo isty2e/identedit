@@ -97,7 +97,7 @@ fn line_ref(source: &str, line: usize) -> String {
         .lines()
         .nth(line - 1)
         .expect("line should exist for anchor");
-    format!("{line}:{}", crate::common::compute_line_hash(line_text))
+    format!("{line}:{}", common::compute_line_hash(line_text))
 }
 
 fn select_function_handle_by_name(file_path: &Path, name: &str) -> Value {
@@ -427,7 +427,7 @@ fn transform_apply_pipeline_supports_mixed_node_and_line_targets() {
                 "identity": handle["identity"],
                 "kind": handle["kind"],
                 "span_hint": handle["span"],
-                "expected_old_hash": crate::common::hash_text(
+                "expected_old_hash": common::hash_text(
                     handle["text"].as_str().expect("text should be present")
                 ),
                 "op": {
@@ -646,7 +646,7 @@ fn select_transform_apply_pipeline_supports_insert_before_and_after() {
                     "start": span_start,
                     "end": span_end
                 },
-                "expected_old_hash": crate::common::hash_text(anchor_text),
+                "expected_old_hash": common::hash_text(anchor_text),
                 "op": {
                     "type": "insert_before",
                     "new_text": before_insert
@@ -659,7 +659,7 @@ fn select_transform_apply_pipeline_supports_insert_before_and_after() {
                     "start": span_start,
                     "end": span_end
                 },
-                "expected_old_hash": crate::common::hash_text(anchor_text),
+                "expected_old_hash": common::hash_text(anchor_text),
                 "op": {
                     "type": "insert_after",
                     "new_text": after_insert
@@ -711,7 +711,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_before() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": crate::common::hash_text(
+                    "expected_old_hash": common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -721,7 +721,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_before() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": crate::common::hash_text(
+                        "expected_old_hash": common::hash_text(
                             destination_handle["text"]
                                 .as_str()
                                 .expect("destination text should be present")
@@ -787,7 +787,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_after() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": crate::common::hash_text(
+                    "expected_old_hash": common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -797,7 +797,7 @@ fn select_transform_apply_pipeline_supports_same_file_move_after() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": crate::common::hash_text(
+                        "expected_old_hash": common::hash_text(
                             destination_handle["text"]
                                 .as_str()
                                 .expect("destination text should be present")
@@ -867,7 +867,7 @@ fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": crate::common::hash_text(
+                    "expected_old_hash": common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -878,7 +878,7 @@ fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": crate::common::hash_text(
+                        "expected_old_hash": common::hash_text(
                             destination_handle["text"].as_str().expect("destination text should be present")
                         )
                     }
@@ -1035,7 +1035,7 @@ fn select_transform_apply_pipeline_inserts_json_key_before_existing_key() {
                 "identity": handle["identity"],
                 "kind": handle["kind"],
                 "span_hint": {"start": span_start, "end": span_end},
-                "expected_old_hash": crate::common::hash_text(anchor_text),
+                "expected_old_hash": common::hash_text(anchor_text),
                 "op": {
                     "type": "insert_before",
                     "new_text": "\"version\": 1,\n  "

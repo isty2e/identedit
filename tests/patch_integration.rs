@@ -126,7 +126,7 @@ fn line_ref(source: &str, line: usize) -> String {
         .lines()
         .nth(line - 1)
         .expect("line should exist for anchor");
-    let hash = crate::common::compute_line_hash(line_text);
+    let hash = common::compute_line_hash(line_text);
     format!("{line}:{hash}")
 }
 
