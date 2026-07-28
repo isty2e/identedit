@@ -3,13 +3,12 @@ use std::path::Path;
 use crate::changeset::{ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::Span;
-use crate::hash::{ContentHash, hash_text};
+use crate::hash::hash_text;
 use crate::transform::MatchedChange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ResolvedReplacement {
     pub(super) index: usize,
-    pub(super) expected_hash: ContentHash,
     pub(super) old_text: String,
     pub(super) start: usize,
     pub(super) end: usize,
@@ -20,13 +19,11 @@ pub(super) fn matched_changes_to_replacements(
     matched_changes: Vec<MatchedChange>,
 ) -> Result<Vec<ResolvedReplacement>, IdenteditError> {
     let mut replacements = Vec::with_capacity(matched_changes.len());
-    let empty_text_hash = hash_text("");
 
     for matched in matched_changes {
         match matched.op {
             OpKind::Replace { new_text } => replacements.push(ResolvedReplacement {
                 index: matched.index,
-                expected_hash: matched.expected_hash,
                 old_text: matched.old_text,
                 start: matched.matched_span.start,
                 end: matched.matched_span.end,
@@ -34,7 +31,6 @@ pub(super) fn matched_changes_to_replacements(
             }),
             OpKind::Delete => replacements.push(ResolvedReplacement {
                 index: matched.index,
-                expected_hash: matched.expected_hash,
                 old_text: matched.old_text,
                 start: matched.matched_span.start,
                 end: matched.matched_span.end,
@@ -44,7 +40,6 @@ pub(super) fn matched_changes_to_replacements(
             | OpKind::InsertAfter { new_text }
             | OpKind::Insert { new_text } => replacements.push(ResolvedReplacement {
                 index: matched.index,
-                expected_hash: matched.expected_hash,
                 old_text: matched.old_text,
                 start: matched.matched_span.start,
                 end: matched.matched_span.end,
@@ -61,7 +56,6 @@ pub(super) fn matched_changes_to_replacements(
 
                 replacements.push(ResolvedReplacement {
                     index: matched.index,
-                    expected_hash: matched.expected_hash,
                     old_text: matched.old_text,
                     start: matched.matched_span.start,
                     end: matched.matched_span.end,
@@ -69,7 +63,6 @@ pub(super) fn matched_changes_to_replacements(
                 });
                 replacements.push(ResolvedReplacement {
                     index: matched.index,
-                    expected_hash: empty_text_hash.clone(),
                     old_text: String::new(),
                     start: insert_at,
                     end: insert_at,
@@ -114,8 +107,9 @@ pub(super) fn apply_replacements_to_text(
 
         if current_text != replacement.old_text {
             let actual_hash = hash_text(current_text);
+            let expected_hash = hash_text(&replacement.old_text);
             return Err(IdenteditError::PreconditionFailed {
-                expected_hash: replacement.expected_hash.to_string(),
+                expected_hash: expected_hash.to_string(),
                 actual_hash: actual_hash.to_string(),
             });
         }

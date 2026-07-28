@@ -8,7 +8,6 @@ use crate::hash::{ContentHash, hash_text};
 use crate::hashline::{LineAnchor, LineHash, compute_line_hash};
 
 pub(super) struct ResolvedOperationView {
-    pub(super) expected_hash: ContentHash,
     pub(super) old_text: String,
     pub(super) matched_span: Span,
     pub(super) move_insert_at: Option<usize>,
@@ -103,9 +102,7 @@ pub(super) fn resolve_operation_view(
     let target = operation.target();
     let op = operation.op();
     match target {
-        TransformTarget::Node {
-            expected_old_hash, ..
-        } => {
+        TransformTarget::Node { .. } => {
             if let OpKind::MoveBefore { destination } | OpKind::MoveAfter { destination } = op {
                 return resolve_same_file_move_view(
                     file,
@@ -119,7 +116,6 @@ pub(super) fn resolve_operation_view(
             let anchor = resolve_target_in_handles_with_index(file, handle_index, target)?;
             let (old_text, matched_span) = edit_view_for_node_operation(op, &anchor);
             Ok(ResolvedOperationView {
-                expected_hash: expected_old_hash.clone(),
                 old_text,
                 matched_span,
                 move_insert_at: None,
@@ -132,7 +128,6 @@ pub(super) fn resolve_operation_view(
             verify_file_target_precondition(source_text, expected_file_hash)?;
             let start = file_content_start_offset(source_text);
             Ok(ResolvedOperationView {
-                expected_hash: expected_file_hash.clone(),
                 old_text: String::new(),
                 matched_span: Span { start, end: start },
                 move_insert_at: None,
@@ -145,7 +140,6 @@ pub(super) fn resolve_operation_view(
             verify_file_target_precondition(source_text, expected_file_hash)?;
             let end = source_text.len();
             Ok(ResolvedOperationView {
-                expected_hash: expected_file_hash.clone(),
                 old_text: String::new(),
                 matched_span: Span { start: end, end },
                 move_insert_at: None,
@@ -193,7 +187,6 @@ fn resolve_line_operation_view(
             };
             let old_text = source_text[matched_span.start..matched_span.end].to_string();
             Ok(ResolvedOperationView {
-                expected_hash: hash_text(&old_text),
                 old_text,
                 matched_span,
                 move_insert_at: None,
@@ -212,7 +205,6 @@ fn resolve_line_operation_view(
             );
             let insert_at = start_line.full_end;
             Ok(ResolvedOperationView {
-                expected_hash: hash_text(""),
                 old_text: String::new(),
                 matched_span: Span {
                     start: insert_at,
@@ -259,15 +251,7 @@ fn resolve_same_file_move_view(
         });
     }
 
-    let expected_hash = match source_target {
-        TransformTarget::Node {
-            expected_old_hash, ..
-        } => expected_old_hash.clone(),
-        _ => unreachable!("same-file move sources are always node targets"),
-    };
-
     Ok(ResolvedOperationView {
-        expected_hash,
         old_text: source_anchor.text.clone(),
         matched_span: source_anchor.span,
         move_insert_at: Some(destination_offset),

@@ -117,7 +117,6 @@ fn build_changeset_with_handles(
         matched_changes.push(MatchedChange {
             index,
             op: op.clone(),
-            expected_hash: resolved.expected_hash.clone(),
             old_text: resolved.old_text.clone(),
             matched_span: resolved.matched_span,
             move_insert_at: resolved.move_insert_at,
@@ -151,14 +150,18 @@ fn canonicalize_operation_target(
     resolved: &ResolvedOperationView,
 ) -> TransformTarget {
     match target {
-        TransformTarget::Node { identity, .. } => TransformTarget::node(
+        TransformTarget::Node {
+            identity,
+            expected_old_hash,
+            ..
+        } => TransformTarget::node(
             resolved
                 .anchor_identity
                 .clone()
                 .unwrap_or_else(|| identity.clone()),
             resolved.anchor_kind.clone(),
             Some(resolved.anchor_span),
-            resolved.expected_hash.clone(),
+            expected_old_hash.clone(),
         ),
         TransformTarget::FileStart { expected_file_hash } => TransformTarget::FileStart {
             expected_file_hash: expected_file_hash.clone(),
@@ -209,11 +212,9 @@ pub(crate) fn resolve_changeset_targets_in_handles(
             &handle_index,
             operation.operation(),
         )?;
-
         matched.push(MatchedChange {
             index,
             op: operation.op().clone(),
-            expected_hash: resolved.expected_hash,
             old_text: resolved.old_text,
             matched_span: resolved.matched_span,
             move_insert_at: resolved.move_insert_at,

@@ -21,10 +21,8 @@ fn replacement(
     end: usize,
     new_text: String,
 ) -> ResolvedReplacement {
-    let expected_hash = crate::hash::hash_text(&old_text);
     ResolvedReplacement {
         index,
-        expected_hash,
         old_text,
         start,
         end,
