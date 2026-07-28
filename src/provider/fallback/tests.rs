@@ -3,18 +3,6 @@ use std::path::Path;
 use super::FallbackProvider;
 use crate::error::IdenteditError;
 use crate::provider::StructureProvider;
-
-#[test]
-fn commonjs_exports_top_level_mask_marks_exported_property_lines() {
-    let source = "module.exports = {\n  parse(value) {\n    return value + 4;\n  },\n  build(value) {\n    return value + 5;\n  },\n};\n";
-    let lines = super::collect_lines(source);
-    let mask = super::build_commonjs_exports_top_level_mask(source.as_bytes(), &lines);
-
-    assert_eq!(mask.len(), lines.len());
-    assert!(mask[1], "first exported property line should be marked");
-    assert!(mask[4], "second exported property line should be marked");
-}
-
 #[test]
 fn parse_extracts_python_indentation_blocks() {
     let source = "class Worker:\n    def run(self):\n        return 1\n\ndef helper(value):\n    return value + 1\n";

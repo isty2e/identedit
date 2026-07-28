@@ -2,7 +2,15 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::{BoundaryKind, Pattern};
+use super::boundary::BoundaryKind;
+
+pub(super) struct Pattern {
+    pub(super) regex: Regex,
+    pub(super) kind: &'static str,
+    pub(super) boundary: BoundaryKind,
+    pub(super) suppress_in_python_multiline: bool,
+    pub(super) requires_commonjs_exports_object_top_level: bool,
+}
 
 pub(super) fn fallback_patterns() -> &'static [Pattern] {
     static PATTERNS: OnceLock<Vec<Pattern>> = OnceLock::new();
