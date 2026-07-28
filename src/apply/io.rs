@@ -25,6 +25,27 @@ pub(super) enum AtomicWritePhase {
     Renamed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AtomicWriteCommitState {
+    NotCommitted,
+    Committed,
+}
+
+#[derive(Debug)]
+pub(super) struct AtomicWriteFailure {
+    pub(super) error: IdenteditError,
+    pub(super) commit_state: AtomicWriteCommitState,
+}
+
+impl From<IdenteditError> for AtomicWriteFailure {
+    fn from(error: IdenteditError) -> Self {
+        Self {
+            error,
+            commit_state: AtomicWriteCommitState::NotCommitted,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ApplyGuardState {
     pub(super) path_fingerprint: PathFingerprint,
@@ -127,6 +148,14 @@ pub(super) fn write_text_atomically(
     contents: &str,
     expected_guard: Option<&ApplyGuardState>,
 ) -> Result<(), IdenteditError> {
+    write_text_atomically_tracked(path, contents, expected_guard).map_err(|failure| failure.error)
+}
+
+pub(super) fn write_text_atomically_tracked(
+    path: &Path,
+    contents: &str,
+    expected_guard: Option<&ApplyGuardState>,
+) -> Result<(), AtomicWriteFailure> {
     write_text_atomically_with_hook_and_guard(path, contents, expected_guard, |_| Ok(()))
 }
 
@@ -140,6 +169,7 @@ where
     F: FnMut(AtomicWritePhase) -> std::io::Result<()>,
 {
     write_text_atomically_with_hook_and_guard(path, contents, None, phase_hook)
+        .map_err(|failure| failure.error)
 }
 
 #[cfg(test)]
@@ -154,6 +184,20 @@ where
     R: FnMut(&Path, &Path) -> std::io::Result<()>,
 {
     write_text_atomically_with_hook_guard_and_rename(path, contents, None, phase_hook, rename_file)
+        .map_err(|failure| failure.error)
+}
+
+#[cfg(test)]
+pub(super) fn write_text_atomically_tracked_with_hook<F>(
+    path: &Path,
+    contents: &str,
+    expected_guard: Option<&ApplyGuardState>,
+    phase_hook: F,
+) -> Result<(), AtomicWriteFailure>
+where
+    F: FnMut(AtomicWritePhase) -> std::io::Result<()>,
+{
+    write_text_atomically_with_hook_and_guard(path, contents, expected_guard, phase_hook)
 }
 
 fn write_text_atomically_with_hook_and_guard<F>(
@@ -161,7 +205,7 @@ fn write_text_atomically_with_hook_and_guard<F>(
     contents: &str,
     expected_guard: Option<&ApplyGuardState>,
     phase_hook: F,
-) -> Result<(), IdenteditError>
+) -> Result<(), AtomicWriteFailure>
 where
     F: FnMut(AtomicWritePhase) -> std::io::Result<()>,
 {
@@ -180,7 +224,7 @@ fn write_text_atomically_with_hook_guard_and_rename<F, R>(
     expected_guard: Option<&ApplyGuardState>,
     mut phase_hook: F,
     mut rename_file: R,
-) -> Result<(), IdenteditError>
+) -> Result<(), AtomicWriteFailure>
 where
     F: FnMut(AtomicWritePhase) -> std::io::Result<()>,
     R: FnMut(&Path, &Path) -> std::io::Result<()>,
@@ -189,6 +233,7 @@ where
         .map_err(|error| IdenteditError::io(path, error))?
         .permissions();
     let (temp_path, mut temp_file) = create_temp_file_adjacent(path)?;
+    let mut commit_state = AtomicWriteCommitState::NotCommitted;
 
     let result = (|| {
         temp_file
@@ -212,6 +257,7 @@ where
         drop(temp_file);
 
         rename_file(&temp_path, path).map_err(|error| IdenteditError::io(path, error))?;
+        commit_state = AtomicWriteCommitState::Committed;
         phase_hook(AtomicWritePhase::Renamed).map_err(|error| IdenteditError::io(path, error))?;
 
         sync_parent_directory(path)
@@ -221,7 +267,10 @@ where
         let _ = fs::remove_file(&temp_path);
     }
 
-    result
+    result.map_err(|error| AtomicWriteFailure {
+        error,
+        commit_state,
+    })
 }
 
 fn create_temp_file_adjacent(path: &Path) -> Result<(PathBuf, File), IdenteditError> {

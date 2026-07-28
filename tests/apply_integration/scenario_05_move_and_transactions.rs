@@ -23,11 +23,7 @@ fn apply_json_mode_move_rejects_existing_symlink_destination() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-symlink",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-symlink"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": symlink_destination.to_string_lossy().to_string()
@@ -85,11 +81,7 @@ fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-rel",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-rel"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "./renamed.py"
@@ -139,11 +131,8 @@ fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
 #[test]
 fn apply_json_mode_move_rejects_dot_segment_self_move_in_relative_mode() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("source.py"),
-        "def keep():\n    return 1\n",
-    )
-    .expect("fixture write should succeed");
+    let source_path = workspace.path().join("source.py");
+    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -153,11 +142,7 @@ fn apply_json_mode_move_rejects_dot_segment_self_move_in_relative_mode() {
                     "file": "./source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-dot",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-dot"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "nested/../source.py"
@@ -217,11 +202,7 @@ fn apply_json_mode_executes_move_to_nested_existing_directory() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-nested",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-nested"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "nested/renamed.py"
@@ -283,11 +264,7 @@ fn apply_json_mode_move_to_path_under_file_parent_returns_io_error() {
                     "file": source_path.to_string_lossy().to_string(),
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-parent-file",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-parent-file"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": workspace.path().join("not_a_directory/renamed.py").to_string_lossy().to_string()
@@ -328,16 +305,10 @@ fn apply_json_mode_move_to_path_under_file_parent_returns_io_error() {
 #[test]
 fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("a.py"),
-        "def from_a():\n    return 'a'\n",
-    )
-    .expect("fixture write should succeed");
-    fs::write(
-        workspace.path().join("b.py"),
-        "def from_b():\n    return 'b'\n",
-    )
-    .expect("fixture write should succeed");
+    let source_a = workspace.path().join("a.py");
+    let source_b = workspace.path().join("b.py");
+    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
+    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -347,11 +318,7 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
                     "file": "a.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": "renamed.py"
@@ -371,11 +338,7 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
                     "file": "b.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": "./renamed.py"
@@ -428,16 +391,10 @@ fn apply_json_mode_move_rejects_duplicate_destination_alias_paths() {
 #[test]
 fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("a.py"),
-        "def from_a():\n    return 'a'\n",
-    )
-    .expect("fixture write should succeed");
-    fs::write(
-        workspace.path().join("b.py"),
-        "def from_b():\n    return 'b'\n",
-    )
-    .expect("fixture write should succeed");
+    let source_a = workspace.path().join("a.py");
+    let source_b = workspace.path().join("b.py");
+    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
+    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -447,11 +404,7 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
                     "file": "a.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": "./b.py"
@@ -471,11 +424,7 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
                     "file": "b.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": "nested/../a.py"
@@ -522,16 +471,10 @@ fn apply_json_mode_move_graph_rejects_cycle_with_relative_aliases() {
 #[test]
 fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("a.py"),
-        "def from_a():\n    return 'a'\n",
-    )
-    .expect("fixture write should succeed");
-    fs::write(
-        workspace.path().join("b.py"),
-        "def from_b():\n    return 'b'\n",
-    )
-    .expect("fixture write should succeed");
+    let source_a = workspace.path().join("a.py");
+    let source_b = workspace.path().join("b.py");
+    fs::write(&source_a, "def from_a():\n    return 'a'\n").expect("fixture write should succeed");
+    fs::write(&source_b, "def from_b():\n    return 'b'\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -541,11 +484,7 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
                     "file": "a.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-a",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-a"
-                            },
+                            "target": file_move_target(&source_a),
                             "op": {
                                 "type": "move",
                                 "to": "./b.py"
@@ -565,11 +504,7 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
                     "file": "b.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-b",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-b"
-                            },
+                            "target": file_move_target(&source_b),
                             "op": {
                                 "type": "move",
                                 "to": "./c.py"
@@ -611,11 +546,8 @@ fn apply_json_mode_move_chain_executes_with_relative_alias_destinations() {
 #[test]
 fn apply_json_mode_executes_move_with_non_self_dot_segment_destination() {
     let workspace = tempdir().expect("tempdir should be created");
-    fs::write(
-        workspace.path().join("source.py"),
-        "def keep():\n    return 1\n",
-    )
-    .expect("fixture write should succeed");
+    let source_path = workspace.path().join("source.py");
+    fs::write(&source_path, "def keep():\n    return 1\n").expect("fixture write should succeed");
 
     let request = json!({
         "command": "apply",
@@ -625,11 +557,7 @@ fn apply_json_mode_executes_move_with_non_self_dot_segment_destination() {
                     "file": "source.py",
                     "operations": [
                         {
-                            "target": {
-                                "identity": "unused-identity-dot-nonself",
-                                "kind": "function_definition",
-                                "expected_old_hash": "unused-hash-dot-nonself"
-                            },
+                            "target": file_move_target(&source_path),
                             "op": {
                                 "type": "move",
                                 "to": "nested/../renamed.py"

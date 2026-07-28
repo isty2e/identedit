@@ -1,18 +1,21 @@
 use tempfile::tempdir;
 
-use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
+use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget, hash_bytes};
 use crate::error::IdenteditError;
 use crate::provider::ProviderRegistry;
 use crate::transform::build::build_replace_changeset;
 use crate::transform::parse::parse_handles_for_file;
 
+use super::super::AtomicWritePhase;
 use super::super::{
     ApplyFileStatus, FileRollbackSnapshot, acquire_apply_lock, apply_changesets_with_hooks,
-    commit_move_plan_with_rename, commit_preflight_batch, preflight_changesets_in_order,
-    preflight_move_plans, prepare_commit_batch, rollback_committed_files,
+    commit_move_plan_with_before_rename_hook, commit_move_plan_with_rename,
+    commit_move_plans_with_after_rename_hook, commit_preflight_batch,
+    commit_preflight_batch_with_write_hook, preflight_changesets_in_order, preflight_move_plans,
+    prepare_commit_batch, rollback_committed_files, rollback_committed_moves,
     validate_move_operation_constraints,
 };
-use super::create_python_target;
+use super::{create_python_target, fail_on_phase};
 use std::fs::FileTimes;
 
 #[cfg(unix)]
@@ -29,15 +32,19 @@ fn process_identity_for(file_path: &std::path::Path) -> String {
 }
 
 fn build_move_changeset(source: &std::path::Path, destination: &std::path::Path) -> FileChange {
+    let source_bytes = std::fs::read(source).expect("move source should be readable");
+    build_move_changeset_with_hash(source, destination, hash_bytes(&source_bytes))
+}
+
+fn build_move_changeset_with_hash(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    expected_file_hash: String,
+) -> FileChange {
     FileChange {
         file: source.to_path_buf(),
         operations: vec![ChangeOp {
-            target: TransformTarget::node(
-                "move-placeholder".to_string(),
-                "file".to_string(),
-                None,
-                "move-placeholder".to_string(),
-            ),
+            target: TransformTarget::File { expected_file_hash },
             op: OpKind::Move {
                 to: destination.to_path_buf(),
             },
@@ -47,6 +54,88 @@ fn build_move_changeset(source: &std::path::Path, destination: &std::path::Path)
             })),
         }],
     }
+}
+
+#[test]
+fn move_validation_rejects_node_target() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.py");
+    let destination = directory.path().join("destination.py");
+    std::fs::write(&source, "def moved():\n    return 1\n")
+        .expect("source fixture write should succeed");
+    let mut changeset = build_move_changeset(&source, &destination);
+    changeset.operations[0].target = TransformTarget::node(
+        "ignored-identity".to_string(),
+        "file".to_string(),
+        None,
+        "ignored-hash".to_string(),
+    );
+
+    let error = validate_move_operation_constraints(&[changeset])
+        .expect_err("move must reject non-file targets");
+    match error {
+        IdenteditError::InvalidRequest { message } => {
+            assert!(
+                message.contains("Move operation requires a 'file' target"),
+                "unexpected target diagnostic: {message}"
+            );
+        }
+        other => panic!("unexpected error variant: {other}"),
+    }
+}
+
+#[test]
+fn move_preflight_rejects_stale_expected_file_hash() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.py");
+    let destination = directory.path().join("destination.py");
+    std::fs::write(&source, "def moved():\n    return 1\n")
+        .expect("source fixture write should succeed");
+    let changeset =
+        build_move_changeset_with_hash(&source, &destination, "0000000000000000".to_string());
+
+    let execution_order = validate_move_operation_constraints(&[changeset])
+        .expect("stale hash should not invalidate move graph shape");
+    let error = preflight_move_plans(&execution_order)
+        .expect_err("move preflight must reject a stale whole-file hash");
+    match error {
+        IdenteditError::PreconditionFailed {
+            expected_hash,
+            actual_hash,
+        } => {
+            assert_eq!(expected_hash, "0000000000000000");
+            assert_ne!(actual_hash, expected_hash);
+        }
+        other => panic!("unexpected error variant: {other}"),
+    }
+    assert!(source.exists(), "preflight failure must preserve source");
+    assert!(
+        !destination.exists(),
+        "preflight failure must not create destination"
+    );
+}
+
+#[test]
+fn move_preflight_accepts_exact_hash_for_non_utf8_source() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.bin");
+    let destination = directory.path().join("destination.bin");
+    let source_bytes = [0x00, 0xFF, 0x80, b'\n'];
+    std::fs::write(&source, source_bytes).expect("binary source fixture write should succeed");
+    let changeset =
+        build_move_changeset_with_hash(&source, &destination, hash_bytes(&source_bytes));
+
+    let execution_order = validate_move_operation_constraints(&[changeset])
+        .expect("binary file move should pass graph validation");
+    let plans = preflight_move_plans(&execution_order)
+        .expect("whole-file move preconditions must hash raw bytes, not decoded text");
+
+    assert_eq!(plans.len(), 1);
+    assert!(source.exists(), "preflight must preserve binary source");
+    assert!(
+        !destination.exists(),
+        "preflight must not create destination"
+    );
 }
 
 #[test]
@@ -761,6 +850,37 @@ fn commit_batch_failure_rolls_back_already_written_files() {
 }
 
 #[test]
+fn post_rename_failure_rolls_back_the_current_file() {
+    let directory = tempdir().expect("tempdir should be created");
+    let file = create_python_target(directory.path());
+    let before = std::fs::read_to_string(&file).expect("fixture should be readable");
+    let changeset = build_replace_changeset(
+        &file,
+        &process_identity_for(&file),
+        "def process_data(value):\n    return value * 777".to_string(),
+    )
+    .expect("changeset should be built");
+    let registry = ProviderRegistry::default();
+    let plans =
+        preflight_changesets_in_order(&[changeset], &registry).expect("preflight should succeed");
+    let batch = prepare_commit_batch(plans);
+
+    let error = commit_preflight_batch_with_write_hook(
+        batch,
+        || Ok(()),
+        || Ok(()),
+        fail_on_phase(AtomicWritePhase::Renamed),
+    )
+    .expect_err("post-rename failure should surface");
+    assert!(error.to_string().contains("injected atomic-write failure"));
+    assert_eq!(
+        std::fs::read_to_string(&file).expect("file should remain readable"),
+        before,
+        "the current file must be included in rollback after its rename committed"
+    );
+}
+
+#[test]
 fn commit_batch_precondition_failure_rolls_back_already_written_files() {
     let directory = tempdir().expect("tempdir should be created");
     let file_a = directory.path().join("a_target.py");
@@ -1210,6 +1330,87 @@ fn move_commit_exdev_like_error_does_not_fallback_to_copy() {
 }
 
 #[test]
+fn post_rename_move_failure_marks_current_move_for_rollback() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.py");
+    let destination = directory.path().join("destination.py");
+    let original = "def moved():\n    return 1\n";
+    std::fs::write(&source, original).expect("source fixture write should succeed");
+
+    let changeset = build_move_changeset(&source, &destination);
+    let execution_order = validate_move_operation_constraints(&[changeset])
+        .expect("single move should pass graph validation");
+    let plans =
+        preflight_move_plans(&execution_order).expect("move preflight should produce one plan");
+
+    let (error, committed_indices) = commit_move_plans_with_after_rename_hook(
+        &plans,
+        || Ok(()),
+        || {
+            Err(IdenteditError::InvalidRequest {
+                message: "injected post-rename failure".to_string(),
+            })
+        },
+    )
+    .expect_err("post-rename hook failure should abort move commit");
+    match error {
+        IdenteditError::InvalidRequest { message } => {
+            assert_eq!(message, "injected post-rename failure");
+        }
+        other => panic!("unexpected error variant: {other}"),
+    }
+
+    rollback_committed_moves(&plans, &committed_indices)
+        .expect("the renamed file should be included in move rollback");
+    assert!(source.exists(), "rollback should restore the source path");
+    assert!(
+        !destination.exists(),
+        "rollback should remove the destination path"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&source).expect("restored source should be readable"),
+        original
+    );
+}
+
+#[test]
+fn move_commit_does_not_replace_destination_created_after_preflight_check() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.py");
+    let destination = directory.path().join("destination.py");
+    let source_text = "def moved():\n    return 'source'\n";
+    let competing_text = "def competing():\n    return 'destination'\n";
+    std::fs::write(&source, source_text).expect("source fixture write should succeed");
+
+    let changeset = build_move_changeset(&source, &destination);
+    let execution_order = validate_move_operation_constraints(&[changeset])
+        .expect("single move should pass graph validation");
+    let plans =
+        preflight_move_plans(&execution_order).expect("move preflight should produce one plan");
+
+    let destination_for_hook = destination.clone();
+    commit_move_plan_with_before_rename_hook(
+        &plans[0],
+        || Ok(()),
+        || {
+            std::fs::write(&destination_for_hook, competing_text)
+                .map_err(|error| IdenteditError::io(&destination_for_hook, error))
+        },
+    )
+    .expect_err("move commit must not replace a concurrently created destination");
+
+    assert_eq!(
+        std::fs::read_to_string(&source).expect("source should remain readable"),
+        source_text
+    );
+    assert_eq!(
+        std::fs::read_to_string(&destination)
+            .expect("concurrently created destination should remain readable"),
+        competing_text
+    );
+}
+
+#[test]
 fn mixed_edit_and_move_failure_rolls_back_committed_edit() {
     let directory = tempdir().expect("tempdir should be created");
     let edit_file = create_python_target(directory.path());
@@ -1558,7 +1759,11 @@ fn mixed_batch_with_missing_move_source_preserves_edit_file() {
         "def process_data(value):\n    return value * 987".to_string(),
     )
     .expect("edit changeset should be built");
-    let move_changeset = build_move_changeset(&missing_move_source, &move_destination);
+    let move_changeset = build_move_changeset_with_hash(
+        &missing_move_source,
+        &move_destination,
+        "0000000000000000".to_string(),
+    );
 
     let error =
         apply_changesets_with_hooks(&[edit_changeset, move_changeset], || Ok(()), || Ok(()))
@@ -1585,7 +1790,11 @@ fn missing_move_source_failure_skips_before_write_hook() {
     let directory = tempdir().expect("tempdir should be created");
     let missing_move_source = directory.path().join("missing_move_source.py");
     let move_destination = directory.path().join("move_destination.py");
-    let move_changeset = build_move_changeset(&missing_move_source, &move_destination);
+    let move_changeset = build_move_changeset_with_hash(
+        &missing_move_source,
+        &move_destination,
+        "0000000000000000".to_string(),
+    );
 
     let mut before_calls = 0usize;
     let error = apply_changesets_with_hooks(

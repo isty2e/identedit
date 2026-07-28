@@ -26,9 +26,12 @@ use io::{
     write_text_atomically_with_hook_and_rename,
 };
 #[cfg(test)]
-use move_ops::commit_move_plan_with_rename;
+use move_ops::{
+    commit_move_plan_with_before_rename_hook, commit_move_plan_with_rename,
+    commit_move_plans_with_after_rename_hook,
+};
 #[cfg(test)]
-use preflight::FileRollbackSnapshot;
+use preflight::{FileRollbackSnapshot, commit_preflight_batch_with_write_hook};
 #[cfg(test)]
 use replacements::{ResolvedReplacement, apply_replacements_to_text, ensure_non_overlapping};
 

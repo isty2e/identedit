@@ -48,6 +48,14 @@ fn run_identedit_with_stdin(arguments: &[&str], input: &str) -> Output {
     common::run_identedit_with_stdin(arguments, &normalized_input)
 }
 
+fn file_move_target(path: &Path) -> Value {
+    let source_bytes = fs::read(path).expect("move source should be readable");
+    json!({
+        "type": "file",
+        "expected_file_hash": identedit::changeset::hash_bytes(&source_bytes)
+    })
+}
+
 fn run_identedit_with_raw_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
     command.args(arguments);

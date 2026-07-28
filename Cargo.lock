@@ -358,6 +358,7 @@ dependencies = [
  "clap",
  "fs2",
  "glob",
+ "libc",
  "libloading",
  "miette",
  "proptest",

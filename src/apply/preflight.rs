@@ -13,9 +13,12 @@ use crate::transform::conflict::validate_change_conflicts;
 use crate::transform::parse::parse_handles_for_source_with_registry;
 
 use super::io::{
-    ApplyFileLock, ApplyGuardState, acquire_apply_lock, capture_apply_guard_state,
-    verify_apply_guard_state, write_text_atomically,
+    ApplyFileLock, ApplyGuardState, AtomicWriteCommitState, AtomicWriteFailure, acquire_apply_lock,
+    capture_apply_guard_state, verify_apply_guard_state, write_text_atomically,
+    write_text_atomically_tracked,
 };
+#[cfg(test)]
+use super::io::{AtomicWritePhase, write_text_atomically_tracked_with_hook};
 use super::replacements::{
     apply_replacements_to_text, matched_changes_to_replacements, validate_preview_consistency,
 };
@@ -260,12 +263,50 @@ fn validate_commit_batch_invariants(batch: &CommitBatch) -> Result<(), Identedit
 
 pub(super) fn commit_preflight_batch<Before, After>(
     batch: CommitBatch,
-    mut before_write_hook: Before,
-    mut after_verify_hook: After,
+    before_write_hook: Before,
+    after_verify_hook: After,
 ) -> Result<Vec<ApplyFileResult>, IdenteditError>
 where
     Before: FnMut() -> Result<(), IdenteditError>,
     After: FnMut() -> Result<(), IdenteditError>,
+{
+    commit_preflight_batch_with_writer(batch, before_write_hook, after_verify_hook, |plan| {
+        write_text_atomically_tracked(&plan.file, &plan.updated_text, Some(&plan.guard_state))
+    })
+}
+
+#[cfg(test)]
+pub(super) fn commit_preflight_batch_with_write_hook<Before, After, Phase>(
+    batch: CommitBatch,
+    before_write_hook: Before,
+    after_verify_hook: After,
+    mut phase_hook: Phase,
+) -> Result<Vec<ApplyFileResult>, IdenteditError>
+where
+    Before: FnMut() -> Result<(), IdenteditError>,
+    After: FnMut() -> Result<(), IdenteditError>,
+    Phase: FnMut(AtomicWritePhase) -> std::io::Result<()>,
+{
+    commit_preflight_batch_with_writer(batch, before_write_hook, after_verify_hook, |plan| {
+        write_text_atomically_tracked_with_hook(
+            &plan.file,
+            &plan.updated_text,
+            Some(&plan.guard_state),
+            &mut phase_hook,
+        )
+    })
+}
+
+fn commit_preflight_batch_with_writer<Before, After, Write>(
+    batch: CommitBatch,
+    mut before_write_hook: Before,
+    mut after_verify_hook: After,
+    mut write_plan: Write,
+) -> Result<Vec<ApplyFileResult>, IdenteditError>
+where
+    Before: FnMut() -> Result<(), IdenteditError>,
+    After: FnMut() -> Result<(), IdenteditError>,
+    Write: FnMut(&PreflightFilePlan) -> Result<(), AtomicWriteFailure>,
 {
     validate_commit_batch_invariants(&batch)?;
     before_write_hook()?;
@@ -274,20 +315,24 @@ where
     let mut applied = Vec::with_capacity(batch.preflight_plans.len());
     let mut committed_indices = Vec::new();
     for (index, plan) in batch.preflight_plans.into_iter().enumerate() {
-        match commit_preflight_plan(plan, &mut after_verify_hook) {
+        match commit_preflight_plan(plan, &mut after_verify_hook, &mut write_plan) {
             Ok(applied_result) => {
                 applied.push(applied_result);
                 committed_indices.push(index);
             }
-            Err(commit_error) => {
+            Err(commit_failure) => {
+                if commit_failure.commit_state == AtomicWriteCommitState::Committed {
+                    committed_indices.push(index);
+                }
                 let rollback_result =
                     rollback_committed_files(&rollback_snapshots, &committed_indices);
                 match rollback_result {
-                    Ok(()) => return Err(commit_error),
+                    Ok(()) => return Err(commit_failure.error),
                     Err(rollback_error) => {
                         return Err(IdenteditError::RollbackFailed {
                             message: format!(
-                                "Commit failed ({commit_error}); rollback failed ({rollback_error})"
+                                "Commit failed ({}); rollback failed ({rollback_error})",
+                                commit_failure.error
                             ),
                         });
                     }
@@ -320,16 +365,26 @@ pub(super) fn rollback_committed_files(
     Ok(())
 }
 
-fn commit_preflight_plan<After>(
+fn commit_preflight_plan<After, Write>(
     plan: PreflightFilePlan,
     mut after_verify_hook: After,
-) -> Result<ApplyFileResult, IdenteditError>
+    mut write_plan: Write,
+) -> Result<ApplyFileResult, AtomicWriteFailure>
 where
     After: FnMut() -> Result<(), IdenteditError>,
+    Write: FnMut(&PreflightFilePlan) -> Result<(), AtomicWriteFailure>,
 {
-    verify_apply_guard_state(&plan.file, &plan.guard_state)?;
-    after_verify_hook()?;
-    write_text_atomically(&plan.file, &plan.updated_text, Some(&plan.guard_state))?;
+    verify_apply_guard_state(&plan.file, &plan.guard_state).map_err(|error| {
+        AtomicWriteFailure {
+            error,
+            commit_state: AtomicWriteCommitState::NotCommitted,
+        }
+    })?;
+    after_verify_hook().map_err(|error| AtomicWriteFailure {
+        error,
+        commit_state: AtomicWriteCommitState::NotCommitted,
+    })?;
+    write_plan(&plan)?;
 
     Ok(ApplyFileResult {
         file: plan.file.display().to_string(),
