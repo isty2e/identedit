@@ -390,7 +390,7 @@ fn changeset_has_move(changeset: &FileChange) -> bool {
     changeset
         .operations
         .iter()
-        .any(|operation| matches!(operation.op, OpKind::Move { .. }))
+        .any(|operation| matches!(operation.op(), OpKind::Move { .. }))
 }
 
 #[cfg(test)]

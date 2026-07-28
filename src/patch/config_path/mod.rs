@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tree_sitter::Tree;
 
-use crate::changeset::{OpKind, TransformTarget};
+use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_bytes;
 use crate::transform::parse::parse_handles_for_source;
@@ -53,12 +53,6 @@ impl MissingPathPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedConfigPatch {
-    pub target: TransformTarget,
-    pub op: OpKind,
-}
-
 struct CreateMissingSetRequest<'a> {
     format: &'a ConfigFormat,
     tree: &'a Tree,
@@ -76,7 +70,7 @@ pub fn resolve_config_path_operation(
     expected_file_hash: Option<&str>,
     document_index: Option<usize>,
     operation: ConfigPathOperation,
-) -> Result<ResolvedConfigPatch, IdenteditError> {
+) -> Result<EditOperation, IdenteditError> {
     let source = std::fs::read(file).map_err(|error| IdenteditError::io(file, error))?;
     let source_text = std::str::from_utf8(&source).map_err(|_| IdenteditError::InvalidRequest {
         message: format!(
@@ -120,10 +114,10 @@ pub fn resolve_config_path_operation(
                 expected_file_hash: hash_bytes(&source),
             }
         };
-        return Ok(ResolvedConfigPatch {
+        return Ok(EditOperation::try_new(
             target,
-            op: OpKind::Insert { new_text: updated },
-        });
+            OpKind::Insert { new_text: updated },
+        )?);
     }
 
     if let ConfigPathOperation::Set {
@@ -157,10 +151,10 @@ pub fn resolve_config_path_operation(
                 expected_file_hash: hash_bytes(&source),
             }
         };
-        return Ok(ResolvedConfigPatch {
+        return Ok(EditOperation::try_new(
             target,
-            op: OpKind::Insert { new_text: updated },
-        });
+            OpKind::Insert { new_text: updated },
+        )?);
     }
 
     let tree = parse_tree_for_format(&format, &source)?;
@@ -327,7 +321,7 @@ fn build_resolved_patch_from_container_edit(
     resolved: ResolvedContainerEdit,
     replacement: &str,
     raw_path: &str,
-) -> Result<ResolvedConfigPatch, IdenteditError> {
+) -> Result<EditOperation, IdenteditError> {
     let handles = parse_handles_for_source(file, source)?;
     let container_handle = find_handle_for_span(
         file,
@@ -363,12 +357,12 @@ fn build_resolved_patch_from_container_edit(
         container_handle.expected_old_hash,
     );
 
-    Ok(ResolvedConfigPatch {
+    Ok(EditOperation::try_new(
         target,
-        op: OpKind::Replace {
+        OpKind::Replace {
             new_text: updated_container_text,
         },
-    })
+    )?)
 }
 
 fn set_replace_span(
@@ -429,7 +423,7 @@ fn contains_yaml_plain_mapping_indicator(text: &str) -> bool {
 fn resolve_config_path_set_with_create_missing(
     file: &Path,
     request: CreateMissingSetRequest<'_>,
-) -> Result<ResolvedConfigPatch, IdenteditError> {
+) -> Result<EditOperation, IdenteditError> {
     if matches!(request.format, ConfigFormat::Yaml) {
         validate_yaml_create_missing_safety(
             request.tree,
@@ -445,12 +439,12 @@ fn resolve_config_path_set_with_create_missing(
                 request.raw_path,
                 request.new_text,
             )?;
-            return Ok(ResolvedConfigPatch {
-                target: TransformTarget::FileEnd {
+            return Ok(EditOperation::try_new(
+                TransformTarget::FileEnd {
                     expected_file_hash: hash_bytes(request.source),
                 },
-                op: OpKind::Insert { new_text },
-            });
+                OpKind::Insert { new_text },
+            )?);
         }
     }
     let updated_root_text = match request.format {
@@ -499,30 +493,30 @@ fn resolve_config_path_set_with_create_missing(
     validate_rendered_config_document(request.format, request.source_text, validation_source)?;
 
     if matches!(request.format, ConfigFormat::Json) && request.source.is_empty() {
-        return Ok(ResolvedConfigPatch {
-            target: TransformTarget::FileStart {
+        return Ok(EditOperation::try_new(
+            TransformTarget::FileStart {
                 expected_file_hash: hash_bytes(request.source),
             },
-            op: OpKind::Insert {
+            OpKind::Insert {
                 new_text: updated_root_text,
             },
-        });
+        )?);
     }
 
     if matches!(request.format, ConfigFormat::Toml)
         && toml_effectively_empty_source(request.source_text)
     {
-        return Ok(ResolvedConfigPatch {
-            target: TransformTarget::FileEnd {
+        return Ok(EditOperation::try_new(
+            TransformTarget::FileEnd {
                 expected_file_hash: hash_bytes(request.source),
             },
-            op: OpKind::Insert {
+            OpKind::Insert {
                 new_text: insertion_text_after_existing_empty_source(
                     request.source_text,
                     updated_root_text,
                 ),
             },
-        });
+        )?);
     }
 
     let root_node = match request.format {
@@ -548,14 +542,14 @@ fn resolve_config_path_set_with_create_missing(
     let root_span = span_from_node(root_node);
     let root_kind = root_node.kind().to_string();
     if matches!(request.format, ConfigFormat::Toml) && root_span.start == root_span.end {
-        return Ok(ResolvedConfigPatch {
-            target: TransformTarget::FileEnd {
+        return Ok(EditOperation::try_new(
+            TransformTarget::FileEnd {
                 expected_file_hash: hash_bytes(request.source),
             },
-            op: OpKind::Insert {
+            OpKind::Insert {
                 new_text: updated_root_text,
             },
-        });
+        )?);
     }
 
     let handles = parse_handles_for_source(file, request.source)?;
@@ -573,12 +567,12 @@ fn resolve_config_path_set_with_create_missing(
         container_handle.expected_old_hash,
     );
 
-    Ok(ResolvedConfigPatch {
+    Ok(EditOperation::try_new(
         target,
-        op: OpKind::Replace {
+        OpKind::Replace {
             new_text: replacement_text,
         },
-    })
+    )?)
 }
 
 fn insertion_text_after_existing_empty_source(

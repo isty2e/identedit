@@ -1,16 +1,10 @@
-use crate::changeset::{OpKind, TransformTarget};
+use crate::changeset::OpKind;
 use crate::handle::Span;
 
 pub(crate) mod build;
 pub(crate) mod conflict;
 pub(crate) mod parse;
 pub(crate) mod resolve;
-
-#[derive(Debug, Clone)]
-pub struct TransformInstruction {
-    pub target: TransformTarget,
-    pub op: OpKind,
-}
 
 #[derive(Debug, Clone)]
 pub struct MatchedChange {

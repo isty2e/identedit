@@ -1,15 +1,17 @@
 use std::path::Path;
 
-use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
+use crate::changeset::{
+    ChangeOp, ChangePreview, EditOperation, FileChange, OpKind, TransformTarget,
+};
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
 use crate::hash::hash_text;
 
+use super::MatchedChange;
 use super::conflict::{reject_move_operation, validate_change_conflicts};
 use super::parse::{parse_handles_for_file_with_context, parse_handles_for_source_with_context};
 use super::resolve::{HandleIndex, ResolvedOperationView, resolve_operation_view};
-use super::{MatchedChange, TransformInstruction};
 
 pub(crate) fn build_replace_changeset(
     file: &Path,
@@ -49,12 +51,8 @@ fn build_single_identity_changeset(
     );
 
     let source_text = context.read_file_utf8(file)?;
-    build_changeset_with_handles(
-        file,
-        &source_text,
-        &handles,
-        vec![TransformInstruction { target, op }],
-    )
+    let operation = EditOperation::try_new(target, op)?;
+    build_changeset_with_handles(file, &source_text, &handles, vec![operation])
 }
 
 fn resolve_unique_identity_handle<'a>(
@@ -84,13 +82,13 @@ fn resolve_unique_identity_handle<'a>(
 
 pub(crate) fn build_changeset(
     file: &Path,
-    instructions: Vec<TransformInstruction>,
+    instructions: Vec<EditOperation>,
 ) -> Result<FileChange, IdenteditError> {
     let context = ExecutionContext::new();
     let source_text = context.read_file_utf8(file)?;
     let requires_structure_parse = instructions
         .iter()
-        .any(|instruction| instruction.target.requires_node_resolution());
+        .any(|instruction| instruction.target().requires_node_resolution());
     let handles = if requires_structure_parse {
         parse_handles_for_source_with_context(file, source_text.as_bytes(), &context)?
     } else {
@@ -103,28 +101,22 @@ fn build_changeset_with_handles(
     file: &Path,
     source_text: &str,
     handles: &[SelectionHandle],
-    instructions: Vec<TransformInstruction>,
+    instructions: Vec<EditOperation>,
 ) -> Result<FileChange, IdenteditError> {
     let handle_index = HandleIndex::new(handles);
     let mut operations = Vec::new();
     let mut matched_changes = Vec::new();
 
     for (index, instruction) in instructions.into_iter().enumerate() {
-        reject_move_operation(&instruction.op, index)?;
-        let preview_new_text = op_new_text(&instruction.op).to_string();
-        let resolved = resolve_operation_view(
-            file,
-            source_text,
-            &handle_index,
-            &instruction.target,
-            &instruction.op,
-            index,
-        )?;
-        let canonical_target = canonicalize_operation_target(&instruction.target, &resolved);
+        reject_move_operation(instruction.op(), index)?;
+        let preview_new_text = op_new_text(instruction.op()).to_string();
+        let resolved = resolve_operation_view(file, source_text, &handle_index, &instruction)?;
+        let canonical_target = canonicalize_operation_target(instruction.target(), &resolved);
+        let op = instruction.op().clone();
 
         matched_changes.push(MatchedChange {
             index,
-            op: instruction.op.clone(),
+            op: op.clone(),
             expected_hash: resolved.expected_hash.clone(),
             old_text: resolved.old_text.clone(),
             matched_span: resolved.matched_span,
@@ -133,17 +125,17 @@ fn build_changeset_with_handles(
             anchor_span: resolved.anchor_span,
         });
 
-        operations.push(ChangeOp {
-            target: canonical_target,
-            op: instruction.op,
-            preview: ChangePreview::text(
+        operations.push(ChangeOp::from_parts(
+            canonical_target,
+            op,
+            ChangePreview::text(
                 Some(resolved.old_text),
                 None,
                 None,
                 preview_new_text,
                 resolved.matched_span,
             ),
-        });
+        )?);
     }
 
     validate_change_conflicts(&matched_changes)?;
@@ -192,7 +184,7 @@ pub(crate) fn resolve_changeset_targets(
     let handles = if changeset
         .operations
         .iter()
-        .any(|operation| operation.target.requires_node_resolution())
+        .any(|operation| operation.target().requires_node_resolution())
     {
         parse_handles_for_source_with_context(&changeset.file, source_text.as_bytes(), &context)?
     } else {
@@ -210,19 +202,17 @@ pub(crate) fn resolve_changeset_targets_in_handles(
     let mut matched = Vec::new();
 
     for (index, operation) in changeset.operations.iter().enumerate() {
-        reject_move_operation(&operation.op, index)?;
+        reject_move_operation(operation.op(), index)?;
         let resolved = resolve_operation_view(
             &changeset.file,
             source_text,
             &handle_index,
-            &operation.target,
-            &operation.op,
-            index,
+            operation.operation(),
         )?;
 
         matched.push(MatchedChange {
             index,
-            op: operation.op.clone(),
+            op: operation.op().clone(),
             expected_hash: resolved.expected_hash,
             old_text: resolved.old_text,
             matched_span: resolved.matched_span,

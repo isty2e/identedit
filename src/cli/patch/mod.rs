@@ -400,18 +400,18 @@ mod tests {
 
         assert_eq!(request.file, temp.path());
         assert_eq!(
-            request.op,
-            OpKind::Insert {
+            request.operation.op(),
+            &OpKind::Insert {
                 new_text: "\n# tail\n".to_string(),
             }
         );
         assert!(!request.execution.dry_run);
         assert!(request.execution.verbose);
-        match request.target {
+        match request.operation.target() {
             TransformTarget::FileEnd { expected_file_hash } => {
-                assert_eq!(expected_file_hash, hash_bytes(b"body\n"));
+                assert_eq!(expected_file_hash, &hash_bytes(b"body\n"));
             }
-            other => panic!("expected file-end target, got {other:?}"),
+            other => panic!("expected file_end target, got {other:?}"),
         }
     }
 }

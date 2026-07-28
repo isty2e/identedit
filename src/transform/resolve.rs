@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::changeset::{OpKind, TransformTarget};
+use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 use crate::hash::hash_text;
@@ -98,11 +98,10 @@ pub(super) fn resolve_operation_view(
     file: &Path,
     source_text: &str,
     handle_index: &HandleIndex<'_>,
-    target: &TransformTarget,
-    op: &OpKind,
-    index: usize,
+    operation: &EditOperation,
 ) -> Result<ResolvedOperationView, IdenteditError> {
-    validate_target_op_compatibility(target, op, index)?;
+    let target = operation.target();
+    let op = operation.op();
     match target {
         TransformTarget::Node { .. } => {
             if let OpKind::MoveBefore { destination } | OpKind::MoveAfter { destination } = op {
@@ -205,12 +204,7 @@ fn resolve_line_operation_view(
             })
         }
         OpKind::InsertAfter { .. } => {
-            if end_anchor.is_some() {
-                return Err(IdenteditError::InvalidRequest {
-                    message: "Line target with end_anchor is only valid for replace operations"
-                        .to_string(),
-                });
-            }
+            debug_assert!(end_anchor.is_none());
             let insert_at = start_line.full_end;
             Ok(ResolvedOperationView {
                 expected_hash: start_line.expected_hash,
@@ -228,12 +222,7 @@ fn resolve_line_operation_view(
                 },
             })
         }
-        _ => Err(IdenteditError::InvalidRequest {
-            message: format!(
-                "Unsupported line target operation '{}'; allowed: replace, insert_after",
-                op_kind_name(op)
-            ),
-        }),
+        _ => unreachable!("EditOperation guarantees line target compatibility"),
     }
 }
 
@@ -301,16 +290,11 @@ fn resolve_destination_offset(
             verify_file_target_precondition(source_text, expected_file_hash)?;
             Ok(source_text.len())
         }
-        TransformTarget::File { .. } => Err(IdenteditError::InvalidRequest {
-            message: "File target cannot be used as an in-file move destination".to_string(),
-        }),
+        TransformTarget::File { .. } => {
+            unreachable!("EditOperation rejects whole-file move destinations")
+        }
         TransformTarget::Line { anchor, end_anchor } => {
-            if end_anchor.is_some() {
-                return Err(IdenteditError::InvalidRequest {
-                    message: "Line destination target for move does not support end_anchor"
-                        .to_string(),
-                });
-            }
+            debug_assert!(end_anchor.is_none());
             let ranges = compute_line_ranges(source_text);
             let destination_line = resolve_line_anchor(anchor, &ranges)?;
             Ok(if insert_before {
@@ -340,9 +324,13 @@ fn edit_view_for_node_operation(op: &OpKind, anchor: &SelectionHandle) -> (Strin
                 end: anchor.span.end,
             },
         ),
-        OpKind::Insert { .. } => (String::new(), Span { start: 0, end: 0 }),
+        OpKind::Insert { .. } => {
+            unreachable!("EditOperation rejects node target with insert operation")
+        }
         OpKind::MoveBefore { .. } | OpKind::MoveAfter { .. } => (anchor.text.clone(), anchor.span),
-        OpKind::Move { .. } => (anchor.text.clone(), anchor.span),
+        OpKind::Move { .. } => {
+            unreachable!("EditOperation rejects node target with whole-file move")
+        }
     }
 }
 
@@ -366,66 +354,6 @@ fn file_content_start_offset(source_text: &str) -> usize {
         3
     } else {
         0
-    }
-}
-
-fn validate_target_op_compatibility(
-    target: &TransformTarget,
-    op: &OpKind,
-    index: usize,
-) -> Result<(), IdenteditError> {
-    let valid = match target {
-        TransformTarget::Node { .. } => matches!(
-            op,
-            OpKind::Replace { .. }
-                | OpKind::Delete
-                | OpKind::InsertBefore { .. }
-                | OpKind::InsertAfter { .. }
-                | OpKind::MoveBefore { .. }
-                | OpKind::MoveAfter { .. }
-        ),
-        TransformTarget::FileStart { .. } | TransformTarget::FileEnd { .. } => {
-            matches!(op, OpKind::Insert { .. })
-        }
-        TransformTarget::File { .. } => matches!(op, OpKind::Move { .. }),
-        TransformTarget::Line { .. } => {
-            matches!(op, OpKind::Replace { .. } | OpKind::InsertAfter { .. })
-        }
-    };
-
-    if valid {
-        return Ok(());
-    }
-
-    Err(IdenteditError::InvalidRequest {
-        message: format!(
-            "Operation {index} has unsupported target/op combination: '{}' target cannot be used with '{}' operation",
-            target_kind_name(target),
-            op_kind_name(op),
-        ),
-    })
-}
-
-fn target_kind_name(target: &TransformTarget) -> &'static str {
-    match target {
-        TransformTarget::Node { .. } => "node",
-        TransformTarget::FileStart { .. } => "file_start",
-        TransformTarget::FileEnd { .. } => "file_end",
-        TransformTarget::File { .. } => "file",
-        TransformTarget::Line { .. } => "line",
-    }
-}
-
-fn op_kind_name(op: &OpKind) -> &'static str {
-    match op {
-        OpKind::Replace { .. } => "replace",
-        OpKind::Delete => "delete",
-        OpKind::InsertBefore { .. } => "insert_before",
-        OpKind::InsertAfter { .. } => "insert_after",
-        OpKind::Insert { .. } => "insert",
-        OpKind::MoveBefore { .. } => "move_before",
-        OpKind::MoveAfter { .. } => "move_after",
-        OpKind::Move { .. } => "move",
     }
 }
 
@@ -456,7 +384,7 @@ fn resolve_target_in_handles_with_index(
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Target type '{}' is not resolvable against syntax handles",
-                    target_kind_name(target)
+                    target.kind_name()
                 ),
             });
         }
@@ -464,7 +392,7 @@ fn resolve_target_in_handles_with_index(
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
                     "Target type '{}' is not resolvable against syntax handles",
-                    target_kind_name(target)
+                    target.kind_name()
                 ),
             });
         }

@@ -63,11 +63,11 @@ fn validate_file_merge_constraints(
 ) -> Result<(), IdenteditError> {
     let move_count = operations
         .iter()
-        .filter(|operation| matches!(operation.op, OpKind::Move { .. }))
+        .filter(|operation| matches!(operation.op(), OpKind::Move { .. }))
         .count();
     let has_non_move = operations
         .iter()
-        .any(|operation| !matches!(operation.op, OpKind::Move { .. }));
+        .any(|operation| !matches!(operation.op(), OpKind::Move { .. }));
 
     if move_count > 1 {
         return Err(IdenteditError::InvalidRequest {
@@ -89,13 +89,12 @@ fn validate_file_merge_constraints(
 
     let mut spans = Vec::<SpanOp>::new();
     for (index, operation) in operations.iter().enumerate() {
-        if matches!(operation.op, OpKind::Move { .. }) {
+        if matches!(operation.op(), OpKind::Move { .. }) {
             continue;
         }
 
         let span = operation
-            .preview
-            .as_text()
+            .text_preview()
             .ok_or_else(|| IdenteditError::InvalidRequest {
                 message: format!(
                     "Strict merge rejected file '{}': operation {index} does not use a text preview",
@@ -115,7 +114,7 @@ fn validate_file_merge_constraints(
         }
 
         let is_insert = matches!(
-            operation.op,
+            operation.op(),
             OpKind::InsertBefore { .. } | OpKind::InsertAfter { .. } | OpKind::Insert { .. }
         );
         spans.push(SpanOp {
@@ -201,16 +200,30 @@ mod tests {
     use std::path::Path;
 
     fn op(kind: OpKind, span: Span) -> ChangeOp {
-        ChangeOp {
-            target: TransformTarget::node(
+        ChangeOp::from_parts(
+            TransformTarget::node(
                 "id".to_string(),
                 "function_definition".to_string(),
                 Some(span),
                 "hash".to_string(),
             ),
-            op: kind,
-            preview: ChangePreview::text(Some(String::new()), None, None, String::new(), span),
-        }
+            kind,
+            ChangePreview::text(Some(String::new()), None, None, String::new(), span),
+        )
+        .expect("merge test operation should be valid")
+    }
+
+    fn file_move() -> ChangeOp {
+        ChangeOp::from_parts(
+            TransformTarget::File {
+                expected_file_hash: "hash".to_string(),
+            },
+            OpKind::Move {
+                to: "moved.py".into(),
+            },
+            ChangePreview::move_operation(None),
+        )
+        .expect("merge test file move should be valid")
     }
 
     #[test]
@@ -253,15 +266,7 @@ mod tests {
 
     #[test]
     fn strict_merge_rejects_move_plus_edit() {
-        let operations = vec![
-            op(
-                OpKind::Move {
-                    to: "moved.py".into(),
-                },
-                Span { start: 0, end: 0 },
-            ),
-            op(OpKind::Delete, Span { start: 0, end: 10 }),
-        ];
+        let operations = vec![file_move(), op(OpKind::Delete, Span { start: 0, end: 10 })];
 
         let error = validate_file_merge_constraints(Path::new("file.py"), &operations)
             .expect_err("move+edit should be rejected");

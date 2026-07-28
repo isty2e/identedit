@@ -4,10 +4,9 @@ use std::time::Duration;
 
 use tempfile::tempdir;
 
-use crate::changeset::{OpKind, TransformTarget};
+use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_text;
-use crate::transform::TransformInstruction;
 use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
 use crate::transform::parse::parse_handles_for_file;
 
@@ -195,17 +194,20 @@ fn concurrent_apply_with_delete_and_insert_has_single_winner_and_resource_busy_l
         .expect("delete changeset should be built");
     let insert_changeset = build_changeset(
         &file_path,
-        vec![TransformInstruction {
-            target: TransformTarget::node(
-                process_handle.identity.clone(),
-                process_handle.kind.clone(),
-                Some(process_handle.span),
-                hash_text(&process_handle.text),
-            ),
-            op: OpKind::InsertBefore {
-                new_text: "# inserted-by-loser\n".to_string(),
-            },
-        }],
+        vec![
+            EditOperation::try_new(
+                TransformTarget::node(
+                    process_handle.identity.clone(),
+                    process_handle.kind.clone(),
+                    Some(process_handle.span),
+                    hash_text(&process_handle.text),
+                ),
+                OpKind::InsertBefore {
+                    new_text: "# inserted-by-loser\n".to_string(),
+                },
+            )
+            .expect("insert operation should be valid"),
+        ],
     )
     .expect("insert changeset should be built");
 
@@ -276,17 +278,20 @@ fn concurrent_apply_loser_retry_returns_target_missing_after_winner_commits() {
         .expect("delete changeset should be built");
     let insert_changeset = build_changeset(
         &file_path,
-        vec![TransformInstruction {
-            target: TransformTarget::node(
-                process_handle.identity.clone(),
-                process_handle.kind.clone(),
-                Some(process_handle.span),
-                hash_text(&process_handle.text),
-            ),
-            op: OpKind::InsertBefore {
-                new_text: "# inserted-by-loser\n".to_string(),
-            },
-        }],
+        vec![
+            EditOperation::try_new(
+                TransformTarget::node(
+                    process_handle.identity.clone(),
+                    process_handle.kind.clone(),
+                    Some(process_handle.span),
+                    hash_text(&process_handle.text),
+                ),
+                OpKind::InsertBefore {
+                    new_text: "# inserted-by-loser\n".to_string(),
+                },
+            )
+            .expect("insert operation should be valid"),
+        ],
     )
     .expect("insert changeset should be built");
 

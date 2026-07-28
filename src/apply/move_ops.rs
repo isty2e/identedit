@@ -5,7 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::changeset::{ChangeOp, FileChange, OpKind, TransformTarget};
+use crate::changeset::{ChangeOp, FileChange};
 use crate::error::IdenteditError;
 
 use super::io::{
@@ -51,12 +51,12 @@ fn validate_file_move_operation_constraints(
     let move_count = changeset
         .operations
         .iter()
-        .filter(|operation| matches!(operation.op, OpKind::Move { .. }))
+        .filter(|operation| operation.as_file_move().is_some())
         .count();
     let has_content_edit = changeset
         .operations
         .iter()
-        .any(|operation| !matches!(operation.op, OpKind::Move { .. }));
+        .any(|operation| operation.as_file_move().is_none());
 
     if move_count > 1 {
         return Err(IdenteditError::InvalidRequest {
@@ -81,81 +81,48 @@ fn validate_file_move_operation_constraints(
     let move_operation = changeset
         .operations
         .iter()
-        .find(|operation| matches!(operation.op, OpKind::Move { .. }))
+        .find_map(ChangeOp::as_file_move)
         .ok_or_else(|| IdenteditError::InvalidRequest {
             message: format!(
                 "Internal validation error: expected one move operation for '{}'",
                 changeset.file.display()
             ),
         })?;
-    let destination = match &move_operation.op {
-        OpKind::Move { to } => to.clone(),
-        _ => unreachable!("move_operation must be move"),
-    };
-    let expected_file_hash = match &move_operation.target {
-        TransformTarget::File { expected_file_hash } => expected_file_hash.clone(),
-        _ => {
-            return Err(IdenteditError::InvalidRequest {
-                message: format!(
-                    "Move operation requires a 'file' target with expected_file_hash: '{}'",
-                    changeset.file.display()
-                ),
-            });
-        }
-    };
-    validate_move_preview(changeset, move_operation, &destination)?;
+    validate_move_preview(
+        changeset,
+        move_operation.preview,
+        move_operation.destination,
+    )?;
 
     Ok(Some(MoveEdge {
         source: changeset.file.clone(),
-        destination,
-        expected_file_hash,
+        destination: move_operation.destination.to_path_buf(),
+        expected_file_hash: move_operation.expected_file_hash.to_string(),
     }))
 }
 
 fn validate_move_preview(
     changeset: &FileChange,
-    operation: &ChangeOp,
+    preview: &crate::changeset::MoveChangePreview,
     destination: &Path,
 ) -> Result<(), IdenteditError> {
-    match &operation.preview {
-        crate::changeset::ChangePreview::Move(preview) => {
-            let Some(move_preview) = preview.move_preview.as_ref() else {
-                // Backward-compatible path: move preview payload may be omitted.
-                return Ok(());
-            };
+    let Some(move_preview) = preview.move_preview.as_ref() else {
+        // Backward-compatible payloads are normalized to an absent move preview at ingress.
+        return Ok(());
+    };
 
-            if move_preview.from != changeset.file || move_preview.to != destination {
-                return Err(IdenteditError::InvalidRequest {
-                    message: format!(
-                        "Move preview mismatch for '{}': expected move.from='{}' and move.to='{}'",
-                        changeset.file.display(),
-                        changeset.file.display(),
-                        destination.display(),
-                    ),
-                });
-            }
-
-            Ok(())
-        }
-        crate::changeset::ChangePreview::Text(preview) => {
-            if preview.old_text.as_deref().unwrap_or("").is_empty()
-                && preview.old_hash.is_none()
-                && preview.old_len.is_none()
-                && preview.new_text.is_empty()
-                && preview.matched_span.start == 0
-                && preview.matched_span.end == 0
-            {
-                return Ok(());
-            }
-
-            Err(IdenteditError::InvalidRequest {
-                message: format!(
-                    "Move operation for '{}' must use move preview fields or compatibility empty text preview",
-                    changeset.file.display()
-                ),
-            })
-        }
+    if move_preview.from != changeset.file || move_preview.to != destination {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Move preview mismatch for '{}': expected move.from='{}' and move.to='{}'",
+                changeset.file.display(),
+                changeset.file.display(),
+                destination.display(),
+            ),
+        });
     }
+
+    Ok(())
 }
 
 fn validate_move_graph(move_edges: &[MoveEdge]) -> Result<Vec<NormalizedMoveEdge>, IdenteditError> {

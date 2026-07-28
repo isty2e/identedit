@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::changeset::{OpKind, TransformTarget};
+use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_bytes;
 use crate::hashline::{HashlineEdit, InsertAfterEdit, ReplaceLinesEdit, SetLineEdit};
@@ -224,10 +224,12 @@ fn parse_file_flag_patch_request(
 
     Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {
         file,
-        target,
-        op: OpKind::Insert {
-            new_text: insert_text,
-        },
+        operation: EditOperation::try_new(
+            target,
+            OpKind::Insert {
+                new_text: insert_text,
+            },
+        )?,
         execution: ApplyBackedExecution::from_args(args),
     }))
 }
@@ -401,8 +403,7 @@ fn parse_config_flag_patch_request(
 
     Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {
         file,
-        target: canonical.target,
-        op: canonical.op,
+        operation: canonical,
         execution: ApplyBackedExecution::from_args(args),
     }))
 }

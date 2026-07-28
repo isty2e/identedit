@@ -3,13 +3,12 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::apply::{ApplyResponse, apply_multi_file_changeset, dry_run_multi_file_changeset};
-use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransformTarget};
+use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget};
 use crate::cli::apply::shape_apply_response;
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::patch::engine::run_resolve_verify_apply;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
-use crate::transform::TransformInstruction;
 use crate::transform::build::build_changeset;
 
 use super::super::line_patch::{
@@ -91,8 +90,7 @@ pub struct NodeFlagPatchRequest {
 #[derive(Debug, Clone)]
 pub(super) struct CanonicalFlagPatchRequest {
     pub file: PathBuf,
-    pub target: TransformTarget,
-    pub op: OpKind,
+    pub operation: EditOperation,
     pub execution: ApplyBackedExecution,
 }
 
@@ -124,13 +122,9 @@ pub(super) fn execute_flag_patch_request(
 ) -> Result<PatchCommandOutput, IdenteditError> {
     match request {
         FlagPatchRequest::Node(request) => execute_node_flag_patch_request(request),
-        FlagPatchRequest::Canonical(request) => run_patch_node_operation(
-            request.file,
-            request.target,
-            request.op,
-            request.execution,
-            None,
-        ),
+        FlagPatchRequest::Canonical(request) => {
+            run_patch_edit_operation(request.file, request.operation, request.execution, None)
+        }
         FlagPatchRequest::Line(request) => match request.execution.output {
             PatchOutputMode::Json => {
                 let response = execute_hashline_patch(
@@ -206,9 +200,19 @@ pub(super) fn run_patch_node_operation(
     execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
 ) -> Result<PatchCommandOutput, IdenteditError> {
+    let operation = EditOperation::try_new(target, op)?;
+    run_patch_edit_operation(file, operation, execution, regex_replacements)
+}
+
+fn run_patch_edit_operation(
+    file: PathBuf,
+    operation: EditOperation,
+    execution: ApplyBackedExecution,
+    regex_replacements: Option<usize>,
+) -> Result<PatchCommandOutput, IdenteditError> {
     let outcome = run_resolve_verify_apply(
         || {
-            let file_change = build_changeset(&file, vec![TransformInstruction { target, op }])?;
+            let file_change = build_changeset(&file, vec![operation])?;
             Ok(wrap_single_file(file_change))
         },
         verify_prepared_changeset,
@@ -234,6 +238,27 @@ pub(super) fn run_patch_node_operation(
             &outcome.changeset,
             color,
         )?)),
+    }
+}
+
+pub(super) fn run_patch_edit_operation_json(
+    file: PathBuf,
+    operation: EditOperation,
+    dry_run: bool,
+    verbose: bool,
+) -> Result<Value, IdenteditError> {
+    let output = run_patch_edit_operation(
+        file,
+        operation,
+        ApplyBackedExecution::json(dry_run, verbose),
+        None,
+    )?;
+    match output {
+        PatchCommandOutput::Json(value) => Ok(value),
+        PatchCommandOutput::Text(_) => Err(IdenteditError::InvalidRequest {
+            message: "Internal patch error: JSON mode unexpectedly produced text output"
+                .to_string(),
+        }),
     }
 }
 

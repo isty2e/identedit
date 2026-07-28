@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use crate::changeset::OpKind;
 use crate::hash::hash_text;
 
+use super::MatchedChange;
 use super::conflict::{reject_move_operation, validate_change_conflicts};
 use super::resolve::resolve_target_in_handles;
-use super::{MatchedChange, TransformTarget};
+use crate::changeset::TransformTarget;
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 

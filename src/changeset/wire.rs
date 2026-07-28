@@ -6,8 +6,8 @@ use serde::de::{self, Deserializer, MapAccess, Visitor};
 use crate::handle::Span;
 
 use super::{
-    ChangePreview, MoveChangePreview, MovePreview, TextChangePreview, TransactionMode,
-    TransactionSpec, TransformTarget,
+    ChangeOp, ChangePreview, EditOperation, MoveChangePreview, MovePreview, OpKind,
+    TextChangePreview, TransactionMode, TransactionSpec, TransformTarget,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -225,28 +225,65 @@ struct ChangePreviewWire {
     move_preview: Option<MovePreview>,
 }
 
-impl<'de> Deserialize<'de> for ChangePreview {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChangeOpWire {
+    target: TransformTarget,
+    op: OpKind,
+    preview: ChangePreviewWire,
+}
+
+impl<'de> Deserialize<'de> for ChangeOp {
     fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let wire = ChangePreviewWire::deserialize(deserializer)?;
+        let wire = ChangeOpWire::deserialize(deserializer)?;
+        let operation = EditOperation::try_new(wire.target, wire.op).map_err(de::Error::custom)?;
+        let preview = wire
+            .preview
+            .into_preview_for_op::<D::Error>(operation.op())?;
+        ChangeOp::try_new(operation, preview).map_err(de::Error::custom)
+    }
+}
 
-        if let Some(move_preview) = wire.move_preview.clone() {
-            reject_legacy_move_placeholder_fields(&wire)?;
-            return Ok(Self::Move(MoveChangePreview {
+impl ChangePreviewWire {
+    fn into_preview_for_op<E>(self, op: &OpKind) -> result::Result<ChangePreview, E>
+    where
+        E: de::Error,
+    {
+        if matches!(op, OpKind::Move { .. }) {
+            if let Some(move_preview) = self.move_preview.clone() {
+                reject_legacy_move_placeholder_fields(&self)?;
+                return Ok(ChangePreview::Move(MoveChangePreview {
+                    move_preview: Some(move_preview),
+                }));
+            }
+
+            if self.old_text.is_none()
+                && self.old_hash.is_none()
+                && self.old_len.is_none()
+                && self.new_text.is_none()
+                && self.matched_span.is_none()
+            {
+                return Ok(ChangePreview::Move(MoveChangePreview {
+                    move_preview: None,
+                }));
+            }
+        } else if let Some(move_preview) = self.move_preview {
+            return Ok(ChangePreview::Move(MoveChangePreview {
                 move_preview: Some(move_preview),
             }));
         }
 
-        Ok(Self::Text(TextChangePreview {
-            old_text: wire.old_text,
-            old_hash: wire.old_hash,
-            old_len: wire.old_len,
-            new_text: wire
+        Ok(ChangePreview::Text(TextChangePreview {
+            old_text: self.old_text,
+            old_hash: self.old_hash,
+            old_len: self.old_len,
+            new_text: self
                 .new_text
                 .ok_or_else(|| de::Error::missing_field("new_text"))?,
-            matched_span: wire
+            matched_span: self
                 .matched_span
                 .ok_or_else(|| de::Error::missing_field("matched_span"))?,
         }))
