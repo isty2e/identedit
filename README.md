@@ -39,6 +39,12 @@ identedit read --mode line example.py   # display LINE:HASH|content
 identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anchor "5:7f6e5d4c3b2a"
 ```
 
+**Failed diff handoff** — recover exact candidates after a patch context failure, without writing:
+```bash
+identedit patch --from-diff failed.diff example.py
+cat failed.diff | identedit patch --from-diff - example.py
+```
+
 Use the canonical CLI entry points: `read`, `edit`, `apply`, `patch`, `merge`, `grammar`.
 These commands, their JSON schemas, exit status, and documented diagnostics are the supported interface. Identedit does not expose a supported Rust library API.
 
@@ -136,6 +142,15 @@ identedit edit --json < request.json
 identedit edit --json < request.json | identedit apply
 ```
 
+### Failed patch context recovery
+
+```bash
+# Preview every exact candidate. This command never writes.
+identedit patch --from-diff /tmp/failed.diff src/example.py > /tmp/handoff.json
+```
+
+Each changed block reports `unique`, `ambiguous`, or `missing` together with its source hunk and block index. Candidate `target` and `op` objects use the canonical `patch --json` schema, so an inspected candidate can be promoted into an explicit patch request. Multi-file/create/delete/rename diffs are rejected by this prototype.
+
 ### Large new_text (10+ lines)
 
 ```bash
@@ -167,6 +182,7 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 
 - `edit` is always a dry-run. No files modified until explicit `apply`.
 - `patch --dry-run` validates and previews without writing files.
+- `edit|patch --from-diff` only discovers candidate targets; it never writes or auto-selects an ambiguous candidate.
 - Line-anchored patch defaults to strict mode. `--auto-repair` is explicit opt-in.
 - `apply --dry-run` validates and returns a summary without writing.
 - Content precondition hashes use 16 hexadecimal characters; line anchors use `LINE:12-hex`.

@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+use crate::cli::edit::EditCommandOutput;
 use crate::cli::patch::PatchCommandOutput;
 use crate::cli::read::ReadCommandOutput;
 use crate::error::IdenteditError;
@@ -53,11 +54,10 @@ pub fn run_cli(cli: Cli) -> Result<String, IdenteditError> {
             ReadCommandOutput::Json(response) => serde_json::to_string_pretty(&response)
                 .map_err(|source| IdenteditError::ResponseSerialization { source }),
         },
-        Commands::Edit(args) => {
-            let response = edit::run_edit(*args)?;
-            serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source })
-        }
+        Commands::Edit(args) => match edit::run_edit(*args)? {
+            EditCommandOutput::Changeset(response) => serialize_response(&response),
+            EditCommandOutput::FailedDiff(response) => serialize_response(&response),
+        },
         Commands::Apply(args) => {
             let response = apply::run_apply(args)?;
             serde_json::to_string_pretty(&response)
@@ -75,8 +75,12 @@ pub fn run_cli(cli: Cli) -> Result<String, IdenteditError> {
         }
         Commands::Patch(args) => match patch::run_patch(*args)? {
             PatchCommandOutput::Text(output) => Ok(output),
-            PatchCommandOutput::Json(response) => serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source }),
+            PatchCommandOutput::Json(response) => serialize_response(&response),
         },
     }
+}
+
+fn serialize_response(response: &impl serde::Serialize) -> Result<String, IdenteditError> {
+    serde_json::to_string_pretty(response)
+        .map_err(|source| IdenteditError::ResponseSerialization { source })
 }

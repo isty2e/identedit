@@ -5,6 +5,12 @@ use clap::Args;
 #[derive(Debug, Default, Args)]
 pub(crate) struct EditIntentArgs {
     #[arg(
+        long = "from-diff",
+        value_name = "PATH",
+        help = "Preview exact candidate targets from one failed unified diff; use '-' for stdin"
+    )]
+    pub(crate) from_diff: Option<PathBuf>,
+    #[arg(
         long,
         value_name = "TARGET",
         help = "Unified target selector: node identity (hex16), line anchor (line:hex12), or file-start/file-end"
@@ -146,28 +152,31 @@ pub(crate) struct EditIntentArgs {
 
 impl EditIntentArgs {
     pub(crate) fn is_empty(&self) -> bool {
-        self.at.is_none()
-            && self.end_anchor.is_none()
-            && self.config_path.is_none()
-            && self.document_index.is_none()
-            && self.kind.is_none()
-            && self.name.is_none()
-            && self.symbol.is_none()
-            && self.replace.is_none()
-            && self.text_file.is_none()
-            && !self.stdin_text
-            && self.set_value.is_none()
-            && self.append_value.is_none()
-            && !self.create_missing
-            && self.insert.is_none()
-            && self.scoped_regex.is_none()
-            && self.scoped_replacement.is_none()
-            && !self.delete
-            && self.insert_before.is_none()
-            && self.insert_after.is_none()
-            && self.set_line.is_none()
-            && self.replace_range.is_none()
-            && self.insert_after_line.is_none()
-            && self.file.is_none()
+        self.from_diff.is_none() && !self.has_ordinary_intent_arguments() && self.file.is_none()
+    }
+
+    pub(super) fn has_ordinary_intent_arguments(&self) -> bool {
+        self.at.is_some()
+            || self.end_anchor.is_some()
+            || self.config_path.is_some()
+            || self.document_index.is_some()
+            || self.kind.is_some()
+            || self.name.is_some()
+            || self.symbol.is_some()
+            || self.replace.is_some()
+            || self.text_file.is_some()
+            || self.stdin_text
+            || self.set_value.is_some()
+            || self.append_value.is_some()
+            || self.create_missing
+            || self.insert.is_some()
+            || self.scoped_regex.is_some()
+            || self.scoped_replacement.is_some()
+            || self.delete
+            || self.insert_before.is_some()
+            || self.insert_after.is_some()
+            || self.set_line.is_some()
+            || self.replace_range.is_some()
+            || self.insert_after_line.is_some()
     }
 }

@@ -40,6 +40,7 @@ Use this table as a command lookup once you already know identedit is the right 
 | Edit a specific line | `identedit patch file --at "LINE:HASH" --set-line 'new line'` |
 | Replace with large text | `identedit patch file --symbol foo --replace --text-file /tmp/body.py` |
 | Preview before writing | `identedit patch file --symbol foo --replace --text-file /tmp/body.py --dry-run --diff` |
+| Recover candidate targets from a failed diff | `identedit patch --from-diff failed.diff file` |
 | Regex replace inside one function/class | `identedit patch file --symbol foo --scoped-regex 'old' --scoped-replacement 'new'` |
 | Multi-op or multi-file atomic | `identedit edit --json` then `identedit apply` |
 | Move a structure | `identedit edit --json` with `move_before` / `move_after` |
@@ -104,6 +105,22 @@ identedit patch src/example.py --symbol process_data \
 Use `--kind` + `--name` for kind-specific glob matching, e.g. `--kind function_definition --name "process_*"`.
 
 For non-trivial replacements, prefer `--dry-run --diff` first.
+
+## Failed Diff Handoff
+
+When a direct patch fails from context drift, recover exact line candidates without applying it:
+
+```bash
+identedit patch --from-diff failed.diff src/example.py > handoff.json
+# Or stream the diff:
+cat failed.diff | identedit patch --from-diff - src/example.py > handoff.json
+```
+
+The command is always preview-only. Each changed block reports `unique`, `ambiguous`, or `missing` and preserves every exact line-boundary candidate in source order. For a `unique` result, `candidate.target` and `candidate.op` can be copied directly into a `patch --json` request. Inspect `candidate.preview` before choosing an ambiguous candidate; never auto-select the first one.
+
+Use this for a one-file unified diff, an `apply_patch` `*** Update File` block, or a bare hunk plus explicit `FILE`. It rejects multi-file/create/delete/rename diffs and conflicting file paths.
+
+See `references/failed-diff-handoff.md` for the response schema and a safe preview-to-apply example.
 
 ## Large Text Payloads
 
@@ -243,6 +260,7 @@ Load these only when the task needs the details:
 - `references/structural-pipeline.md`: `read --json`, `edit --json`, handle refs, operations, file-level targets, merge, pipe workflows.
 - `references/line-editing.md`: line anchor format, line JSON, strict/repair behavior.
 - `references/config-path-patching.md`: JSON/YAML/TOML path syntax, create-missing policy, anchors/tags/comments.
+- `references/failed-diff-handoff.md`: failed unified diff recovery, candidate status, and explicit apply handoff.
 - `references/transactions.md`: multi-file transaction details, apply wrapper shape, rollback drill, error table.
 - `references/languages.md`: bundled languages and `grammar install` tiers.
 

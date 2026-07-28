@@ -1,7 +1,10 @@
 use clap::Args;
 
 use crate::changeset::MultiFileChangeset;
-use crate::cli::edit_intent::{EditIntentArgs, PreparedEditIntent, parse_flag_edit_intent};
+use crate::cli::edit_intent::{
+    EditIntentArgs, FailedDiffResponse, PreparedEditIntent, parse_flag_edit_intent,
+    prepare_failed_diff_handoff,
+};
 use crate::error::IdenteditError;
 
 #[derive(Debug, Args)]
@@ -17,7 +20,24 @@ pub struct EditArgs {
     pub verbose: bool,
 }
 
-pub fn run_edit(args: EditArgs) -> Result<MultiFileChangeset, IdenteditError> {
+pub(super) enum EditCommandOutput {
+    Changeset(MultiFileChangeset),
+    FailedDiff(FailedDiffResponse),
+}
+
+pub fn run_edit(args: EditArgs) -> Result<EditCommandOutput, IdenteditError> {
+    if args.intent.from_diff.is_some() {
+        if args.json || args.verbose {
+            return Err(IdenteditError::InvalidRequest {
+                message:
+                    "--from-diff is a preview-only flag workflow and cannot be combined with --json or --verbose."
+                        .to_string(),
+            });
+        }
+        let response = prepare_failed_diff_handoff(&args.intent)?;
+        return Ok(EditCommandOutput::FailedDiff(response));
+    }
+
     if args.json {
         if !args.intent.is_empty() {
             return Err(IdenteditError::InvalidRequest {
@@ -26,11 +46,12 @@ pub fn run_edit(args: EditArgs) -> Result<MultiFileChangeset, IdenteditError> {
                         .to_string(),
             });
         }
-        return crate::cli::edit_build::run_edit_json_mode(args.verbose);
+        return crate::cli::edit_build::run_edit_json_mode(args.verbose)
+            .map(EditCommandOutput::Changeset);
     }
 
     let intent = parse_flag_edit_intent(&args.intent)?;
-    match intent {
+    let changeset = match intent {
         PreparedEditIntent::Node(intent) => {
             let resolved = intent.resolve()?;
             crate::cli::edit_build::build_single_file_edit_plan(
@@ -54,5 +75,6 @@ pub fn run_edit(args: EditArgs) -> Result<MultiFileChangeset, IdenteditError> {
                 args.verbose,
             )
         }
-    }
+    }?;
+    Ok(EditCommandOutput::Changeset(changeset))
 }

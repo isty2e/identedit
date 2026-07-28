@@ -1,7 +1,9 @@
 use clap::{Args, ValueEnum};
 use serde_json::Value;
 
-use crate::cli::edit_intent::{EditIntentArgs, parse_flag_edit_intent};
+use crate::cli::edit_intent::{
+    EditIntentArgs, parse_flag_edit_intent, prepare_failed_diff_handoff,
+};
 use crate::error::IdenteditError;
 
 mod diff;
@@ -48,6 +50,14 @@ pub(super) enum PatchCommandOutput {
 }
 
 pub(super) fn run_patch(args: PatchArgs) -> Result<PatchCommandOutput, IdenteditError> {
+    if args.intent.from_diff.is_some() {
+        validate_failed_diff_options(&args)?;
+        let response = prepare_failed_diff_handoff(&args.intent)?;
+        let response = serde_json::to_value(response)
+            .map_err(|source| IdenteditError::ResponseSerialization { source })?;
+        return Ok(PatchCommandOutput::Json(response));
+    }
+
     validate_output_options(&args)?;
 
     if args.json {
@@ -64,6 +74,23 @@ pub(super) fn run_patch(args: PatchArgs) -> Result<PatchCommandOutput, Identedit
     let intent = parse_flag_edit_intent(&args.intent)?;
     let execution = execute::PatchExecution::from_args(&args);
     execute::execute_flag_patch_request(intent, execution)
+}
+
+fn validate_failed_diff_options(args: &PatchArgs) -> Result<(), IdenteditError> {
+    if args.json
+        || args.auto_repair
+        || args.dry_run
+        || args.diff
+        || args.color.is_some()
+        || args.verbose
+    {
+        return Err(IdenteditError::InvalidRequest {
+            message:
+                "--from-diff is already preview-only and cannot be combined with --json, --auto-repair, --dry-run, --diff, --color, or --verbose."
+                    .to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_output_options(args: &PatchArgs) -> Result<(), IdenteditError> {
