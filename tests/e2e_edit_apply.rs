@@ -476,6 +476,59 @@ fn transform_apply_pipeline_supports_mixed_node_and_line_targets() {
 }
 
 #[test]
+fn line_insert_after_changeset_rechecks_anchor_before_apply() {
+    let source = "a\nb\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file
+        .write_all(source.as_bytes())
+        .expect("fixture write should succeed");
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let edit_request = json!({
+        "command": "edit",
+        "file": file_path.to_string_lossy().to_string(),
+        "operations": [{
+            "target": {
+                "type": "line",
+                "anchor": line_ref(source, 1)
+            },
+            "op": {
+                "type": "insert_after_line",
+                "text": "x"
+            }
+        }]
+    });
+    let edit_output = run_identedit_with_stdin(&["edit", "--json"], &edit_request.to_string());
+    assert!(
+        edit_output.status.success(),
+        "line insert edit should succeed: {}",
+        String::from_utf8_lossy(&edit_output.stderr)
+    );
+
+    let externally_modified = "changed\nb\n";
+    fs::write(&file_path, externally_modified).expect("external mutation should succeed");
+
+    let changeset = std::str::from_utf8(&edit_output.stdout).expect("edit output should be utf-8");
+    let apply_output = run_identedit_with_stdin(&["apply"], changeset);
+    assert!(
+        !apply_output.status.success(),
+        "apply should reject a stale line anchor"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&apply_output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("file should remain readable"),
+        externally_modified,
+        "failed apply must not insert text after a stale anchor"
+    );
+}
+
+#[test]
 fn select_transform_apply_pipeline_supports_parent_segment_paths() {
     let workspace = tempdir().expect("tempdir should be created");
     let nested = workspace.path().join("nested");
