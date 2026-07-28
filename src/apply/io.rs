@@ -73,6 +73,7 @@ pub(super) struct PathFingerprint {
     #[cfg(unix)]
     inode: u64,
     length: u64,
+    // Rollback deliberately fails closed if a filesystem changes metadata across rename.
     modified_nanos: Option<u128>,
 }
 

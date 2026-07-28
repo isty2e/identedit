@@ -401,6 +401,7 @@ dependencies = [
  "tree-sitter-xml",
  "tree-sitter-yaml",
  "tree-sitter-zsh",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

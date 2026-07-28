@@ -664,7 +664,116 @@ fn path_to_c_string(path: &Path) -> io::Result<CString> {
 
 #[cfg(windows)]
 fn rename_file_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::rename(source, destination)
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+
+    let source = path_to_windows_wide(source)?;
+    let destination = path_to_windows_wide(destination)?;
+    // Omitting MOVEFILE_REPLACE_EXISTING makes destination creation an atomic failure.
+    // SAFETY: both pointers reference live, NUL-terminated UTF-16 buffers for the call.
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn path_to_windows_wide(path: &Path) -> io::Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const LEGACY_MAX_PATH: usize = 248;
+    const VERBATIM_PREFIX: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    const NT_PREFIX: &[u16] = &[b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
+    const DEVICE_PREFIX: &[u16] = &[b'\\' as u16, b'\\' as u16, b'.' as u16, b'\\' as u16];
+    const UNC_PREFIX: &[u16] = &[
+        b'\\' as u16,
+        b'\\' as u16,
+        b'?' as u16,
+        b'\\' as u16,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        b'\\' as u16,
+    ];
+    const UNC_PATH_PREFIX: &[u16] = &[b'\\' as u16, b'\\' as u16];
+
+    let absolute = std::path::absolute(path)?;
+    let mut encoded = absolute.as_os_str().encode_wide().collect::<Vec<_>>();
+    if encoded.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Path contains an interior NUL byte: '{}'", path.display()),
+        ));
+    }
+
+    if encoded.len() + 1 >= LEGACY_MAX_PATH
+        && !encoded.starts_with(VERBATIM_PREFIX)
+        && !encoded.starts_with(NT_PREFIX)
+    {
+        if encoded.starts_with(DEVICE_PREFIX) {
+            encoded.splice(..DEVICE_PREFIX.len(), VERBATIM_PREFIX.iter().copied());
+        } else if encoded.starts_with(UNC_PATH_PREFIX) {
+            encoded.splice(..UNC_PATH_PREFIX.len(), UNC_PREFIX.iter().copied());
+        } else {
+            encoded.splice(..0, VERBATIM_PREFIX.iter().copied());
+        }
+    }
+
+    encoded.push(0);
+    Ok(encoded)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::rename_file_no_replace;
+
+    #[test]
+    fn rename_file_no_replace_moves_to_missing_destination() {
+        let workspace = tempdir().expect("tempdir should be created");
+        let source = workspace.path().join("source.txt");
+        let destination = workspace.path().join("destination.txt");
+        fs::write(&source, "source").expect("source should be written");
+
+        rename_file_no_replace(&source, &destination).expect("move should succeed");
+
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read_to_string(&destination).expect("destination should be readable"),
+            "source"
+        );
+    }
+
+    #[test]
+    fn rename_file_no_replace_preserves_existing_destination() {
+        let workspace = tempdir().expect("tempdir should be created");
+        let source = workspace.path().join("source.txt");
+        let destination = workspace.path().join("destination.txt");
+        fs::write(&source, "source").expect("source should be written");
+        fs::write(&destination, "destination").expect("destination should be written");
+
+        rename_file_no_replace(&source, &destination)
+            .expect_err("existing destination must make the move fail");
+
+        assert_eq!(
+            fs::read_to_string(&source).expect("source should remain readable"),
+            "source"
+        );
+        assert_eq!(
+            fs::read_to_string(&destination).expect("destination should remain readable"),
+            "destination"
+        );
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
