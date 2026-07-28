@@ -47,6 +47,12 @@ Line operations:
 - `--replace-range` with optional `--end-anchor`
 - `--insert-after-line`
 
+## Line Ending Preservation
+
+- Untouched lines retain their original `LF`, `CRLF`, or `CR` terminators, including in mixed files.
+- Multiline replacement and insertion text uses the target boundary's local terminator style.
+- Replacing or deleting the final line preserves whether the original file ended with a line terminator.
+
 ## Target Auto-Detection
 
 `patch --at` detects target type by format:
