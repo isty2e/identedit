@@ -688,8 +688,27 @@ pub(super) fn rollback_committed_moves(
                 ),
             })?;
 
-        fs::rename(&plan.destination, &plan.source)
-            .map_err(|error| IdenteditError::io(&plan.destination, error))?;
+        verify_apply_guard_state(&plan.destination, &plan.guard_state)?;
+        if move_path_exists(&plan.source)? {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "Move rollback source path already exists: '{}'",
+                    plan.source.display()
+                ),
+            });
+        }
+        rename_file_no_replace(&plan.destination, &plan.source).map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Move rollback source path already exists: '{}'",
+                        plan.source.display()
+                    ),
+                }
+            } else {
+                IdenteditError::io(&plan.destination, error)
+            }
+        })?;
         sync_parent_directory(&plan.source)?;
         sync_parent_directory(&plan.destination)?;
     }

@@ -1099,6 +1099,92 @@ fn apply_json_mode_rejects_move_mixed_with_content_edits_for_same_file() {
 }
 
 #[test]
+fn apply_json_mode_rejects_edit_and_move_split_across_duplicate_file_entries() {
+    let workspace = tempdir().expect("tempdir should be created");
+    let source_path = workspace.path().join("source.py");
+    let original = "def keep():\n    return 1\n";
+    fs::write(&source_path, original).expect("fixture write should succeed");
+    let destination = workspace.path().join("renamed.py");
+    let move_target = file_move_target(&source_path);
+    let expected_file_hash = move_target["expected_file_hash"].clone();
+
+    let request = json!({
+        "command": "apply",
+        "changeset": {
+            "files": [
+                {
+                    "file": source_path.to_string_lossy().to_string(),
+                    "operations": [
+                        {
+                            "target": {
+                                "type": "file_start",
+                                "expected_file_hash": expected_file_hash
+                            },
+                            "op": {
+                                "type": "insert",
+                                "new_text": "# header\n"
+                            },
+                            "preview": {
+                                "old_text": "",
+                                "new_text": "# header\n",
+                                "matched_span": {
+                                    "start": 0,
+                                    "end": 0
+                                }
+                            }
+                        }
+                    ]
+                },
+                {
+                    "file": source_path.to_string_lossy().to_string(),
+                    "operations": [
+                        {
+                            "target": move_target,
+                            "op": {
+                                "type": "move",
+                                "to": destination.to_string_lossy().to_string()
+                            },
+                            "preview": {
+                                "old_text": "",
+                                "new_text": "",
+                                "matched_span": {
+                                    "start": 0,
+                                    "end": 0
+                                }
+                            }
+                        }
+                    ]
+                }
+            ],
+            "transaction": {
+                "mode": "all_or_nothing"
+            }
+        }
+    });
+
+    let output = run_identedit_with_stdin(&["apply", "--json", "--dry-run"], &request.to_string());
+    assert!(
+        !output.status.success(),
+        "apply should reject duplicate file entries before preflight locking"
+    );
+
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Duplicate file entry in changeset.files")),
+        "expected duplicate file entry diagnostic, got: {response}"
+    );
+    assert_eq!(
+        fs::read_to_string(&source_path).expect("source should remain readable"),
+        original
+    );
+    assert!(!destination.exists());
+}
+
+#[test]
 fn apply_json_mode_executes_single_move_operation() {
     let workspace = tempdir().expect("tempdir should be created");
     let source_path = workspace.path().join("source.py");

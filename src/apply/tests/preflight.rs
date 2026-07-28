@@ -8,7 +8,8 @@ use crate::transform::parse::parse_handles_for_file;
 
 use super::super::AtomicWritePhase;
 use super::super::{
-    ApplyFileStatus, FileRollbackSnapshot, acquire_apply_lock, apply_changesets_with_hooks,
+    ApplyFileStatus, CommittedFileRollback, FileRollbackSnapshot, acquire_apply_lock,
+    apply_changesets_with_hooks, capture_apply_guard_state,
     commit_move_plan_with_before_rename_hook, commit_move_plan_with_rename,
     commit_move_plans_with_after_rename_hook, commit_preflight_batch,
     commit_preflight_batch_with_write_hook, preflight_changesets_in_order, preflight_move_plans,
@@ -764,8 +765,9 @@ fn commit_preflight_batch_applies_changes_in_deterministic_order() {
     let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
         .expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
-    let applied = commit_preflight_batch(commit_batch, || Ok(()), || Ok(()))
+    let committed = commit_preflight_batch(commit_batch, || Ok(()), || Ok(()))
         .expect("commit batch should succeed");
+    let applied = committed.applied;
 
     assert_eq!(applied.len(), 2);
     assert_eq!(
@@ -877,6 +879,78 @@ fn post_rename_failure_rolls_back_the_current_file() {
         std::fs::read_to_string(&file).expect("file should remain readable"),
         before,
         "the current file must be included in rollback after its rename committed"
+    );
+}
+
+#[test]
+fn rollback_refuses_to_overwrite_external_change_after_commit() {
+    let directory = tempdir().expect("tempdir should be created");
+    let file_a = directory.path().join("a_target.py");
+    let file_b = directory.path().join("b_target.py");
+    let fixture = "def process_data(value):\n    result = value + 1\n    return result\n";
+    let external_text = "def externally_changed():\n    return 99\n";
+    std::fs::write(&file_a, fixture).expect("file_a fixture write should succeed");
+    std::fs::write(&file_b, fixture).expect("file_b fixture write should succeed");
+
+    let changeset_b = build_replace_changeset(
+        &file_b,
+        &process_identity_for(&file_b),
+        "def process_data(value):\n    return value * 202".to_string(),
+    )
+    .expect("changeset_b should be built");
+    let changeset_a = build_replace_changeset(
+        &file_a,
+        &process_identity_for(&file_a),
+        "def process_data(value):\n    return value * 201".to_string(),
+    )
+    .expect("changeset_a should be built");
+
+    let registry = ProviderRegistry::default();
+    let plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+        .expect("preflight should succeed");
+    let batch = prepare_commit_batch(plans);
+
+    let file_a_for_hook = file_a.clone();
+    let mut first_rename_observed = false;
+    let error = commit_preflight_batch_with_write_hook(
+        batch,
+        || Ok(()),
+        || Ok(()),
+        move |phase| {
+            if phase == AtomicWritePhase::Renamed && !first_rename_observed {
+                first_rename_observed = true;
+                std::fs::write(&file_a_for_hook, external_text)
+                    .expect("external writer should update first committed file");
+                return Ok(());
+            }
+            if phase == AtomicWritePhase::TempWritten && first_rename_observed {
+                return Err(std::io::Error::other(
+                    "injected second-file failure after external rewrite",
+                ));
+            }
+            Ok(())
+        },
+    )
+    .expect_err("rollback must fail rather than overwrite the external rewrite");
+
+    match error {
+        IdenteditError::RollbackFailed { message } => {
+            assert!(
+                message.contains("rollback failed"),
+                "rollback failure should be explicit: {message}"
+            );
+        }
+        other => panic!("unexpected error variant: {other}"),
+    }
+    assert_eq!(
+        std::fs::read_to_string(&file_a).expect("file_a should remain readable"),
+        external_text,
+        "rollback must preserve the external writer's content"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file_b).expect("file_b should remain readable"),
+        fixture,
+        "second file must remain uncommitted"
     );
 }
 
@@ -1159,7 +1233,19 @@ fn rollback_committed_files_reports_missing_snapshot_index_deterministically() {
         original_text: "def process_data(value):\n    return value + 1\n".to_string(),
         original_permissions: permissions,
     }];
-    let error = rollback_committed_files(&snapshots, &[0, 1])
+    let expected_guard =
+        capture_apply_guard_state(&file).expect("rollback guard should be captured");
+    let committed_files = vec![
+        CommittedFileRollback {
+            snapshot_index: 0,
+            expected_guard: expected_guard.clone(),
+        },
+        CommittedFileRollback {
+            snapshot_index: 1,
+            expected_guard,
+        },
+    ];
+    let error = rollback_committed_files(&snapshots, &committed_files)
         .expect_err("out-of-range committed index should be rejected deterministically");
     match error {
         IdenteditError::InvalidRequest { message } => {
@@ -1370,6 +1456,93 @@ fn post_rename_move_failure_marks_current_move_for_rollback() {
     assert_eq!(
         std::fs::read_to_string(&source).expect("restored source should be readable"),
         original
+    );
+}
+
+#[test]
+fn move_rollback_refuses_to_replace_recreated_source_path() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.py");
+    let destination = directory.path().join("destination.py");
+    let original = "def moved():\n    return 1\n";
+    let external = "def external():\n    return 2\n";
+    std::fs::write(&source, original).expect("source fixture write should succeed");
+
+    let changeset = build_move_changeset(&source, &destination);
+    let execution_order = validate_move_operation_constraints(&[changeset])
+        .expect("single move should pass graph validation");
+    let plans =
+        preflight_move_plans(&execution_order).expect("move preflight should produce one plan");
+
+    let source_for_hook = source.clone();
+    let (commit_error, committed_indices) = commit_move_plans_with_after_rename_hook(
+        &plans,
+        || Ok(()),
+        move || {
+            std::fs::write(&source_for_hook, external)
+                .expect("external writer should recreate the source path");
+            Err(IdenteditError::InvalidRequest {
+                message: "injected post-rename failure".to_string(),
+            })
+        },
+    )
+    .expect_err("post-rename hook failure should abort move commit");
+    assert!(
+        commit_error
+            .to_string()
+            .contains("injected post-rename failure")
+    );
+
+    rollback_committed_moves(&plans, &committed_indices)
+        .expect_err("rollback must not replace the recreated source path");
+    assert_eq!(
+        std::fs::read_to_string(&source).expect("recreated source should remain readable"),
+        external
+    );
+    assert_eq!(
+        std::fs::read_to_string(&destination).expect("moved destination should remain readable"),
+        original
+    );
+}
+
+#[test]
+fn move_rollback_refuses_to_overwrite_modified_destination() {
+    let directory = tempdir().expect("tempdir should be created");
+    let source = directory.path().join("source.py");
+    let destination = directory.path().join("destination.py");
+    let original = "def moved():\n    return 1\n";
+    let external = "def externally_modified():\n    return 3\n";
+    std::fs::write(&source, original).expect("source fixture write should succeed");
+
+    let changeset = build_move_changeset(&source, &destination);
+    let execution_order = validate_move_operation_constraints(&[changeset])
+        .expect("single move should pass graph validation");
+    let plans =
+        preflight_move_plans(&execution_order).expect("move preflight should produce one plan");
+
+    let destination_for_hook = destination.clone();
+    let (_, committed_indices) = commit_move_plans_with_after_rename_hook(
+        &plans,
+        || Ok(()),
+        move || {
+            std::fs::write(&destination_for_hook, external)
+                .expect("external writer should modify move destination");
+            Err(IdenteditError::InvalidRequest {
+                message: "injected post-rename failure".to_string(),
+            })
+        },
+    )
+    .expect_err("post-rename hook failure should abort move commit");
+
+    rollback_committed_moves(&plans, &committed_indices)
+        .expect_err("rollback must not overwrite the modified destination");
+    assert!(
+        !source.exists(),
+        "source must stay absent when destination ownership changed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&destination).expect("destination should remain readable"),
+        external
     );
 }
 
