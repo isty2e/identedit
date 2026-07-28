@@ -1,22 +1,5 @@
 use super::*;
 
-fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
-    assert!(
-        preview.get("old_text").is_none(),
-        "compact preview should omit old_text by default"
-    );
-    assert_eq!(
-        preview["old_hash"],
-        crate::common::hash_text(expected_old_text),
-        "compact preview should include old_hash"
-    );
-    assert_eq!(
-        preview["old_len"],
-        expected_old_text.len(),
-        "compact preview should include old_len"
-    );
-}
-
 #[test]
 fn transform_flags_mode_builds_changeset_preview() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -67,7 +50,6 @@ fn transform_flags_mode_builds_changeset_preview() {
         "transform must remain dry-run and never mutate source files on success"
     );
 }
-
 #[test]
 fn transform_flags_mode_supports_crlf_source_files() {
     let mut temp_file = Builder::new()
@@ -110,7 +92,6 @@ fn transform_flags_mode_supports_crlf_source_files() {
     let preview = &response["files"][0]["operations"][0]["preview"];
     assert_compact_preview_old_state(preview, old_text);
 }
-
 #[test]
 fn transform_flags_mode_supports_cr_only_source_files() {
     let mut temp_file = Builder::new()
@@ -153,7 +134,6 @@ fn transform_flags_mode_supports_cr_only_source_files() {
         "selected function text should preserve CR line endings for CR-only source"
     );
 }
-
 #[test]
 fn transform_flags_mode_supports_utf8_bom_prefixed_python_files() {
     let mut temp_file = Builder::new()
@@ -195,7 +175,6 @@ fn transform_flags_mode_supports_utf8_bom_prefixed_python_files() {
         3
     );
 }
-
 #[test]
 fn transform_flags_mode_preserves_mixed_line_endings_in_preview() {
     let mut temp_file = Builder::new()
@@ -242,7 +221,6 @@ fn transform_flags_mode_preserves_mixed_line_endings_in_preview() {
         "selected function text should retain bare CR segments in mixed-ending source"
     );
 }
-
 #[test]
 fn transform_json_mode_preserves_nul_in_replacement_preview() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -287,7 +265,6 @@ fn transform_json_mode_preserves_nul_in_replacement_preview() {
         "preview new_text should preserve embedded NUL"
     );
 }
-
 #[test]
 fn transform_handles_large_python_files_within_reasonable_time() {
     let file_path = create_large_python_file(400);
@@ -324,7 +301,6 @@ fn transform_handles_large_python_files_within_reasonable_time() {
         "transform took too long on large fixture: {elapsed:?}"
     );
 }
-
 #[test]
 fn transform_flags_mode_requires_identity_argument() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -350,7 +326,6 @@ fn transform_flags_mode_requires_identity_argument() {
         "expected missing identity message"
     );
 }
-
 #[test]
 fn transform_flags_mode_requires_operation_argument() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -381,7 +356,6 @@ fn transform_flags_mode_requires_operation_argument() {
         "expected missing operation message"
     );
 }
-
 #[test]
 fn transform_flags_mode_supports_delete_argument() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -425,7 +399,6 @@ fn transform_flags_mode_supports_delete_argument() {
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(before, after, "transform flags mode must stay dry-run");
 }
-
 #[test]
 fn transform_flags_mode_rejects_replace_and_delete_together() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -458,7 +431,6 @@ fn transform_flags_mode_rejects_replace_and_delete_together() {
         "expected mutually-exclusive operation message"
     );
 }
-
 #[cfg(unix)]
 #[test]
 fn transform_flags_mode_supports_shell_variable_expanded_path() {
@@ -491,7 +463,6 @@ fn transform_flags_mode_supports_shell_variable_expanded_path() {
         Some(1)
     );
 }
-
 #[cfg(unix)]
 #[test]
 fn transform_flags_mode_single_quoted_env_token_path_remains_literal() {
@@ -515,7 +486,6 @@ fn transform_flags_mode_single_quoted_env_token_path_remains_literal() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn transform_returns_parse_failure_for_syntax_invalid_python_file() {
     let mut temporary_file = Builder::new()
@@ -544,7 +514,6 @@ fn transform_returns_parse_failure_for_syntax_invalid_python_file() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn transform_parse_failure_does_not_modify_invalid_source_file() {
     let mut temporary_file = Builder::new()
@@ -580,7 +549,6 @@ fn transform_parse_failure_does_not_modify_invalid_source_file() {
         "transform parse-failure path must not mutate source files"
     );
 }
-
 #[test]
 fn transform_returns_parse_failure_for_partially_binary_python_file() {
     let mut temporary_file = Builder::new()
@@ -609,7 +577,6 @@ fn transform_returns_parse_failure_for_partially_binary_python_file() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn transform_returns_parse_failure_for_nul_in_python_source() {
     let mut temporary_file = Builder::new()
@@ -638,7 +605,6 @@ fn transform_returns_parse_failure_for_nul_in_python_source() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn transform_returns_parse_failure_for_bom_plus_nul_python_source() {
     let mut temporary_file = Builder::new()
@@ -667,7 +633,6 @@ fn transform_returns_parse_failure_for_bom_plus_nul_python_source() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn transform_returns_target_missing_for_unknown_identity() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -689,7 +654,6 @@ fn transform_returns_target_missing_for_unknown_identity() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "target_missing");
 }
-
 #[test]
 fn transform_returns_ambiguous_target_when_identity_matches_multiple_nodes() {
     let fixture = fixture_path("ambiguous.py");

@@ -69,7 +69,6 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary() {
     let mut temp_file = Builder::new()
@@ -140,7 +139,6 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary() 
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_file_start_insert_and_replace_same_boundary() {
     let mut temp_file = Builder::new()
@@ -210,7 +208,6 @@ fn transform_json_mode_rejects_file_start_insert_and_replace_same_boundary() {
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_bom_only_file() {
     let mut temp_file = Builder::new()
@@ -267,7 +264,6 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_bom_only_file(
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary_on_bom_file() {
     let mut temp_file = Builder::new()
@@ -337,7 +333,6 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary_on_bom_file() {
     let mut temp_file = Builder::new()
@@ -408,7 +403,6 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary_on
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn transform_json_mode_boundary_conflict_message_is_order_independent() {
     let mut temp_file = Builder::new()
@@ -490,7 +484,6 @@ fn transform_json_mode_boundary_conflict_message_is_order_independent() {
         }
     }
 }
-
 #[test]
 fn transform_json_mode_rejects_unknown_file_level_target_type() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -527,7 +520,6 @@ fn transform_json_mode_rejects_unknown_file_level_target_type() {
         "expected unknown variant parse error"
     );
 }
-
 #[test]
 fn transform_json_mode_builds_file_start_insert_preview_on_bom_only_file() {
     let mut temp_file = Builder::new()
@@ -579,7 +571,6 @@ fn transform_json_mode_builds_file_start_insert_preview_on_bom_only_file() {
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(before, after, "transform must remain dry-run");
 }
-
 #[test]
 fn transform_json_mode_builds_file_end_insert_preview_on_bom_only_file() {
     let mut temp_file = Builder::new()
@@ -631,7 +622,6 @@ fn transform_json_mode_builds_file_end_insert_preview_on_bom_only_file() {
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(before, after, "transform must remain dry-run");
 }
-
 #[test]
 fn transform_json_mode_allows_insert_before_and_after_on_same_anchor() {
     let file_path = copy_fixture_to_temp_python("example.py");

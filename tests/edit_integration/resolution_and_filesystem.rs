@@ -1,22 +1,5 @@
 use super::*;
 
-fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
-    assert!(
-        preview.get("old_text").is_none(),
-        "compact preview should omit old_text by default"
-    );
-    assert_eq!(
-        preview["old_hash"],
-        crate::common::hash_text(expected_old_text),
-        "compact preview should include old_hash"
-    );
-    assert_eq!(
-        preview["old_len"],
-        expected_old_text.len(),
-        "compact preview should include old_len"
-    );
-}
-
 #[test]
 fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -153,7 +136,6 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
     assert_eq!(after_b["preview"]["matched_span"]["start"], span_end);
     assert_eq!(after_b["preview"]["matched_span"]["end"], span_end);
 }
-
 #[test]
 fn transform_json_mode_rejects_replace_and_insert_on_same_anchor() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -206,7 +188,6 @@ fn transform_json_mode_rejects_replace_and_insert_on_same_anchor() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_reports_deterministic_error_for_three_operation_conflicts() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -310,7 +291,6 @@ fn transform_json_mode_reports_deterministic_error_for_three_operation_conflicts
         }
     }
 }
-
 #[test]
 fn transform_json_mode_insert_after_supports_crlf_source_files() {
     let mut temp_file = Builder::new()
@@ -361,7 +341,6 @@ fn transform_json_mode_insert_after_supports_crlf_source_files() {
     assert_eq!(preview["matched_span"]["start"], span_end);
     assert_eq!(preview["matched_span"]["end"], span_end);
 }
-
 #[test]
 fn transform_json_mode_insert_before_supports_utf8_bom_prefixed_source() {
     let mut temp_file = Builder::new()
@@ -414,7 +393,6 @@ fn transform_json_mode_insert_before_supports_utf8_bom_prefixed_source() {
         3
     );
 }
-
 #[test]
 fn transform_json_mode_insert_returns_parse_failure_for_nul_python_source() {
     let mut temp_file = Builder::new()
@@ -455,7 +433,6 @@ fn transform_json_mode_insert_returns_parse_failure_for_nul_python_source() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn transform_json_mode_returns_ambiguous_target_when_span_hint_misses_candidates() {
     let fixture = fixture_path("ambiguous.py");
@@ -492,7 +469,6 @@ fn transform_json_mode_returns_ambiguous_target_when_span_hint_misses_candidates
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "ambiguous_target");
 }
-
 #[test]
 fn transform_json_mode_uses_span_hint_to_disambiguate_targets() {
     let fixture = fixture_path("ambiguous.py");
@@ -562,7 +538,6 @@ fn transform_json_mode_uses_span_hint_to_disambiguate_targets() {
         first["span"]["start"]
     );
 }
-
 #[test]
 fn transform_json_mode_detects_stale_file_after_selection() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -608,7 +583,6 @@ fn transform_json_mode_detects_stale_file_after_selection() {
         "stale-detection failure must not mutate file contents"
     );
 }
-
 #[test]
 fn transform_json_mode_accepts_empty_operation_list_as_noop_changeset() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -632,7 +606,6 @@ fn transform_json_mode_accepts_empty_operation_list_as_noop_changeset() {
         Some(0)
     );
 }
-
 #[test]
 fn transform_json_mode_empty_operations_unsupported_extension_is_noop_success() {
     let mut temporary_file = Builder::new()
@@ -666,7 +639,6 @@ fn transform_json_mode_empty_operations_unsupported_extension_is_noop_success() 
         0
     );
 }
-
 #[test]
 fn transform_json_mode_empty_operations_missing_file_returns_io_error() {
     let missing_path = std::env::temp_dir().join(format!(
@@ -692,7 +664,6 @@ fn transform_json_mode_empty_operations_missing_file_returns_io_error() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn transform_json_mode_operation_against_empty_json_returns_target_missing() {
     let mut temporary_file = Builder::new()
@@ -730,7 +701,6 @@ fn transform_json_mode_operation_against_empty_json_returns_target_missing() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "target_missing");
 }
-
 #[test]
 fn transform_flags_mode_extensionless_file_uses_fallback_and_reports_target_missing() {
     let mut temporary_file = Builder::new()
@@ -758,7 +728,6 @@ fn transform_flags_mode_extensionless_file_uses_fallback_and_reports_target_miss
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "target_missing");
 }
-
 #[test]
 fn transform_fallback_duplicate_identity_reports_ambiguous_target() {
     let mut temporary_file = Builder::new()
@@ -821,7 +790,6 @@ fn transform_fallback_duplicate_identity_reports_ambiguous_target() {
         serde_json::from_slice(&transform_output.stdout).expect("stdout should be valid JSON");
     assert_eq!(transform_response["error"]["type"], "ambiguous_target");
 }
-
 #[test]
 fn transform_flags_mode_hidden_dotfile_without_basename_uses_fallback_and_reports_target_missing() {
     let directory = tempdir().expect("tempdir should be created");
@@ -849,7 +817,6 @@ fn transform_flags_mode_hidden_dotfile_without_basename_uses_fallback_and_report
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "target_missing");
 }
-
 #[test]
 fn transform_flags_mode_returns_io_error_for_directory_input() {
     let directory = tempdir().expect("tempdir should be created");
@@ -872,7 +839,6 @@ fn transform_flags_mode_returns_io_error_for_directory_input() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn transform_json_mode_treats_env_token_file_path_as_literal() {
     let request = json!({
@@ -891,7 +857,6 @@ fn transform_json_mode_treats_env_token_file_path_as_literal() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[test]
 fn transform_json_mode_empty_operations_hidden_dotfile_without_basename_is_noop_success() {
     let directory = tempdir().expect("tempdir should be created");
@@ -924,7 +889,6 @@ fn transform_json_mode_empty_operations_hidden_dotfile_without_basename_is_noop_
         0
     );
 }
-
 #[test]
 fn transform_json_mode_returns_io_error_for_directory_input() {
     let directory = tempdir().expect("tempdir should be created");
@@ -944,7 +908,6 @@ fn transform_json_mode_returns_io_error_for_directory_input() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "io_error");
 }
-
 #[cfg(unix)]
 #[test]
 fn transform_non_utf8_path_argument_returns_io_error_without_panicking() {
