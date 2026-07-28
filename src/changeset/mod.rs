@@ -927,7 +927,8 @@ mod tests {
     fn change_op_rejects_legacy_empty_text_move_preview_inside_canonical_model() {
         let error = ChangeOp::from_parts(
             TransformTarget::File {
-                expected_file_hash: "0123456789abcdef".to_string(),
+                expected_file_hash: ContentHash::parse("0123456789abcdef")
+                    .expect("test hash should be canonical"),
             },
             OpKind::Move {
                 to: PathBuf::from("renamed.py"),
