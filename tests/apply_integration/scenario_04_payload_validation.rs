@@ -801,7 +801,7 @@ fn apply_json_mode_rejects_unknown_target_field() {
     let handle = select_named_handle(&file_path, "process_*");
     let span = &handle["span"];
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_hash = identedit::changeset::hash_text(old_text);
+    let expected_hash = crate::common::hash_text(old_text);
     let request = json!({
         "command": "apply",
         "changeset": {

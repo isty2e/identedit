@@ -67,7 +67,7 @@ fn patch_json_node_target_replace_applies_change() {
                 "start": handle["span"]["start"],
                 "end": handle["span"]["end"]
             },
-            "expected_old_hash": identedit::changeset::hash_text(
+            "expected_old_hash": crate::common::hash_text(
                 handle["text"].as_str().expect("text should be string")
             )
         },

@@ -4,9 +4,10 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use crate::changeset::{FileChange, hash_bytes};
+use crate::changeset::FileChange;
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
+use crate::hash::hash_bytes;
 use crate::provider::ProviderRegistry;
 use crate::transform::build::resolve_changeset_targets_in_handles;
 use crate::transform::conflict::validate_change_conflicts;

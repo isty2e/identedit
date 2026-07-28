@@ -1,9 +1,10 @@
 use std::path::Path;
 
-use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget, hash_text};
+use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
+use crate::hash::hash_text;
 
 use super::conflict::{reject_move_operation, validate_change_conflicts};
 use super::parse::{parse_handles_for_file_with_context, parse_handles_for_source_with_context};

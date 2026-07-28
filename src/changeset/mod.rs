@@ -6,8 +6,6 @@ use crate::handle::Span;
 
 mod wire;
 
-pub use crate::hash::{HASH_HEX_LEN, hash_bytes, hash_text};
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TransformTarget {
@@ -169,7 +167,8 @@ impl ChangePreview {
         })
     }
 
-    pub fn move_operation(move_preview: Option<MovePreview>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn move_operation(move_preview: Option<MovePreview>) -> Self {
         Self::Move(MoveChangePreview { move_preview })
     }
 
@@ -186,13 +185,6 @@ impl ChangePreview {
             Self::Move(_) => None,
         }
     }
-
-    pub fn as_move(&self) -> Option<&MoveChangePreview> {
-        match self {
-            Self::Text(_) => None,
-            Self::Move(preview) => Some(preview),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -201,9 +193,10 @@ mod tests {
 
     use super::{
         ChangeOp, ChangePreview, MovePreview, MultiFileChangeset, OpKind, TextChangePreview,
-        TransactionMode, TransformTarget, hash_text,
+        TransactionMode, TransformTarget,
     };
     use crate::handle::Span;
+    use crate::hash::{HASH_HEX_LEN, hash_text};
 
     #[test]
     fn multi_file_changeset_defaults_transaction_mode_to_all_or_nothing() {
@@ -246,7 +239,7 @@ mod tests {
     #[test]
     fn hash_text_uses_fixed_hex_prefix_length() {
         let hash = hash_text("def process_data(value):\n    return value + 1\n");
-        assert_eq!(hash.len(), super::HASH_HEX_LEN);
+        assert_eq!(hash.len(), HASH_HEX_LEN);
         assert!(hash.chars().all(|character| character.is_ascii_hexdigit()));
     }
 

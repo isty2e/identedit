@@ -7,7 +7,7 @@ fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
     );
     assert_eq!(
         preview["old_hash"],
-        identedit::changeset::hash_text(expected_old_text),
+        crate::common::hash_text(expected_old_text),
         "compact preview should include old_hash"
     );
     assert_eq!(
@@ -259,7 +259,7 @@ fn transform_json_mode_preserves_nul_in_replacement_preview() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {

@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 
-use crate::changeset::hash_bytes;
 use crate::error::IdenteditError;
+use crate::hash::hash_bytes;
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 

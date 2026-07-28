@@ -11,7 +11,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
         .expect("python fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let handle = select_first_handle(&file_path, "function_definition", Some("only"));
     let span_start = handle["span"]["start"].as_u64().expect("span start");
     assert_eq!(
@@ -41,7 +41,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
                         "start": handle["span"]["start"],
                         "end": handle["span"]["end"]
                     },
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -81,7 +81,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary() 
         .expect("python fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let file_end = source.len() as u64;
     let handle = select_first_handle(&file_path, "function_definition", Some("tail"));
     let span_end = handle["span"]["end"].as_u64().expect("span end");
@@ -112,7 +112,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary() 
                         "start": handle["span"]["start"],
                         "end": handle["span"]["end"]
                     },
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -152,7 +152,7 @@ fn transform_json_mode_rejects_file_start_insert_and_replace_same_boundary() {
         .expect("python fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let handle = select_first_handle(&file_path, "function_definition", Some("rewrite_me"));
     let span_start = handle["span"]["start"].as_u64().expect("span start");
     assert_eq!(
@@ -182,7 +182,7 @@ fn transform_json_mode_rejects_file_start_insert_and_replace_same_boundary() {
                         "start": handle["span"]["start"],
                         "end": handle["span"]["end"]
                     },
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -222,7 +222,7 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_bom_only_file(
         .expect("bom-only fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
 
     let request = json!({
         "command": "edit",
@@ -279,7 +279,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
         .expect("bom fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let handle = select_first_handle(&file_path, "function_definition", Some("bom_start"));
     let span_start = handle["span"]["start"].as_u64().expect("span start");
     assert_eq!(
@@ -309,7 +309,7 @@ fn transform_json_mode_rejects_file_start_insert_and_insert_before_same_boundary
                         "start": handle["span"]["start"],
                         "end": handle["span"]["end"]
                     },
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -349,7 +349,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary_on
         .expect("bom fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let file_end = source.len() as u64;
     let handle = select_first_handle(&file_path, "function_definition", Some("bom_end"));
     let span_end = handle["span"]["end"].as_u64().expect("span end");
@@ -380,7 +380,7 @@ fn transform_json_mode_rejects_file_end_insert_and_insert_after_same_boundary_on
                         "start": handle["span"]["start"],
                         "end": handle["span"]["end"]
                     },
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         handle["text"].as_str().expect("text should be string")
                     )
                 },
@@ -420,12 +420,12 @@ fn transform_json_mode_boundary_conflict_message_is_order_independent() {
         .expect("python fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let source = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&source);
+    let expected_file_hash = crate::common::hash_text(&source);
     let handle = select_first_handle(&file_path, "function_definition", Some("stable"));
     let span_start = handle["span"]["start"].as_u64().expect("span start");
     let span_end = handle["span"]["end"].as_u64().expect("span end");
     let expected_old_hash =
-        identedit::changeset::hash_text(handle["text"].as_str().expect("text should be string"));
+        crate::common::hash_text(handle["text"].as_str().expect("text should be string"));
 
     let file_start_insert = json!({
         "target": {
@@ -539,7 +539,7 @@ fn transform_json_mode_builds_file_start_insert_preview_on_bom_only_file() {
         .expect("bom-only fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let request = json!({
         "command": "edit",
@@ -591,7 +591,7 @@ fn transform_json_mode_builds_file_end_insert_preview_on_bom_only_file() {
         .expect("bom-only fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let request = json!({
         "command": "edit",
@@ -650,7 +650,7 @@ fn transform_json_mode_allows_insert_before_and_after_on_same_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -665,7 +665,7 @@ fn transform_json_mode_allows_insert_before_and_after_on_same_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {

@@ -7,7 +7,7 @@ fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
     );
     assert_eq!(
         preview["old_hash"],
-        identedit::changeset::hash_text(expected_old_text),
+        crate::common::hash_text(expected_old_text),
         "compact preview should include old_hash"
     );
     assert_eq!(
@@ -37,7 +37,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -52,7 +52,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -85,7 +85,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -100,7 +100,7 @@ fn transform_json_mode_insert_preview_order_stability_for_json_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -170,7 +170,7 @@ fn transform_json_mode_rejects_replace_and_insert_on_same_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -185,7 +185,7 @@ fn transform_json_mode_rejects_replace_and_insert_on_same_anchor() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -212,12 +212,12 @@ fn transform_json_mode_reports_deterministic_error_for_three_operation_conflicts
     let file_path = copy_fixture_to_temp_python("example.py");
     let process_handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let helper_handle = select_first_handle(&file_path, "function_definition", Some("helper"));
-    let process_hash = identedit::changeset::hash_text(
+    let process_hash = crate::common::hash_text(
         process_handle["text"]
             .as_str()
             .expect("process handle text should be string"),
     );
-    let helper_hash = identedit::changeset::hash_text(
+    let helper_hash = crate::common::hash_text(
         helper_handle["text"]
             .as_str()
             .expect("helper handle text should be string"),
@@ -336,7 +336,7 @@ fn transform_json_mode_insert_after_supports_crlf_source_files() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -385,7 +385,7 @@ fn transform_json_mode_insert_before_supports_utf8_bom_prefixed_source() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -471,7 +471,7 @@ fn transform_json_mode_returns_ambiguous_target_when_span_hint_misses_candidates
                     "start": 9999,
                     "end": 10001
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -533,7 +533,7 @@ fn transform_json_mode_uses_span_hint_to_disambiguate_targets() {
                     "start": first["span"]["start"],
                     "end": first["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     first["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -581,7 +581,7 @@ fn transform_json_mode_detects_stale_file_after_selection() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {

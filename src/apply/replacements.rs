@@ -1,10 +1,9 @@
 use std::path::Path;
 
-use crate::changeset::{
-    ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget, hash_text,
-};
+use crate::changeset::{ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::Span;
+use crate::hash::hash_text;
 use crate::transform::MatchedChange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

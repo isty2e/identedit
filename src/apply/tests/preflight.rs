@@ -1,7 +1,8 @@
 use tempfile::tempdir;
 
-use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget, hash_bytes};
+use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
+use crate::hash::hash_bytes;
 use crate::provider::ProviderRegistry;
 use crate::transform::build::build_replace_changeset;
 use crate::transform::parse::parse_handles_for_file;

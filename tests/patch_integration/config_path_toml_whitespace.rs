@@ -379,7 +379,7 @@ fn patch_json_config_path_set_create_missing_toml_bom_only_file_preserves_hash_p
         "target": {
             "type": "config_path",
             "path": "enabled",
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",
@@ -1191,7 +1191,7 @@ fn patch_json_config_path_set_create_missing_bom_whitespace_toml_with_exact_hash
         "target": {
             "type": "config_path",
             "path": "server.port",
-            "expected_file_hash": identedit::hash::hash_text(source)
+            "expected_file_hash": crate::common::hash_text(source)
         },
         "op": {
             "type": "set",

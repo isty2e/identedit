@@ -7,7 +7,7 @@ fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
     );
     assert_eq!(
         preview["old_hash"],
-        identedit::changeset::hash_text(expected_old_text),
+        crate::common::hash_text(expected_old_text),
         "compact preview should include old_hash"
     );
     assert_eq!(
@@ -22,10 +22,7 @@ fn line_ref(source: &str, line: usize) -> String {
         .lines()
         .nth(line - 1)
         .expect("line should exist for anchor");
-    format!(
-        "{line}:{}",
-        identedit::hashline::compute_line_hash(line_text)
-    )
+    format!("{line}:{}", crate::common::compute_line_hash(line_text))
 }
 
 fn select_handle_by_name(file_path: &Path, name: &str) -> Value {
@@ -71,7 +68,7 @@ fn transform_json_mode_supports_multiple_operations() {
                     "start": process_handle["span"]["start"].as_u64().expect("span start"),
                     "end": process_handle["span"]["end"].as_u64().expect("span end")
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     process_handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -86,7 +83,7 @@ fn transform_json_mode_supports_multiple_operations() {
                     "start": helper_handle["span"]["start"].as_u64().expect("span start"),
                     "end": helper_handle["span"]["end"].as_u64().expect("span end")
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     helper_handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -132,7 +129,7 @@ fn transform_json_mode_supports_handle_ref_target_with_file_level_handle_table()
                 "identity": handle["identity"],
                 "kind": handle["kind"],
                 "span_hint": handle["span"],
-                "expected_old_hash": identedit::changeset::hash_text(old_text)
+                "expected_old_hash": crate::common::hash_text(old_text)
             }
         },
         "operations": [
@@ -164,7 +161,7 @@ fn transform_json_mode_supports_handle_ref_target_with_file_level_handle_table()
     assert_eq!(operation["target"]["kind"], handle["kind"]);
     assert_eq!(
         operation["target"]["expected_old_hash"],
-        identedit::changeset::hash_text(old_text)
+        crate::common::hash_text(old_text)
     );
     let preview = &operation["preview"];
     assert_compact_preview_old_state(preview, old_text);
@@ -189,7 +186,7 @@ fn transform_json_mode_supports_batch_handle_ref_with_file_scoped_namespaces() {
                         "identity": handle_a["identity"],
                         "kind": handle_a["kind"],
                         "span_hint": handle_a["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(old_text_a)
+                        "expected_old_hash": crate::common::hash_text(old_text_a)
                     }
                 },
                 "operations": [
@@ -209,7 +206,7 @@ fn transform_json_mode_supports_batch_handle_ref_with_file_scoped_namespaces() {
                         "identity": handle_b["identity"],
                         "kind": handle_b["kind"],
                         "span_hint": handle_b["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(old_text_b)
+                        "expected_old_hash": crate::common::hash_text(old_text_b)
                     }
                 },
                 "operations": [
@@ -262,7 +259,7 @@ fn transform_json_mode_defaults_to_compact_preview_for_replace() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(old_text),
+                "expected_old_hash": crate::common::hash_text(old_text),
                 "op": {
                     "type": "replace",
                     "new_text": "def process_data(value):\n    return value + 10"
@@ -301,7 +298,7 @@ fn transform_json_mode_verbose_includes_full_preview_old_text() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(old_text),
+                "expected_old_hash": crate::common::hash_text(old_text),
                 "op": {
                     "type": "replace",
                     "new_text": "def process_data(value):\n    return value + 10"
@@ -351,7 +348,7 @@ fn transform_json_mode_builds_insert_before_preview_with_zero_width_span() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -401,7 +398,7 @@ fn transform_json_mode_builds_delete_preview_with_anchor_span() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(old_text),
+                "expected_old_hash": crate::common::hash_text(old_text),
                 "op": {
                     "type": "delete"
                 }
@@ -434,7 +431,7 @@ fn transform_json_mode_delete_and_empty_replace_have_equivalent_previews() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_first_handle(&file_path, "function_definition", Some("process_*"));
     let old_text = handle["text"].as_str().expect("text should be string");
-    let expected_old_hash = identedit::changeset::hash_text(old_text);
+    let expected_old_hash = crate::common::hash_text(old_text);
 
     let delete_request = json!({
         "command": "edit",
@@ -527,7 +524,7 @@ fn transform_json_mode_builds_insert_after_preview_with_zero_width_span() {
                     "start": handle["span"]["start"],
                     "end": handle["span"]["end"]
                 },
-                "expected_old_hash": identedit::changeset::hash_text(
+                "expected_old_hash": crate::common::hash_text(
                     handle["text"].as_str().expect("text should be string")
                 ),
                 "op": {
@@ -562,7 +559,7 @@ fn transform_json_mode_builds_insert_after_preview_with_zero_width_span() {
 fn transform_json_mode_builds_file_end_insert_preview_with_zero_width_span() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
     let insert_text = "\n# appended-at-file-end\n";
 
     let request = json!({
@@ -616,7 +613,7 @@ fn transform_json_mode_builds_file_end_insert_preview_with_zero_width_span() {
 fn transform_json_mode_builds_file_start_insert_preview_with_zero_width_span() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
     let insert_text = "# prepended-at-file-start\n";
 
     let request = json!({
@@ -754,7 +751,7 @@ fn transform_json_mode_rejects_node_target_with_expected_file_hash_field() {
                         "start": handle["span"]["start"],
                         "end": handle["span"]["end"]
                     },
-                    "expected_old_hash": identedit::changeset::hash_text(old_text),
+                    "expected_old_hash": crate::common::hash_text(old_text),
                     "expected_file_hash": "not-allowed"
                 },
                 "op": {
@@ -786,7 +783,7 @@ fn transform_json_mode_rejects_node_target_with_expected_file_hash_field() {
 fn transform_json_mode_rejects_mixed_target_and_legacy_fields_in_operation() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let request = json!({
         "command": "edit",
@@ -836,7 +833,7 @@ fn transform_json_mode_file_start_insert_preview_starts_after_utf8_bom() {
         .expect("bom python fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
     let insert_text = "# file-start-bom\n";
 
     let request = json!({
@@ -882,7 +879,7 @@ fn transform_json_mode_file_start_insert_preview_starts_after_utf8_bom() {
 fn transform_json_mode_rejects_file_end_replace_combo() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let request = json!({
         "command": "edit",
@@ -962,7 +959,7 @@ fn transform_json_mode_rejects_file_start_insert_with_hardlink_alias_stale_hash_
     fs::write(&canonical_path, &source).expect("canonical fixture write should succeed");
     fs::hard_link(&canonical_path, &alias_path).expect("hardlink alias should be created");
 
-    let expected_file_hash = identedit::changeset::hash_text(
+    let expected_file_hash = crate::common::hash_text(
         &fs::read_to_string(&alias_path).expect("alias should be readable"),
     );
     fs::write(
@@ -1011,7 +1008,7 @@ fn transform_json_mode_rejects_file_end_insert_with_hardlink_alias_stale_hash_af
     fs::write(&canonical_path, &source).expect("canonical fixture write should succeed");
     fs::hard_link(&canonical_path, &alias_path).expect("hardlink alias should be created");
 
-    let expected_file_hash = identedit::changeset::hash_text(
+    let expected_file_hash = crate::common::hash_text(
         &fs::read_to_string(&canonical_path).expect("canonical should be readable"),
     );
     fs::write(&alias_path, format!("{source}\n# alias-mutation\n"))
@@ -1053,7 +1050,7 @@ fn transform_json_mode_rejects_file_start_and_file_end_inserts_on_empty_hardlink
     let alias_path = workspace.path().join("alias.py");
     fs::write(&canonical_path, "").expect("empty canonical fixture write should succeed");
     fs::hard_link(&canonical_path, &alias_path).expect("hardlink alias should be created");
-    let expected_file_hash = identedit::changeset::hash_text("");
+    let expected_file_hash = crate::common::hash_text("");
 
     let request = json!({
         "command": "edit",
@@ -1110,7 +1107,7 @@ fn transform_json_mode_rejects_file_start_insert_with_crlf_normalized_hash_misma
         .write_all(source.as_bytes())
         .expect("crlf fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
-    let normalized_hash = identedit::changeset::hash_text(&source.replace("\r\n", "\n"));
+    let normalized_hash = crate::common::hash_text(&source.replace("\r\n", "\n"));
 
     let request = json!({
         "command": "edit",
@@ -1152,7 +1149,7 @@ fn transform_json_mode_builds_file_end_preview_with_multibyte_byte_length() {
         .expect("multibyte fixture write should succeed");
     let file_path = temp_file.keep().expect("temp file should persist").1;
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let request = json!({
         "command": "edit",
@@ -1206,7 +1203,7 @@ fn transform_json_mode_file_start_preview_starts_after_bom_for_hardlink_alias_pa
     .expect("bom fixture write should succeed");
     fs::hard_link(&canonical_path, &alias_path).expect("hardlink alias should be created");
     let before = fs::read_to_string(&alias_path).expect("alias should be readable");
-    let expected_file_hash = identedit::changeset::hash_text(&before);
+    let expected_file_hash = crate::common::hash_text(&before);
 
     let request = json!({
         "command": "edit",
@@ -1375,7 +1372,7 @@ fn transform_json_mode_mixed_node_line_overlap_error_is_order_independent() {
         "identity": process_handle["identity"],
         "kind": process_handle["kind"],
         "span_hint": process_handle["span"],
-        "expected_old_hash": identedit::changeset::hash_text(
+        "expected_old_hash": crate::common::hash_text(
             process_handle["text"].as_str().expect("text should be string")
         ),
     });
@@ -1445,7 +1442,7 @@ fn transform_json_mode_supports_same_file_move_before_preview() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -1455,7 +1452,7 @@ fn transform_json_mode_supports_same_file_move_before_preview() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             destination_handle["text"]
                                 .as_str()
                                 .expect("destination text should be present")
@@ -1515,7 +1512,7 @@ fn transform_json_mode_rejects_same_file_move_with_overlapping_destination() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -1525,7 +1522,7 @@ fn transform_json_mode_rejects_same_file_move_with_overlapping_destination() {
                         "identity": source_handle["identity"],
                         "kind": source_handle["kind"],
                         "span_hint": source_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             source_handle["text"].as_str().expect("source text should be present")
                         )
                     }
@@ -1564,7 +1561,7 @@ fn transform_json_mode_same_file_move_reports_missing_source_target() {
                 "target": {
                     "identity": "missing-source",
                     "kind": "function_definition",
-                    "expected_old_hash": identedit::changeset::hash_text("def missing():\n    pass")
+                    "expected_old_hash": crate::common::hash_text("def missing():\n    pass")
                 },
                 "op": {
                     "type": "move_before",
@@ -1572,7 +1569,7 @@ fn transform_json_mode_same_file_move_reports_missing_source_target() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             destination_handle["text"]
                                 .as_str()
                                 .expect("destination text should be present")
@@ -1619,7 +1616,7 @@ fn transform_json_mode_same_file_move_reports_missing_destination_target() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(
+                    "expected_old_hash": crate::common::hash_text(
                         source_handle["text"].as_str().expect("source text should be present")
                     )
                 },
@@ -1628,7 +1625,7 @@ fn transform_json_mode_same_file_move_reports_missing_destination_target() {
                     "destination": {
                         "identity": "missing-destination",
                         "kind": "function_definition",
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             "def missing_destination():\n    pass"
                         )
                     }
@@ -1670,14 +1667,14 @@ fn transform_json_mode_same_file_move_reports_ambiguous_destination_target() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(source_text)
+                    "expected_old_hash": crate::common::hash_text(source_text)
                 },
                 "op": {
                     "type": "move_before",
                     "destination": {
                         "identity": source_handle["identity"],
                         "kind": source_handle["kind"],
-                        "expected_old_hash": identedit::changeset::hash_text(source_text)
+                        "expected_old_hash": crate::common::hash_text(source_text)
                     }
                 }
             }
@@ -1740,7 +1737,7 @@ fn transform_json_mode_supports_cross_file_move_to_before_preview() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(source_text)
+                    "expected_old_hash": crate::common::hash_text(source_text)
                 },
                 "op": {
                     "type": "move_to_before",
@@ -1749,7 +1746,7 @@ fn transform_json_mode_supports_cross_file_move_to_before_preview() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             destination_handle["text"].as_str().expect("destination text should be present")
                         )
                     }
@@ -1839,7 +1836,7 @@ fn transform_json_mode_cross_file_move_reports_missing_destination_target() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(source_text)
+                    "expected_old_hash": crate::common::hash_text(source_text)
                 },
                 "op": {
                     "type": "move_to_before",
@@ -1847,7 +1844,7 @@ fn transform_json_mode_cross_file_move_reports_missing_destination_target() {
                     "destination": {
                         "identity": "missing-destination-target",
                         "kind": "function_definition",
-                        "expected_old_hash": identedit::changeset::hash_text("def missing():\n    return 0\n")
+                        "expected_old_hash": crate::common::hash_text("def missing():\n    return 0\n")
                     }
                 }
             }
@@ -1895,7 +1892,7 @@ fn transform_json_mode_cross_file_move_reports_ambiguous_source_target() {
                 "target": {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
-                    "expected_old_hash": identedit::changeset::hash_text(source_text)
+                    "expected_old_hash": crate::common::hash_text(source_text)
                 },
                 "op": {
                     "type": "move_to_before",
@@ -1904,7 +1901,7 @@ fn transform_json_mode_cross_file_move_reports_ambiguous_source_target() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             destination_handle["text"].as_str().expect("destination text should be present")
                         )
                     }
@@ -1941,7 +1938,7 @@ fn transform_json_mode_cross_file_move_rejects_same_file_destination() {
                     "identity": source_handle["identity"],
                     "kind": source_handle["kind"],
                     "span_hint": source_handle["span"],
-                    "expected_old_hash": identedit::changeset::hash_text(source_text)
+                    "expected_old_hash": crate::common::hash_text(source_text)
                 },
                 "op": {
                     "type": "move_to_before",
@@ -1950,7 +1947,7 @@ fn transform_json_mode_cross_file_move_rejects_same_file_destination() {
                         "identity": destination_handle["identity"],
                         "kind": destination_handle["kind"],
                         "span_hint": destination_handle["span"],
-                        "expected_old_hash": identedit::changeset::hash_text(
+                        "expected_old_hash": crate::common::hash_text(
                             destination_handle["text"].as_str().expect("destination text should be present")
                         )
                     }

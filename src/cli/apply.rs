@@ -11,8 +11,9 @@ use crate::apply::{
     ApplyTransaction, apply_multi_file_changeset, apply_multi_file_changeset_with_injection,
     dry_run_multi_file_changeset,
 };
-use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget, hash_text};
+use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget};
 use crate::error::IdenteditError;
+use crate::hash::hash_text;
 use crate::hashline::{
     HashlineCheckError, HashlineCheckResult, HashlineMismatchStatus, check_hashline_refs,
     format_line_ref,

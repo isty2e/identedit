@@ -25,4 +25,4 @@ jobs:
           targets: x86_64-pc-windows-gnu
 
       - name: Test Windows no-replace moves
-        run: cargo test --locked --target x86_64-pc-windows-gnu --lib rename_file_no_replace_
+        run: cargo test --locked --target x86_64-pc-windows-gnu --bin identedit rename_file_no_replace_

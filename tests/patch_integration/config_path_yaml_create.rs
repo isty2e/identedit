@@ -100,7 +100,7 @@ fn patch_json_config_path_set_create_missing_empty_yaml_with_exact_hash_succeeds
         "target": {
             "type": "config_path",
             "path": "server.enabled",
-            "expected_file_hash": identedit::hash::hash_text("")
+            "expected_file_hash": crate::common::hash_text("")
         },
         "op": {
             "type": "set",
@@ -1089,7 +1089,7 @@ fn patch_json_config_path_set_create_missing_yaml_exact_hash_succeeds_on_surgica
         "target": {
             "type": "config_path",
             "path": "service.port",
-            "expected_file_hash": identedit::hash::hash_text(&before)
+            "expected_file_hash": crate::common::hash_text(&before)
         },
         "op": {
             "type": "set",

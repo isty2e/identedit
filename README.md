@@ -40,6 +40,7 @@ identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anc
 ```
 
 Use the canonical CLI entry points: `read`, `edit`, `apply`, `patch`, `merge`, `grammar`.
+These commands, their JSON schemas, exit status, and documented diagnostics are the supported interface. Identedit does not expose a supported Rust library API.
 
 ### Key Properties
 

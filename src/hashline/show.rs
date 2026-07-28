@@ -13,14 +13,6 @@ pub(super) fn show_hashed_lines(source: &str) -> Vec<HashedLine> {
         .collect()
 }
 
-pub(super) fn format_hashed_lines(source: &str) -> String {
-    show_hashed_lines(source)
-        .into_iter()
-        .map(|line| format!("{}:{}|{}", line.line, line.hash, line.content))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 pub(super) fn split_set_line_text(text: &str) -> Vec<String> {
     split_multiline_text(text)
 }

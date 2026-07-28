@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::changeset::{OpKind, hash_text};
+use crate::changeset::OpKind;
+use crate::hash::hash_text;
 
 use super::conflict::{reject_move_operation, validate_change_conflicts};
 use super::resolve::resolve_target_in_handles;

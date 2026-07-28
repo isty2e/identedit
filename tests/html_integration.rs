@@ -6,6 +6,8 @@ use std::process::{Command, Output, Stdio};
 use serde_json::{Value, json};
 use tempfile::Builder;
 
+mod common;
+
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -873,7 +875,7 @@ fn transform_json_span_hint_disambiguates_stress_html_duplicate_identity() {
     );
     assert_eq!(
         preview["old_hash"],
-        identedit::changeset::hash_text(old_text),
+        common::hash_text(old_text),
         "compact preview old_hash should match selected duplicate node text"
     );
     assert_eq!(
