@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::Path;
 
 use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransactionMode};
 use crate::error::IdenteditError;
@@ -14,8 +15,8 @@ use move_ops::{
     validate_move_operation_constraints,
 };
 use preflight::{
-    commit_preflight_batch, preflight_changesets_in_order, prepare_commit_batch,
-    rollback_committed_files,
+    commit_preflight_batch, preflight_changesets_in_order, preflight_resolved_text_update,
+    prepare_commit_batch, rollback_committed_files,
 };
 
 #[cfg(test)]
@@ -164,6 +165,23 @@ pub fn apply_multi_file_changeset(
     changeset: &MultiFileChangeset,
 ) -> Result<ApplyResponse, IdenteditError> {
     apply_multi_file_changeset_with_injection(changeset, None)
+}
+
+pub(crate) fn apply_resolved_text_update(
+    file: &Path,
+    expected_source: &str,
+    updated_text: String,
+    operations_total: usize,
+    dry_run: bool,
+) -> Result<(), IdenteditError> {
+    let plan =
+        preflight_resolved_text_update(file, expected_source, updated_text, operations_total)?;
+    if dry_run {
+        return Ok(());
+    }
+
+    let batch = prepare_commit_batch(vec![plan]);
+    commit_preflight_batch(batch, || Ok(()), || Ok(())).map(|_| ())
 }
 
 pub fn dry_run_multi_file_changeset(

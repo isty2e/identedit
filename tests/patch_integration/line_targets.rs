@@ -308,6 +308,82 @@ fn patch_line_insert_after_line_stdin_dry_run_does_not_modify_file() {
     assert_eq!(after, before);
 }
 
+#[cfg(unix)]
+#[test]
+fn patch_line_rejects_direct_symlink_without_mutating_target() {
+    use std::os::unix::fs::symlink;
+
+    let target_path = create_temp_text_file("alpha\nbeta\n");
+    let link_directory = tempfile::tempdir().expect("symlink tempdir should be created");
+    let link_path = link_directory.path().join("linked.txt");
+    symlink(&target_path, &link_path).expect("symlink should be created");
+    let before = fs::read_to_string(&target_path).expect("target should be readable");
+    let anchor = line_ref(&before, 2);
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        anchor.as_str(),
+        "--set-line",
+        "changed",
+        link_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "line patch should reject a direct symlink"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("symbolic link"))
+    );
+    assert_eq!(
+        fs::read_to_string(&target_path).expect("target should remain readable"),
+        before
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn patch_line_preserves_file_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let mut permissions = fs::metadata(&file_path)
+        .expect("fixture metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o640);
+    fs::set_permissions(&file_path, permissions).expect("permissions should be set");
+    let before = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let anchor = line_ref(&before, 2);
+
+    let output = run_identedit(&[
+        "patch",
+        "--anchor",
+        anchor.as_str(),
+        "--set-line",
+        "changed",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "line patch should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::metadata(&file_path)
+            .expect("patched metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o640
+    );
+}
+
 #[test]
 fn patch_set_line_stdin_utf8_bom_payload_preserves_bytes() {
     let file_path = create_temp_text_file("alpha\nbeta\n");

@@ -47,6 +47,36 @@ pub(super) fn preflight_changesets_in_order(
     Ok(plans)
 }
 
+pub(super) fn preflight_resolved_text_update(
+    file: &Path,
+    expected_source: &str,
+    updated_text: String,
+    operations_total: usize,
+) -> Result<PreflightFilePlan, IdenteditError> {
+    let lock_guard = acquire_apply_lock(file)?;
+    let guard_state = capture_apply_guard_state(file)?;
+    let source_text = fs::read_to_string(file).map_err(|error| IdenteditError::io(file, error))?;
+    if source_text != expected_source {
+        return Err(IdenteditError::PreconditionFailed {
+            expected_hash: hash_bytes(expected_source.as_bytes()),
+            actual_hash: hash_bytes(source_text.as_bytes()),
+        });
+    }
+    let original_permissions = fs::metadata(file)
+        .map_err(|error| IdenteditError::io(file, error))?
+        .permissions();
+
+    Ok(PreflightFilePlan {
+        file: file.to_path_buf(),
+        operations_total,
+        original_text: source_text,
+        original_permissions,
+        updated_text,
+        guard_state,
+        _lock_guard: lock_guard,
+    })
+}
+
 #[derive(Debug)]
 struct OrderedChangeset<'a> {
     canonical_path: PathBuf,
