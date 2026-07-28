@@ -1196,7 +1196,7 @@ fn transform_json_stale_hash_on_minified_html_returns_precondition_failed() {
                 "target": {
                     "identity": handle["identity"],
                     "kind": handle["kind"],
-                    "expected_old_hash": "deadbeef",
+                    "expected_old_hash": "deadbeefdeadbeef",
                     "span_hint": {"start": span["start"], "end": span["end"]}
                 },
                 "op": {"type": "replace", "new_text": "<main id=\"mini-main\" class=\"stale\">"}

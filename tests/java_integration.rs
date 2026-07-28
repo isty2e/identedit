@@ -655,7 +655,7 @@ fn apply_reports_parse_failure_for_nul_in_java_source() {
                     "type": "node",
                     "identity": "deadbeef",
                     "kind": "class_declaration",
-                    "expected_old_hash": "00",
+                    "expected_old_hash": "0000000000000000",
                     "span_hint": {"start": 0, "end": 1}
                 },
                 "op": {"type": "replace", "new_text": "class Broken {}"},

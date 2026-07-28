@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
-use crate::hash::hash_bytes;
+use crate::hash::{ContentHash, hash_bytes};
 use crate::provider::ProviderRegistry;
 use crate::selector::Selector;
 
@@ -39,7 +39,7 @@ pub struct ReadSelectHandle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub identity: String,
-    pub expected_old_hash: String,
+    pub expected_old_hash: ContentHash,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 }
@@ -53,7 +53,7 @@ pub struct ReadSelectSummary {
 #[derive(Debug, Serialize)]
 pub struct FilePrecondition {
     pub file: PathBuf,
-    pub expected_file_hash: String,
+    pub expected_file_hash: ContentHash,
 }
 
 pub fn run_read_select_from_stdin(verbose: bool) -> Result<ReadSelectResponse, IdenteditError> {

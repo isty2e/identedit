@@ -30,7 +30,7 @@ fn matched_change(
     MatchedChange {
         index,
         op,
-        expected_hash: "hash".to_string(),
+        expected_hash: hash_text(""),
         old_text: String::new(),
         matched_span,
         move_insert_at: None,
@@ -51,7 +51,7 @@ fn resolve_target_returns_target_missing_when_span_hint_hits_wrong_kind_only() {
         "missing-identity".to_string(),
         "function_definition".to_string(),
         Some(Span { start: 4, end: 28 }),
-        "irrelevant".to_string(),
+        hash_text("irrelevant"),
     );
 
     let error = resolve_target_in_handles(Path::new("fixture.py"), &handles, &target)
@@ -75,11 +75,12 @@ fn resolve_target_returns_precondition_failed_for_unique_stale_span_hint_candida
         "def process_data(): pass",
     );
     let handles = vec![stale.clone()];
+    let stale_hash = hash_text("stale");
     let target = TransformTarget::node(
         "stale-identity".to_string(),
         "function_definition".to_string(),
         Some(stale.span),
-        "stale-hash".to_string(),
+        stale_hash.clone(),
     );
 
     let error = resolve_target_in_handles(Path::new("fixture.py"), &handles, &target)
@@ -90,8 +91,8 @@ fn resolve_target_returns_precondition_failed_for_unique_stale_span_hint_candida
             expected_hash,
             actual_hash,
         } => {
-            assert_eq!(expected_hash, "stale-hash");
-            assert_eq!(actual_hash, hash_text(&stale.text));
+            assert_eq!(expected_hash, stale_hash.to_string());
+            assert_eq!(actual_hash, hash_text(&stale.text).to_string());
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -117,7 +118,7 @@ fn resolve_target_returns_ambiguous_when_stale_span_hint_matches_multiple_candid
         "missing-identity".to_string(),
         "function_definition".to_string(),
         Some(Span { start: 0, end: 20 }),
-        "irrelevant".to_string(),
+        hash_text("irrelevant"),
     );
 
     let error = resolve_target_in_handles(Path::new("fixture.py"), &handles, &target)

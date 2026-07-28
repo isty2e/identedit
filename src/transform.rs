@@ -1,5 +1,6 @@
 use crate::changeset::OpKind;
 use crate::handle::Span;
+use crate::hash::ContentHash;
 
 pub(crate) mod build;
 pub(crate) mod conflict;
@@ -10,7 +11,7 @@ pub(crate) mod resolve;
 pub struct MatchedChange {
     pub index: usize,
     pub op: OpKind,
-    pub expected_hash: String,
+    pub expected_hash: ContentHash,
     pub old_text: String,
     pub matched_span: Span,
     pub move_insert_at: Option<usize>,

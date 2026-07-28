@@ -1312,7 +1312,7 @@ fn apply_json_mode_rejects_unknown_file_level_target_type() {
                         {
                             "target": {
                                 "type": "file_middle",
-                                "expected_file_hash": "irrelevant"
+                                "expected_file_hash": "ffffffffffffffff"
                             },
                             "op": {"type": "insert", "new_text": "# invalid target type\n"},
                             "preview": {
@@ -1538,7 +1538,7 @@ fn apply_rejects_file_end_insert_when_file_hash_is_stale() {
             {
                 "target": {
                     "type": "file_end",
-                    "expected_file_hash": "stale-file-hash"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {"type": "insert", "new_text": insert_text},
                 "preview": {

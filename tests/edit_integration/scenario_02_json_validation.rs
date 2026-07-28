@@ -387,7 +387,7 @@ fn transform_json_mode_rejects_missing_operation_identity_field() {
         "operations": [
             {
                 "kind": "function_definition",
-                "expected_old_hash": "00",
+                "expected_old_hash": "0000000000000000",
                 "op": {
                     "type": "replace",
                     "new_text": "def process_data(value):\n    return value + 2"
@@ -422,7 +422,7 @@ fn transform_json_mode_rejects_unsupported_operation_type() {
             {
                 "identity": "id-1",
                 "kind": "function_definition",
-                "expected_old_hash": "00",
+                "expected_old_hash": "0000000000000000",
                 "op": {
                     "type": "rename"
                 }
@@ -757,7 +757,7 @@ fn transform_json_mode_rejects_missing_operation_kind_field() {
         "operations": [
             {
                 "identity": "id-1",
-                "expected_old_hash": "00",
+                "expected_old_hash": "0000000000000000",
                 "op": {
                     "type": "delete"
                 }
@@ -791,7 +791,7 @@ fn transform_json_mode_rejects_operation_op_missing_type_tag() {
             {
                 "identity": "id-1",
                 "kind": "function_definition",
-                "expected_old_hash": "00",
+                "expected_old_hash": "0000000000000000",
                 "op": {}
             }
         ]
@@ -823,7 +823,7 @@ fn transform_json_mode_rejects_replace_op_missing_new_text() {
             {
                 "identity": "id-1",
                 "kind": "function_definition",
-                "expected_old_hash": "00",
+                "expected_old_hash": "0000000000000000",
                 "op": {
                     "type": "replace"
                 }
@@ -863,7 +863,7 @@ fn transform_json_mode_returns_precondition_failed_when_hash_mismatches() {
                     "start": handle["span"]["start"].as_u64().expect("span start"),
                     "end": handle["span"]["end"].as_u64().expect("span end")
                 },
-                "expected_old_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "expected_old_hash": "0000000000000000",
                 "op": {
                     "type": "replace",
                     "new_text": "def process_data(value):\n    return value"

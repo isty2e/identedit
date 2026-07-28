@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use super::{
     HASHLINE_DISPLAY_MAX_HEX_LEN, HASHLINE_DISPLAY_MIN_HEX_LEN, HashlineApplyError,
-    HashlineApplyMode, HashlineCheckResult, HashlineEdit, HashlineMismatchStatus, ResolvedEdit,
-    ResolvedOperation, check_hashline_edits, format_line_ref,
+    HashlineApplyMode, HashlineCheckResult, HashlineEdit, HashlineMismatchStatus, LineAnchor,
+    ResolvedEdit, ResolvedOperation, check_hashline_edits,
 };
 
 pub(super) fn prepare_edits_for_mode(
@@ -48,13 +48,14 @@ fn remap_anchors_from_check(
     edits: &[HashlineEdit],
     check: &HashlineCheckResult,
 ) -> Vec<HashlineEdit> {
-    let mut remap_by_anchor = BTreeMap::<(usize, String), String>::new();
+    let mut remap_by_anchor = BTreeMap::<(usize, LineAnchor), LineAnchor>::new();
     for mismatch in &check.mismatches {
         if mismatch.status == HashlineMismatchStatus::Remappable && mismatch.remaps.len() == 1 {
             let target = &mismatch.remaps[0];
             remap_by_anchor.insert(
                 (mismatch.edit_index, mismatch.anchor.clone()),
-                format_line_ref(target.line, &target.hash),
+                LineAnchor::try_new(target.line, target.hash.clone())
+                    .expect("hashline remap candidates always use positive source line numbers"),
             );
         }
     }

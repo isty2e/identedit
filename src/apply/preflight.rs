@@ -68,8 +68,8 @@ pub(super) fn preflight_resolved_text_update(
     let source_text = fs::read_to_string(file).map_err(|error| IdenteditError::io(file, error))?;
     if source_text != expected_source {
         return Err(IdenteditError::PreconditionFailed {
-            expected_hash: hash_bytes(expected_source.as_bytes()),
-            actual_hash: hash_bytes(source_text.as_bytes()),
+            expected_hash: hash_bytes(expected_source.as_bytes()).to_string(),
+            actual_hash: hash_bytes(source_text.as_bytes()).to_string(),
         });
     }
     let original_permissions = fs::metadata(file)

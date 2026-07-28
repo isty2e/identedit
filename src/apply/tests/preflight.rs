@@ -2,7 +2,7 @@ use tempfile::tempdir;
 
 use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
-use crate::hash::hash_bytes;
+use crate::hash::{ContentHash, hash_bytes};
 use crate::provider::ProviderRegistry;
 use crate::transform::build::build_replace_changeset;
 use crate::transform::parse::parse_handles_for_file;
@@ -41,7 +41,7 @@ fn build_move_changeset(source: &std::path::Path, destination: &std::path::Path)
 fn build_move_changeset_with_hash(
     source: &std::path::Path,
     destination: &std::path::Path,
-    expected_file_hash: String,
+    expected_file_hash: ContentHash,
 ) -> FileChange {
     FileChange {
         file: source.to_path_buf(),
@@ -68,8 +68,11 @@ fn move_preflight_rejects_stale_expected_file_hash() {
     let destination = directory.path().join("destination.py");
     std::fs::write(&source, "def moved():\n    return 1\n")
         .expect("source fixture write should succeed");
-    let changeset =
-        build_move_changeset_with_hash(&source, &destination, "0000000000000000".to_string());
+    let changeset = build_move_changeset_with_hash(
+        &source,
+        &destination,
+        ContentHash::parse("0000000000000000").expect("test hash should be valid"),
+    );
 
     let execution_order = validate_move_operation_constraints(&[changeset])
         .expect("stale hash should not invalidate move graph shape");
@@ -197,7 +200,7 @@ fn preflight_fails_fast_and_preserves_all_file_contents() {
             "missing-preflight-identity".to_string(),
             "function_definition".to_string(),
             stale_span_hint,
-            "stale-hash".to_string(),
+            ContentHash::parse("0000000000000000").expect("test hash should be valid"),
         ))
         .expect("node replacement target should remain canonical");
 
@@ -1918,7 +1921,7 @@ fn mixed_batch_with_missing_move_source_preserves_edit_file() {
     let move_changeset = build_move_changeset_with_hash(
         &missing_move_source,
         &move_destination,
-        "0000000000000000".to_string(),
+        ContentHash::parse("0000000000000000").expect("test hash should be valid"),
     );
 
     let error =
@@ -1949,7 +1952,7 @@ fn missing_move_source_failure_skips_before_write_hook() {
     let move_changeset = build_move_changeset_with_hash(
         &missing_move_source,
         &move_destination,
-        "0000000000000000".to_string(),
+        ContentHash::parse("0000000000000000").expect("test hash should be valid"),
     );
 
     let mut before_calls = 0usize;

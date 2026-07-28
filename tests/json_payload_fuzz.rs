@@ -355,13 +355,13 @@ fn apply_json_duplicate_nested_keys_produce_parse_errors() {
 
     let payloads = [
         format!(
-            "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"identity\":\"b\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
+            "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"identity\":\"b\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
         ),
         format!(
-            "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
+            "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
         ),
         format!(
-            "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"start\":1,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
+            "{{\"command\":\"apply\",\"changeset\":{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"start\":1,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}}}"
         ),
     ];
 
@@ -435,13 +435,13 @@ fn edit_json_duplicate_nested_keys_produce_parse_errors() {
 
     let payloads = [
         format!(
-            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"identity\":\"id2\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
+            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"identity\":\"id2\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
         ),
         format!(
-            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}}}}]}}"
+            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}}}}]}}"
         ),
         format!(
-            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"span_hint\":{{\"start\":0,\"start\":1,\"end\":2}},\"expected_old_hash\":\"00\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
+            "{{\"command\":\"edit\",\"file\":\"{file_literal}\",\"operations\":[{{\"identity\":\"id1\",\"kind\":\"function_definition\",\"span_hint\":{{\"start\":0,\"start\":1,\"end\":2}},\"expected_old_hash\":\"0000000000000000\",\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}}}}]}}"
         ),
     ];
 

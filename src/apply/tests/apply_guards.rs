@@ -503,8 +503,14 @@ fn apply_guard_uses_hash_when_mtime_and_size_collide() {
             expected_hash,
             actual_hash,
         } => {
-            assert_eq!(expected_hash, crate::hash::hash_text(original_text));
-            assert_eq!(actual_hash, crate::hash::hash_text(replacement_text));
+            assert_eq!(
+                expected_hash,
+                crate::hash::hash_text(original_text).to_string()
+            );
+            assert_eq!(
+                actual_hash,
+                crate::hash::hash_text(replacement_text).to_string()
+            );
         }
         other => panic!("unexpected guard result: {other}"),
     }

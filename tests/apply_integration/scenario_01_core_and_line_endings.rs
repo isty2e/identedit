@@ -438,7 +438,7 @@ fn apply_returns_precondition_failed_when_expected_hash_is_stale() {
                         "start": span["start"],
                         "end": span["end"]
                     },
-                    "expected_old_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                    "expected_old_hash": "ffffffffffffffff"
                 },
                 "op": {
                     "type": "replace",
@@ -1459,7 +1459,7 @@ fn apply_rejects_node_target_with_expected_file_hash_field() {
                         "end": span["end"]
                     },
                     "expected_old_hash": expected_hash,
-                    "expected_file_hash": "not-allowed"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {"type": "replace", "new_text": old_text},
                 "preview": {
@@ -1502,7 +1502,7 @@ fn apply_rejects_file_start_insert_when_file_hash_is_stale() {
             {
                 "target": {
                     "type": "file_start",
-                    "expected_file_hash": "stale-file-hash"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {"type": "insert", "new_text": insert_text},
                 "preview": {

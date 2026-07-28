@@ -197,6 +197,7 @@ mod tests {
     use crate::changeset::{ChangeOp, ChangePreview, OpKind, TransformTarget};
     use crate::error::IdenteditError;
     use crate::handle::Span;
+    use crate::hash::hash_text;
     use std::path::Path;
 
     fn op(kind: OpKind, span: Span) -> ChangeOp {
@@ -205,7 +206,7 @@ mod tests {
                 "id".to_string(),
                 "function_definition".to_string(),
                 Some(span),
-                "hash".to_string(),
+                hash_text("merge fixture"),
             ),
             kind,
             ChangePreview::text(Some(String::new()), None, None, String::new(), span),
@@ -216,7 +217,7 @@ mod tests {
     fn file_move() -> ChangeOp {
         ChangeOp::from_parts(
             TransformTarget::File {
-                expected_file_hash: "hash".to_string(),
+                expected_file_hash: hash_text("merge fixture"),
             },
             OpKind::Move {
                 to: "moved.py".into(),

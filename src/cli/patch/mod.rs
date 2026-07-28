@@ -374,7 +374,7 @@ mod tests {
 
         match line_request.edit {
             HashlineEdit::SetLine { set_line } => {
-                assert_eq!(set_line.anchor, "12:0123456789ab");
+                assert_eq!(set_line.anchor.to_string(), "12:0123456789ab");
                 assert_eq!(set_line.new_text, "replacement");
             }
             other => panic!("expected set-line edit, got {other:?}"),

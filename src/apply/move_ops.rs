@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::changeset::{ChangeOp, FileChange};
 use crate::error::IdenteditError;
+use crate::hash::ContentHash;
 
 use super::io::{
     ApplyFileLock, ApplyGuardState, acquire_apply_lock, capture_apply_guard_state,
@@ -18,14 +19,14 @@ use super::{ApplyFileResult, ApplyFileStatus};
 struct MoveEdge {
     source: PathBuf,
     destination: PathBuf,
-    expected_file_hash: String,
+    expected_file_hash: ContentHash,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct NormalizedMoveEdge {
     pub(super) source: PathBuf,
     pub(super) destination: PathBuf,
-    pub(super) expected_file_hash: String,
+    pub(super) expected_file_hash: ContentHash,
 }
 
 pub(super) fn validate_move_operation_constraints(
@@ -97,7 +98,7 @@ fn validate_file_move_operation_constraints(
     Ok(Some(MoveEdge {
         source: changeset.file.clone(),
         destination: move_operation.destination.to_path_buf(),
-        expected_file_hash: move_operation.expected_file_hash.to_string(),
+        expected_file_hash: move_operation.expected_file_hash.clone(),
     }))
 }
 
@@ -397,8 +398,8 @@ pub(super) fn preflight_move_plans(
         let guard_state = capture_apply_guard_state(&edge.source)?;
         if guard_state.source_hash != edge.expected_file_hash {
             return Err(IdenteditError::PreconditionFailed {
-                expected_hash: edge.expected_file_hash,
-                actual_hash: guard_state.source_hash,
+                expected_hash: edge.expected_file_hash.to_string(),
+                actual_hash: guard_state.source_hash.to_string(),
             });
         }
         plans_by_source.insert(

@@ -501,7 +501,7 @@ fn transform_json_mode_rejects_unknown_file_level_target_type() {
             {
                 "target": {
                     "type": "file_middle",
-                    "expected_file_hash": "irrelevant"
+                    "expected_file_hash": "ffffffffffffffff"
                 },
                 "op": {
                     "type": "insert",

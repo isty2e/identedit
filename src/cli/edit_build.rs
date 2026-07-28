@@ -10,7 +10,7 @@ use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, Tr
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
-use crate::hash::hash_text;
+use crate::hash::{ContentHash, hash_text};
 use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
 use crate::transform::parse::parse_handles_for_file;
 use crate::transform::resolve::resolve_target_in_handles;
@@ -130,7 +130,7 @@ struct StdinEditOperationWire {
     #[serde(default)]
     span_hint: Option<Span>,
     #[serde(default)]
-    expected_old_hash: Option<String>,
+    expected_old_hash: Option<ContentHash>,
     op: StdinEditOp,
 }
 
@@ -143,7 +143,7 @@ struct StdinHandleTableEntryWire {
     kind: String,
     #[serde(default)]
     span_hint: Option<Span>,
-    expected_old_hash: String,
+    expected_old_hash: ContentHash,
 }
 
 #[derive(Debug, Deserialize)]

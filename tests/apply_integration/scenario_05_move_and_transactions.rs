@@ -1215,7 +1215,7 @@ fn apply_multi_file_stale_target_fails_without_writing_other_files() {
     let new_text_b = "def process_data(value):\n    return value * 202";
     let expected_hash_a =
         crate::common::hash_text(handle_a["text"].as_str().expect("text should be string"));
-    let stale_hash_b = "deadbeef";
+    let stale_hash_b = "deadbeefdeadbeef";
 
     let payload = json!({
         "files": [

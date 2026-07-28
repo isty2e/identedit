@@ -216,7 +216,7 @@ fn apply_non_overlapping_operations_are_order_independent() {
 
 #[test]
 fn apply_precondition_failure_is_order_independent_when_one_target_is_stale() {
-    let stale_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let stale_hash = "0000000000000000";
     let process_replacement = "def process_data(value):\n    return value * 3";
     let helper_replacement = "def helper():\n    return \"broken\"";
 
@@ -365,7 +365,7 @@ fn apply_is_atomic_when_any_operation_fails_precondition() {
                     "identity": helper_handle["identity"],
                     "kind": helper_handle["kind"],
                     "span_hint": {"start": helper_span["start"], "end": helper_span["end"]},
-                    "expected_old_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+                    "expected_old_hash": "0000000000000000"
                 },
                 "op": {"type": "replace", "new_text": "def helper():\n    return \"broken\""},
                 "preview": {

@@ -7,7 +7,8 @@ use serde_json::Value;
 use crate::changeset::{OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::Span;
-use crate::hashline::{HashlineEdit, InsertAfterEdit, ReplaceLinesEdit, SetLineEdit};
+use crate::hash::ContentHash;
+use crate::hashline::{HashlineEdit, InsertAfterEdit, LineAnchor, ReplaceLinesEdit, SetLineEdit};
 use crate::patch::config_path::{
     ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
 };
@@ -48,23 +49,23 @@ enum StdinPatchTarget {
         kind: String,
         #[serde(default)]
         span_hint: Option<Span>,
-        expected_old_hash: String,
+        expected_old_hash: ContentHash,
     },
     FileStart {
-        expected_file_hash: String,
+        expected_file_hash: ContentHash,
     },
     FileEnd {
-        expected_file_hash: String,
+        expected_file_hash: ContentHash,
     },
     Line {
-        anchor: String,
+        anchor: LineAnchor,
         #[serde(default)]
-        end_anchor: Option<String>,
+        end_anchor: Option<LineAnchor>,
     },
     ConfigPath {
         path: String,
         #[serde(default)]
-        expected_file_hash: Option<String>,
+        expected_file_hash: Option<ContentHash>,
         #[serde(default)]
         document_index: Option<usize>,
     },
@@ -277,8 +278,8 @@ fn run_patch_json_node(
 
 fn run_patch_json_line(
     file: PathBuf,
-    anchor: String,
-    end_anchor: Option<String>,
+    anchor: LineAnchor,
+    end_anchor: Option<LineAnchor>,
     op: Value,
     auto_repair: bool,
     dry_run: bool,
@@ -310,7 +311,7 @@ fn run_patch_json_line(
 fn run_patch_json_config(
     file: PathBuf,
     path: String,
-    expected_file_hash: Option<String>,
+    expected_file_hash: Option<ContentHash>,
     document_index: Option<usize>,
     op: Value,
     dry_run: bool,
@@ -341,7 +342,7 @@ fn run_patch_json_config(
         } => resolve_config_path_operation(
             file.as_path(),
             &path,
-            expected_file_hash.as_deref(),
+            expected_file_hash.as_ref(),
             document_index,
             ConfigPathOperation::Set {
                 new_text,
@@ -351,14 +352,14 @@ fn run_patch_json_config(
         ConfigPatchOp::Append { new_text } => resolve_config_path_operation(
             file.as_path(),
             &path,
-            expected_file_hash.as_deref(),
+            expected_file_hash.as_ref(),
             document_index,
             ConfigPathOperation::Append { new_text },
         )?,
         ConfigPatchOp::Delete => resolve_config_path_operation(
             file.as_path(),
             &path,
-            expected_file_hash.as_deref(),
+            expected_file_hash.as_ref(),
             document_index,
             ConfigPathOperation::Delete,
         )?,

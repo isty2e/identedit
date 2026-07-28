@@ -15,15 +15,16 @@ use super::fail_on_phase;
 
 fn replacement(
     index: usize,
-    expected_hash: &str,
+    _label: &str,
     old_text: String,
     start: usize,
     end: usize,
     new_text: String,
 ) -> ResolvedReplacement {
+    let expected_hash = crate::hash::hash_text(&old_text);
     ResolvedReplacement {
         index,
-        expected_hash: expected_hash.to_string(),
+        expected_hash,
         old_text,
         start,
         end,

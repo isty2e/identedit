@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_bytes;
-use crate::hashline::{HashlineEdit, InsertAfterEdit, ReplaceLinesEdit, SetLineEdit};
+use crate::hashline::{HashlineEdit, InsertAfterEdit, LineAnchor, ReplaceLinesEdit, SetLineEdit};
 use crate::patch::config_path::{
     ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
 };
@@ -236,7 +236,7 @@ fn parse_file_flag_patch_request(
 
 fn parse_line_flag_patch_request(
     file: PathBuf,
-    anchor: String,
+    anchor: LineAnchor,
     args: &PatchArgs,
 ) -> Result<FlagPatchRequest, IdenteditError> {
     let text_source = resolve_patch_text_source(args)?;
@@ -290,7 +290,14 @@ fn parse_line_flag_patch_request(
         HashlineEdit::ReplaceLines {
             replace_lines: ReplaceLinesEdit {
                 start_anchor: anchor,
-                end_anchor: args.end_anchor.clone(),
+                end_anchor: args
+                    .end_anchor
+                    .as_deref()
+                    .map(LineAnchor::parse)
+                    .transpose()
+                    .map_err(|error| IdenteditError::InvalidRequest {
+                        message: error.to_string(),
+                    })?,
                 new_text,
             },
         }

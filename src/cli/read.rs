@@ -10,8 +10,8 @@ use serde::Serialize;
 
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
-use crate::hash::hash_bytes;
-use crate::hashline::{format_line_ref, show_hashed_lines};
+use crate::hash::{ContentHash, hash_bytes};
+use crate::hashline::{LineAnchor, LineHash, show_hashed_lines};
 use crate::provider::ProviderRegistry;
 
 #[derive(Debug, Args)]
@@ -77,15 +77,15 @@ pub enum ReadHandle {
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
         identity: String,
-        expected_old_hash: String,
+        expected_old_hash: ContentHash,
         #[serde(skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },
     Line {
         file: PathBuf,
         line: usize,
-        anchor: String,
-        hash: String,
+        anchor: LineAnchor,
+        hash: LineHash,
         text: String,
     },
 }
@@ -99,7 +99,7 @@ pub struct ReadSummary {
 #[derive(Debug, Serialize)]
 pub struct FilePrecondition {
     pub file: PathBuf,
-    pub expected_file_hash: String,
+    pub expected_file_hash: ContentHash,
 }
 
 pub enum ReadCommandOutput {
@@ -221,12 +221,15 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
                     )
                 })?;
                 let lines = show_hashed_lines(&source_text);
-                handles.extend(lines.into_iter().map(|line| ReadHandle::Line {
-                    file: file.clone(),
-                    line: line.line,
-                    anchor: format_line_ref(line.line, &line.hash),
-                    hash: line.hash,
-                    text: line.content,
+                handles.extend(lines.into_iter().map(|line| {
+                    ReadHandle::Line {
+                        file: file.clone(),
+                        line: line.line,
+                        anchor: LineAnchor::try_new(line.line, line.hash.clone())
+                            .expect("hashed source lines always use positive line numbers"),
+                        hash: line.hash,
+                        text: line.content,
+                    }
                 }));
             }
         }

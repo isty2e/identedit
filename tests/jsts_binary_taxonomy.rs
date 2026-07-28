@@ -135,7 +135,7 @@ fn jsts_non_utf8_apply_is_io_error() {
                         "identity": "deadbeef",
                         "kind": "function_declaration",
                         "span_hint": { "start": 0, "end": 1 },
-                        "expected_old_hash": "00"
+                        "expected_old_hash": "0000000000000000"
                     },
                     "op": { "type": "replace", "new_text": "function replacement() { return 0; }" },
                     "preview": {
@@ -205,7 +205,7 @@ fn jsts_embedded_nul_select_transform_apply_are_parse_failure() {
                         "identity": "deadbeef",
                         "kind": "function_declaration",
                         "span_hint": { "start": 0, "end": 1 },
-                        "expected_old_hash": "00"
+                        "expected_old_hash": "0000000000000000"
                     },
                     "op": { "type": "replace", "new_text": "function replacement() { return 0; }" },
                     "preview": {

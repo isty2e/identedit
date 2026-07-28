@@ -3,13 +3,13 @@ use std::path::Path;
 use crate::changeset::{ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::Span;
-use crate::hash::hash_text;
+use crate::hash::{ContentHash, hash_text};
 use crate::transform::MatchedChange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ResolvedReplacement {
     pub(super) index: usize,
-    pub(super) expected_hash: String,
+    pub(super) expected_hash: ContentHash,
     pub(super) old_text: String,
     pub(super) start: usize,
     pub(super) end: usize,
@@ -115,8 +115,8 @@ pub(super) fn apply_replacements_to_text(
         if current_text != replacement.old_text {
             let actual_hash = hash_text(current_text);
             return Err(IdenteditError::PreconditionFailed {
-                expected_hash: replacement.expected_hash.clone(),
-                actual_hash,
+                expected_hash: replacement.expected_hash.to_string(),
+                actual_hash: actual_hash.to_string(),
             });
         }
 
