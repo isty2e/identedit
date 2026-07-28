@@ -12,7 +12,6 @@ fn transform_json_mode_rejects_invalid_json_payload() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_missing_operations_field() {
     let request = json!({
@@ -30,7 +29,6 @@ fn transform_json_mode_rejects_missing_operations_field() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_missing_file_field() {
     let request = json!({
@@ -48,7 +46,6 @@ fn transform_json_mode_rejects_missing_file_field() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_accepts_batch_files_shape() {
     let file_a = copy_fixture_to_temp_python("example.py");
@@ -118,7 +115,6 @@ fn transform_json_mode_accepts_batch_files_shape() {
         file_b.to_string_lossy().to_string()
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_ambiguous_single_and_batch_shapes() {
     let request = json!({
@@ -144,7 +140,6 @@ fn transform_json_mode_rejects_ambiguous_single_and_batch_shapes() {
         "expected explicit ambiguous-shape message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_batch_request_with_top_level_handle_table() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -186,7 +181,6 @@ fn transform_json_mode_rejects_batch_request_with_top_level_handle_table() {
         "expected explicit shape conflict diagnostic for top-level handle_table with files"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_handle_ref_without_handle_table() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -220,7 +214,6 @@ fn transform_json_mode_rejects_handle_ref_without_handle_table() {
         "expected missing handle_table diagnostic for handle_ref"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_unknown_handle_ref() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -264,7 +257,6 @@ fn transform_json_mode_rejects_unknown_handle_ref() {
         "expected unknown handle_ref diagnostic"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_empty_batch_files_array() {
     let request = json!({
@@ -288,7 +280,6 @@ fn transform_json_mode_rejects_empty_batch_files_array() {
         "expected explicit empty-batch diagnostic"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_unknown_top_level_field() {
     let request = json!({
@@ -314,7 +305,6 @@ fn transform_json_mode_rejects_unknown_top_level_field() {
         "expected unknown top-level field message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_operations_object_type() {
     let request = json!({
@@ -335,7 +325,6 @@ fn transform_json_mode_rejects_operations_object_type() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_unknown_operation_field() {
     let handle = select_first_handle(
@@ -378,7 +367,6 @@ fn transform_json_mode_rejects_unknown_operation_field() {
         "expected unknown operation field message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_missing_operation_identity_field() {
     let request = json!({
@@ -412,7 +400,6 @@ fn transform_json_mode_rejects_missing_operation_identity_field() {
         "expected explicit missing identity field message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_unsupported_operation_type() {
     let request = json!({
@@ -440,7 +427,6 @@ fn transform_json_mode_rejects_unsupported_operation_type() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_unknown_replace_payload_field() {
     let handle = select_first_handle(
@@ -483,7 +469,6 @@ fn transform_json_mode_rejects_unknown_replace_payload_field() {
         "expected unknown op payload field message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_operation_expected_old_hash_number_type() {
     let handle = select_first_handle(
@@ -521,7 +506,6 @@ fn transform_json_mode_rejects_operation_expected_old_hash_number_type() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_operations_null_type() {
     let request = json!({
@@ -540,7 +524,6 @@ fn transform_json_mode_rejects_operations_null_type() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_non_object_operation_entries() {
     let file = fixture_path("example.py").to_string_lossy().to_string();
@@ -585,7 +568,6 @@ fn transform_json_mode_rejects_non_object_operation_entries() {
         );
     }
 }
-
 #[test]
 fn transform_json_mode_rejects_non_transform_command() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -611,7 +593,6 @@ fn transform_json_mode_rejects_non_transform_command() {
         "expected command mismatch message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_legacy_transform_command() {
     let request = json!({
@@ -636,7 +617,6 @@ fn transform_json_mode_rejects_legacy_transform_command() {
         "expected command mismatch message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_missing_command_field() {
     let request = json!({
@@ -660,7 +640,6 @@ fn transform_json_mode_rejects_missing_command_field() {
         "expected missing command field message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_homoglyph_command_token() {
     let request = json!({
@@ -685,7 +664,6 @@ fn transform_json_mode_rejects_homoglyph_command_token() {
         "expected homoglyph-token rejection"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_command_with_embedded_nul() {
     let request = json!({
@@ -710,7 +688,6 @@ fn transform_json_mode_rejects_command_with_embedded_nul() {
         "expected embedded-nul token rejection"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_command_with_trailing_whitespace() {
     let request = json!({
@@ -729,7 +706,6 @@ fn transform_json_mode_rejects_command_with_trailing_whitespace() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_uppercase_command_token() {
     let request = json!({
@@ -748,7 +724,6 @@ fn transform_json_mode_rejects_uppercase_command_token() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn transform_json_mode_rejects_missing_operation_kind_field() {
     let request = json!({
@@ -781,7 +756,6 @@ fn transform_json_mode_rejects_missing_operation_kind_field() {
         "expected missing kind field message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_operation_op_missing_type_tag() {
     let request = json!({
@@ -813,7 +787,6 @@ fn transform_json_mode_rejects_operation_op_missing_type_tag() {
         "expected missing op.type diagnostic"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_replace_op_missing_new_text() {
     let request = json!({
@@ -847,7 +820,6 @@ fn transform_json_mode_rejects_replace_op_missing_new_text() {
         "expected missing new_text diagnostic"
     );
 }
-
 #[test]
 fn transform_json_mode_returns_precondition_failed_when_hash_mismatches() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -882,7 +854,6 @@ fn transform_json_mode_returns_precondition_failed_when_hash_mismatches() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "precondition_failed");
 }
-
 #[test]
 fn transform_json_mode_treats_canonically_equivalent_unicode_reorder_as_stale() {
     let mut temp_file = Builder::new()
@@ -939,7 +910,6 @@ fn transform_json_mode_treats_canonically_equivalent_unicode_reorder_as_stale() 
         "expected hash mismatch detail in precondition failure"
     );
 }
-
 #[test]
 fn transform_json_mode_returns_target_missing_when_kind_mismatches() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -976,7 +946,6 @@ fn transform_json_mode_returns_target_missing_when_kind_mismatches() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "target_missing");
 }
-
 #[test]
 fn transform_json_mode_returns_target_missing_for_json_kind_mismatch_with_stale_span_hint() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -1024,7 +993,6 @@ fn transform_json_mode_returns_target_missing_for_json_kind_mismatch_with_stale_
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "target_missing");
 }
-
 #[test]
 fn transform_json_mode_rejects_span_hint_with_start_greater_than_end() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1067,7 +1035,6 @@ fn transform_json_mode_rejects_span_hint_with_start_greater_than_end() {
         "expected span_hint validation message"
     );
 }
-
 #[test]
 fn transform_json_mode_rejects_zero_length_span_hint() {
     let fixture = fixture_path("ambiguous.py");
@@ -1111,7 +1078,6 @@ fn transform_json_mode_rejects_zero_length_span_hint() {
         "expected zero-length span_hint validation message"
     );
 }
-
 #[test]
 fn transform_json_mode_accepts_extreme_span_values_when_target_is_unique() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1157,7 +1123,6 @@ fn transform_json_mode_accepts_extreme_span_values_when_target_is_unique() {
         "transform output should use resolved span in preview",
     );
 }
-
 #[test]
 fn transform_json_mode_accepts_non_matching_span_hint_for_unique_target() {
     let file_path = copy_fixture_to_temp_python("example.py");

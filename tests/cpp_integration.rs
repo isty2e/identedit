@@ -236,7 +236,7 @@ fn transform_replace_and_apply_support_cpp_function_definition() {
     let replacement = "int process_data(int value) {\n    return value - 1;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

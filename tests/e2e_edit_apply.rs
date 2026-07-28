@@ -154,7 +154,7 @@ fn select_transform_apply_pipeline_edits_file_end_to_end() {
     let replacement = "def process_data(value):\n    return value - 1";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -220,7 +220,7 @@ fn select_transform_apply_pipeline_edits_unknown_extension_via_fallback() {
     let replacement = "def process_data(value):\n    return value - 3\n";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -285,7 +285,7 @@ fn select_transform_apply_pipeline_edits_fallback_js_unicode_escape_name() {
     let replacement = "function \\u0066oo(value) {\n  return value - 2;\n}\n";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -358,7 +358,7 @@ fn select_transform_apply_pipeline_supports_relative_dot_segment_paths() {
         workspace.path(),
         &[
             "edit",
-            "--identity",
+            "--at",
             identity,
             "--replace",
             replacement,
@@ -570,7 +570,7 @@ fn select_transform_apply_pipeline_supports_parent_segment_paths() {
         &nested,
         &[
             "edit",
-            "--identity",
+            "--at",
             identity,
             "--replace",
             replacement,
@@ -627,7 +627,7 @@ fn select_transform_apply_pipeline_supports_delete_operation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--delete",
         file_path.to_str().expect("path should be utf-8"),
@@ -1021,7 +1021,7 @@ fn select_transform_apply_pipeline_replaces_json_nested_object_without_side_effe
         "{\n    \"enabled\": false,\n    \"retries\": 10,\n    \"mode\": \"safe\"\n  }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -1152,7 +1152,7 @@ fn stale_json_delete_changeset_returns_precondition_failed_after_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--delete",
         file_path.to_str().expect("path should be utf-8"),

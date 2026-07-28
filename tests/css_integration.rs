@@ -139,7 +139,7 @@ fn transform_replace_and_apply_support_css_stylesheet() {
     let replacement = "body {\n  margin: 0;\n  color: blue;\n}\n";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -273,7 +273,7 @@ fn transform_replace_and_apply_support_realistic_css_body_rule_rewrite() {
     let replacement = "body {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n  color: #1f2937;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -372,7 +372,7 @@ fn transform_replace_and_apply_support_complex_css_root_rule_rewrite() {
     let replacement = ":root {\n  --surface: hsl(220 20% 98%);\n  --text: hsl(220 40% 18%);\n  --brand: hsl(252 84% 59%);\n  --radius: 0.75rem;\n  --space: clamp(0.75rem, 2vw, 1.25rem);\n  --shadow-sm: 0 1px 2px hsl(220 15% 20% / 0.15);\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -430,7 +430,7 @@ fn transform_reports_ambiguous_target_for_duplicate_css_rule_identity() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         chip_identity,
         "--replace",
         ".chip { display: inline-flex; gap: 0.5rem; }",
@@ -521,7 +521,7 @@ fn transform_replace_and_apply_support_bootstrap_escape_css_form_select_rewrite(
     let replacement = ".form-select {\n  display: block;\n  width: 100%;\n  border: 1px solid var(--identedit-border);\n  background-image: none;\n  background-color: var(--identedit-surface);\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -580,7 +580,7 @@ fn transform_reports_ambiguous_target_for_duplicate_escaped_selector_identity() 
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         ".btn\\:primary:hover {\n  color: #fff;\n  background-color: #0a58ca;\n}",
@@ -629,7 +629,7 @@ fn transform_reports_ambiguous_target_for_duplicate_css_identity_across_media_bl
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         ".alert-pill {\n  display: inline-flex;\n  gap: 0.5rem;\n  color: #0f172a;\n}",
@@ -679,7 +679,7 @@ fn transform_replace_and_apply_support_minified_css_fixture_rule_rewrite() {
     let replacement = ".mini-card {\n  padding: 1rem;\n  border: 1px solid #94a3b8;\n  background: var(--surface);\n  color: var(--ink);\n  box-shadow: 0 1px 2px rgb(15 23 42 / 0.16);\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -739,7 +739,7 @@ fn transform_replace_and_apply_supports_bom_cr_only_css_source() {
     let replacement = ".token{color:#0f172a}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

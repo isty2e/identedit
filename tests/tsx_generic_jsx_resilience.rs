@@ -139,14 +139,8 @@ fn tsx_generic_function_can_be_transformed_and_applied_without_parser_drift() {
         .expect("identity should be present");
 
     let replacement = "export function View<T extends { id: number }>(props: T): JSX.Element {\n  return <article>{identity<Box<number>>({ value: props.id }).value}</article>;\n}";
-    let transform_output = run_identedit(&[
-        "edit",
-        "--identity",
-        identity,
-        "--replace",
-        replacement,
-        path,
-    ]);
+    let transform_output =
+        run_identedit(&["edit", "--at", identity, "--replace", replacement, path]);
     assert!(
         transform_output.status.success(),
         "transform failed: {}",

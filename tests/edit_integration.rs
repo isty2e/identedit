@@ -47,13 +47,32 @@ fn create_large_python_file(function_count: usize) -> PathBuf {
     common::create_large_python_file(function_count)
 }
 
-#[path = "edit_integration/scenario_01_flags_and_paths.rs"]
-mod scenario_01_flags_and_paths;
-#[path = "edit_integration/scenario_02_json_validation.rs"]
-mod scenario_02_json_validation;
-#[path = "edit_integration/scenario_03_preview_and_file_targets.rs"]
-mod scenario_03_preview_and_file_targets;
-#[path = "edit_integration/scenario_04_boundary_conflicts.rs"]
-mod scenario_04_boundary_conflicts;
-#[path = "edit_integration/scenario_05_fallback_and_misc.rs"]
-mod scenario_05_fallback_and_misc;
+fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
+    assert!(
+        preview.get("old_text").is_none(),
+        "compact preview should omit old_text by default"
+    );
+    assert_eq!(
+        preview["old_hash"],
+        crate::common::hash_text(expected_old_text),
+        "compact preview should include old_hash"
+    );
+    assert_eq!(
+        preview["old_len"],
+        expected_old_text.len(),
+        "compact preview should include old_len"
+    );
+}
+
+#[path = "edit_integration/boundary_conflicts.rs"]
+mod boundary_conflicts;
+#[path = "edit_integration/flag_mode_and_resolution.rs"]
+mod flag_mode_and_resolution;
+#[path = "edit_integration/preview_generation.rs"]
+mod preview_generation;
+#[path = "edit_integration/request_validation.rs"]
+mod request_validation;
+#[path = "edit_integration/resolution_and_filesystem.rs"]
+mod resolution_and_filesystem;
+#[path = "edit_integration/structural_moves.rs"]
+mod structural_moves;

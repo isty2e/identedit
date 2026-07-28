@@ -8,15 +8,14 @@ use crate::patch::config_path::{
     ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
 };
 
-use super::PatchArgs;
-use super::execute::{
-    ApplyBackedExecution, CanonicalFlagPatchRequest, FlagPatchRequest, LineExecution,
-    LineFlagPatchRequest, NodeFlagPatchRequest, PreparedNodePatchOperation,
+use super::args::EditIntentArgs;
+use super::model::{
+    CanonicalEditIntent, LineEditIntent, NodeEditIntent, PreparedEditIntent,
+    PreparedNodeEditOperation,
 };
-use super::target::{NodeTargetSelector, PatchTargetIngress, resolve_patch_target_ingress};
+use super::target::{EditTargetIngress, NodeTargetSelector, resolve_edit_target_ingress};
 use super::text::{
-    reject_unused_text_source, resolve_patch_text_payload, resolve_patch_text_source,
-    text_arg_present,
+    reject_unused_text_source, resolve_text_payload, resolve_text_source, text_arg_present,
 };
 
 const NODE_MODE_OPERATIONS: &str = "--replace, --delete, --insert-before, --insert-after, or --scoped-regex with --scoped-replacement";
@@ -25,13 +24,13 @@ const CONFIG_MODE_OPERATIONS: &str = "--set-value, --append-value, or --delete";
 
 fn node_mode_guidance() -> String {
     format!(
-        "Node target mode supports {NODE_MODE_OPERATIONS}. For line edits use --anchor or --at <line:hash>; for file insertion use --at file-start|file-end --insert; for config edits use --config-path with {CONFIG_MODE_OPERATIONS}."
+        "Node target mode supports {NODE_MODE_OPERATIONS}. For line edits use --at <line:hash>; for file insertion use --at file-start|file-end --insert; for config edits use --config-path with {CONFIG_MODE_OPERATIONS}."
     )
 }
 
 fn line_mode_guidance() -> String {
     format!(
-        "Line target mode supports {LINE_MODE_OPERATIONS}. For node edits use --identity, --symbol, --kind with --name, or --at <hex16>."
+        "Line target mode supports {LINE_MODE_OPERATIONS}. For node edits use --at <hex16>, --symbol, or --kind with --name."
     )
 }
 
@@ -46,9 +45,9 @@ fn config_mode_guidance() -> String {
     )
 }
 
-pub(super) fn parse_flag_patch_request(
-    args: &PatchArgs,
-) -> Result<FlagPatchRequest, IdenteditError> {
+pub(crate) fn parse_flag_edit_intent(
+    args: &EditIntentArgs,
+) -> Result<PreparedEditIntent, IdenteditError> {
     let file = args
         .file
         .clone()
@@ -56,46 +55,44 @@ pub(super) fn parse_flag_patch_request(
             message: "FILE is required unless --json mode is enabled".to_string(),
         })?;
 
-    match resolve_patch_target_ingress(args)? {
-        PatchTargetIngress::NodeIdentity(identity) => {
-            parse_node_flag_patch_request(file, NodeTargetSelector::Identity(identity), args)
+    match resolve_edit_target_ingress(args)? {
+        EditTargetIngress::NodeIdentity(identity) => {
+            parse_node_flag_edit_intent(file, NodeTargetSelector::Identity(identity), args)
         }
-        PatchTargetIngress::NodeSelector { kind, name_pattern } => parse_node_flag_patch_request(
+        EditTargetIngress::NodeSelector { kind, name_pattern } => parse_node_flag_edit_intent(
             file,
             NodeTargetSelector::Selector { kind, name_pattern },
             args,
         ),
-        PatchTargetIngress::NodeSymbol(symbol) => {
-            parse_node_flag_patch_request(file, NodeTargetSelector::Symbol(symbol), args)
+        EditTargetIngress::NodeSymbol(symbol) => {
+            parse_node_flag_edit_intent(file, NodeTargetSelector::Symbol(symbol), args)
         }
-        PatchTargetIngress::LineAnchor(anchor) => parse_line_flag_patch_request(file, anchor, args),
-        PatchTargetIngress::FileStart => parse_file_flag_patch_request(file, true, args),
-        PatchTargetIngress::FileEnd => parse_file_flag_patch_request(file, false, args),
-        PatchTargetIngress::ConfigPath(path) => parse_config_flag_patch_request(file, path, args),
+        EditTargetIngress::LineAnchor(anchor) => parse_line_flag_edit_intent(file, anchor, args),
+        EditTargetIngress::FileStart => parse_file_flag_edit_intent(file, true, args),
+        EditTargetIngress::FileEnd => parse_file_flag_edit_intent(file, false, args),
+        EditTargetIngress::ConfigPath(path) => parse_config_flag_edit_intent(file, path, args),
     }
 }
 
-fn parse_node_flag_patch_request(
+fn parse_node_flag_edit_intent(
     file: PathBuf,
     selector: NodeTargetSelector,
-    args: &PatchArgs,
-) -> Result<FlagPatchRequest, IdenteditError> {
-    let operation = prepare_patch_flag_node_operation(args)?;
-    Ok(FlagPatchRequest::Node(NodeFlagPatchRequest {
+    args: &EditIntentArgs,
+) -> Result<PreparedEditIntent, IdenteditError> {
+    let operation = prepare_node_edit_operation(args)?;
+    Ok(PreparedEditIntent::Node(NodeEditIntent {
         file,
         selector,
         operation,
-        execution: ApplyBackedExecution::from_args(args),
     }))
 }
 
-fn prepare_patch_flag_node_operation(
-    args: &PatchArgs,
-) -> Result<PreparedNodePatchOperation, IdenteditError> {
-    let text_source = resolve_patch_text_source(args)?;
+fn prepare_node_edit_operation(
+    args: &EditIntentArgs,
+) -> Result<PreparedNodeEditOperation, IdenteditError> {
+    let text_source = resolve_text_source(args)?;
 
-    if args.anchor.is_some()
-        || args.end_anchor.is_some()
+    if args.end_anchor.is_some()
         || args.insert.is_some()
         || args.set_value.is_some()
         || args.append_value.is_some()
@@ -104,7 +101,6 @@ fn prepare_patch_flag_node_operation(
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
-        || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
             message: node_mode_guidance(),
@@ -133,7 +129,7 @@ fn prepare_patch_flag_node_operation(
     }
 
     if let Some(pattern) = args.scoped_regex.clone() {
-        let replacement = resolve_patch_text_payload(
+        let replacement = resolve_text_payload(
             "--scoped-replacement",
             args.scoped_replacement.clone(),
             text_source,
@@ -141,55 +137,52 @@ fn prepare_patch_flag_node_operation(
         .ok_or_else(|| IdenteditError::InvalidRequest {
             message: "missing payload for --scoped-replacement".to_string(),
         })?;
-        return Ok(PreparedNodePatchOperation::ScopedRegex {
+        return Ok(PreparedNodeEditOperation::ScopedRegex {
             pattern,
             replacement,
         });
     }
 
     if let Some(new_text) =
-        resolve_patch_text_payload("--replace", args.replace.clone(), text_source.clone())?
+        resolve_text_payload("--replace", args.replace.clone(), text_source.clone())?
     {
-        return Ok(PreparedNodePatchOperation::Standard(OpKind::Replace {
+        return Ok(PreparedNodeEditOperation::Standard(OpKind::Replace {
             new_text,
         }));
     }
 
     if args.delete {
         reject_unused_text_source(text_source, NODE_MODE_OPERATIONS)?;
-        return Ok(PreparedNodePatchOperation::Standard(OpKind::Delete));
+        return Ok(PreparedNodeEditOperation::Standard(OpKind::Delete));
     }
 
-    if let Some(new_text) = resolve_patch_text_payload(
+    if let Some(new_text) = resolve_text_payload(
         "--insert-before",
         args.insert_before.clone(),
         text_source.clone(),
     )? {
-        return Ok(PreparedNodePatchOperation::Standard(OpKind::InsertBefore {
+        return Ok(PreparedNodeEditOperation::Standard(OpKind::InsertBefore {
             new_text,
         }));
     }
 
-    let new_text =
-        resolve_patch_text_payload("--insert-after", args.insert_after.clone(), text_source)?
-            .ok_or_else(|| IdenteditError::InvalidRequest {
-                message: "missing operation payload for --insert-after".to_string(),
-            })?;
-    Ok(PreparedNodePatchOperation::Standard(OpKind::InsertAfter {
+    let new_text = resolve_text_payload("--insert-after", args.insert_after.clone(), text_source)?
+        .ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "missing operation payload for --insert-after".to_string(),
+        })?;
+    Ok(PreparedNodeEditOperation::Standard(OpKind::InsertAfter {
         new_text,
     }))
 }
 
-fn parse_file_flag_patch_request(
+fn parse_file_flag_edit_intent(
     file: PathBuf,
     at_file_start: bool,
-    args: &PatchArgs,
-) -> Result<FlagPatchRequest, IdenteditError> {
-    let text_source = resolve_patch_text_source(args)?;
+    args: &EditIntentArgs,
+) -> Result<PreparedEditIntent, IdenteditError> {
+    let text_source = resolve_text_source(args)?;
 
-    if args.identity.is_some()
-        || args.anchor.is_some()
-        || args.replace.is_some()
+    if args.replace.is_some()
         || args.set_value.is_some()
         || args.append_value.is_some()
         || args.scoped_regex.is_some()
@@ -202,14 +195,13 @@ fn parse_file_flag_patch_request(
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
-        || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
             message: file_mode_guidance(),
         });
     }
 
-    let insert_text = resolve_patch_text_payload("--insert", args.insert.clone(), text_source)?
+    let insert_text = resolve_text_payload("--insert", args.insert.clone(), text_source)?
         .ok_or_else(|| IdenteditError::InvalidRequest {
             message: file_mode_guidance(),
         })?;
@@ -222,7 +214,7 @@ fn parse_file_flag_patch_request(
         TransformTarget::FileEnd { expected_file_hash }
     };
 
-    Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {
+    Ok(PreparedEditIntent::Canonical(CanonicalEditIntent {
         file,
         operation: EditOperation::try_new(
             target,
@@ -230,19 +222,17 @@ fn parse_file_flag_patch_request(
                 new_text: insert_text,
             },
         )?,
-        execution: ApplyBackedExecution::from_args(args),
     }))
 }
 
-fn parse_line_flag_patch_request(
+fn parse_line_flag_edit_intent(
     file: PathBuf,
     anchor: LineAnchor,
-    args: &PatchArgs,
-) -> Result<FlagPatchRequest, IdenteditError> {
-    let text_source = resolve_patch_text_source(args)?;
+    args: &EditIntentArgs,
+) -> Result<PreparedEditIntent, IdenteditError> {
+    let text_source = resolve_text_source(args)?;
 
-    if args.identity.is_some()
-        || args.replace.is_some()
+    if args.replace.is_some()
         || args.insert.is_some()
         || args.set_value.is_some()
         || args.append_value.is_some()
@@ -253,7 +243,6 @@ fn parse_line_flag_patch_request(
         || args.insert_after.is_some()
         || args.create_missing
         || args.document_index.is_some()
-        || args.verbose
     {
         return Err(IdenteditError::InvalidRequest {
             message: line_mode_guidance(),
@@ -271,7 +260,7 @@ fn parse_line_flag_patch_request(
     }
 
     let edit = if let Some(new_text) =
-        resolve_patch_text_payload("--set-line", args.set_line.clone(), text_source.clone())?
+        resolve_text_payload("--set-line", args.set_line.clone(), text_source.clone())?
     {
         if args.end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
@@ -282,7 +271,7 @@ fn parse_line_flag_patch_request(
         HashlineEdit::SetLine {
             set_line: SetLineEdit { anchor, new_text },
         }
-    } else if let Some(new_text) = resolve_patch_text_payload(
+    } else if let Some(new_text) = resolve_text_payload(
         "--replace-range",
         args.replace_range.clone(),
         text_source.clone(),
@@ -308,7 +297,7 @@ fn parse_line_flag_patch_request(
                     .to_string(),
             });
         }
-        let text = resolve_patch_text_payload(
+        let text = resolve_text_payload(
             "--insert-after-line",
             args.insert_after_line.clone(),
             text_source,
@@ -321,23 +310,17 @@ fn parse_line_flag_patch_request(
         }
     };
 
-    Ok(FlagPatchRequest::Line(LineFlagPatchRequest {
-        file,
-        edit,
-        execution: LineExecution::from_args(args),
-    }))
+    Ok(PreparedEditIntent::Line(LineEditIntent { file, edit }))
 }
 
-fn parse_config_flag_patch_request(
+fn parse_config_flag_edit_intent(
     file: PathBuf,
     path: String,
-    args: &PatchArgs,
-) -> Result<FlagPatchRequest, IdenteditError> {
-    let text_source = resolve_patch_text_source(args)?;
+    args: &EditIntentArgs,
+) -> Result<PreparedEditIntent, IdenteditError> {
+    let text_source = resolve_text_source(args)?;
 
     if args.at.is_some()
-        || args.identity.is_some()
-        || args.anchor.is_some()
         || args.end_anchor.is_some()
         || args.replace.is_some()
         || args.insert.is_some()
@@ -348,7 +331,6 @@ fn parse_config_flag_patch_request(
         || args.set_line.is_some()
         || args.replace_range.is_some()
         || args.insert_after_line.is_some()
-        || args.auto_repair
     {
         return Err(IdenteditError::InvalidRequest {
             message: config_mode_guidance(),
@@ -373,7 +355,7 @@ fn parse_config_flag_patch_request(
     }
 
     let canonical = if let Some(new_text) =
-        resolve_patch_text_payload("--set-value", args.set_value.clone(), text_source.clone())?
+        resolve_text_payload("--set-value", args.set_value.clone(), text_source.clone())?
     {
         resolve_config_path_operation(
             file.as_path(),
@@ -385,7 +367,7 @@ fn parse_config_flag_patch_request(
                 missing_path: MissingPathPolicy::from_create_missing(args.create_missing),
             },
         )?
-    } else if let Some(new_text) = resolve_patch_text_payload(
+    } else if let Some(new_text) = resolve_text_payload(
         "--append-value",
         args.append_value.clone(),
         text_source.clone(),
@@ -408,9 +390,8 @@ fn parse_config_flag_patch_request(
         )?
     };
 
-    Ok(FlagPatchRequest::Canonical(CanonicalFlagPatchRequest {
+    Ok(PreparedEditIntent::Canonical(CanonicalEditIntent {
         file,
         operation: canonical,
-        execution: ApplyBackedExecution::from_args(args),
     }))
 }

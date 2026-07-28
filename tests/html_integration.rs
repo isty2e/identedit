@@ -156,7 +156,7 @@ fn transform_replace_and_apply_support_html_start_tag() {
     let replacement = "<section id=\"main\" class=\"updated\">";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -231,7 +231,7 @@ fn select_transform_apply_pipeline_supports_html_title_rewrite() {
     let replacement = "<title data-suite=\"identedit\">";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -359,7 +359,7 @@ fn transform_replace_and_apply_support_realistic_html_main_tag_rewrite() {
     let replacement = "<main class=\"container layout-grid\">";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -463,7 +463,7 @@ fn transform_replace_and_apply_support_complex_html_main_rewrite() {
     let replacement = "<main id=\"dashboard-main\" class=\"container-fluid py-3 has-grid\">";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -521,7 +521,7 @@ fn transform_reports_ambiguous_target_for_duplicate_html_element_identity() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         li_identity,
         "--replace",
         "<li class=\"nav-item\"><a href=\"#overview\">Overview (Updated)</a></li>",
@@ -614,7 +614,7 @@ fn transform_replace_and_apply_support_webapp_html_app_main_rewrite() {
     let replacement = "<main id=\"app-main\" data-e2e=\"edge-hunt\" class=\"app-shell\">";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -672,7 +672,7 @@ fn transform_reports_ambiguous_target_for_duplicate_webapp_html_list_item_identi
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "<li class=\"queue-item\"><button type=\"button\">Retry now</button></li>",
@@ -721,7 +721,7 @@ fn transform_reports_ambiguous_target_for_stress_html_duplicate_identity_set() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "<li class=\"dup-item\"><a href=\"#retry\">Retry now</a></li>",
@@ -771,7 +771,7 @@ fn transform_replace_and_apply_support_minified_html_fixture_main_rewrite() {
     let replacement = "<main id=\"mini-main\" class=\"grid compact\" data-round=\"r1\">";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

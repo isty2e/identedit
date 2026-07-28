@@ -146,7 +146,7 @@ fn transform_replace_and_apply_support_zsh_function_definition() {
     let replacement = "process_data() {\n  local value=\"$1\"\n  print -r -- \"$((value + 2))\"\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

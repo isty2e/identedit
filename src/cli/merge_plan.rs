@@ -222,7 +222,10 @@ mod tests {
             OpKind::Move {
                 to: "moved.py".into(),
             },
-            ChangePreview::move_operation(None),
+            ChangePreview::move_operation(crate::changeset::MovePreview {
+                from: "fixture.py".into(),
+                to: "moved.py".into(),
+            }),
         )
         .expect("merge test file move should be valid")
     }

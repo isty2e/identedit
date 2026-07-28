@@ -197,7 +197,7 @@ fn transform_replace_and_apply_support_xml_element() {
     let replacement = "<description><![CDATA[Agent <safe> updated]]></description>";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -263,7 +263,7 @@ fn transform_reports_ambiguous_target_for_duplicate_xml_element_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "<entry>updated</entry>",
@@ -467,7 +467,7 @@ fn apply_reports_stale_target_error_after_xml_source_mutation() {
     let replacement = "<?xml-stylesheet type=\"text/xsl\" href=\"theme.xsl\"?>";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -569,7 +569,7 @@ fn transform_replace_and_apply_preserve_crlf_xml_source_segments() {
     let replacement = "<value>new</value>";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

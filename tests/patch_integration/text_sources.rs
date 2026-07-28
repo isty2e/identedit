@@ -11,7 +11,7 @@ fn patch_replace_accepts_text_file_payload() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "--text-file",
@@ -69,7 +69,7 @@ fn patch_flag_rejects_text_file_and_stdin_text_together() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--identity",
+            "--at",
             identity,
             "--replace",
             "--text-file",
@@ -106,7 +106,7 @@ fn patch_delete_rejects_external_text_source() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--delete",
         "--text-file",
@@ -141,7 +141,7 @@ fn patch_replace_text_file_non_utf8_returns_io_error_without_mutation() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "--text-file",
@@ -194,7 +194,7 @@ fn patch_replace_stdin_text_dry_run_does_not_modify_file() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--identity",
+            "--at",
             identity,
             "--replace",
             "--stdin-text",
@@ -250,7 +250,7 @@ fn patch_missing_operation_with_stdin_text_reports_invalid_request() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--identity",
+            "--at",
             identity,
             "--stdin-text",
             file_path.to_str().expect("path should be utf-8"),
@@ -288,7 +288,7 @@ fn patch_replace_text_file_directory_returns_io_error_without_mutation() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "--text-file",
@@ -358,7 +358,7 @@ fn patch_replace_text_file_path_with_spaces_applies() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "--text-file",

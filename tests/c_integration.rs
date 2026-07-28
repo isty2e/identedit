@@ -180,7 +180,7 @@ fn transform_replace_and_apply_support_c_function_definition() {
     let replacement = "int process_data(int value) {\n    return value - 1;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -261,7 +261,7 @@ fn transform_reports_ambiguous_target_for_duplicate_c_function_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "int configure(int value) {\n    return value + 2;\n}",
@@ -446,7 +446,7 @@ fn apply_reports_precondition_failed_after_c_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "int process_data(int value) {\n    return value + 2;\n}",
@@ -534,7 +534,7 @@ fn transform_replace_and_apply_support_crlf_c_source() {
     let replacement = "int run(int value) {\r\n    return value + 2;\r\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

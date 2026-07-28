@@ -48,7 +48,6 @@ fn apply_accepts_compact_preview_for_replace_operation() {
         "apply should write compact preview changes"
     );
 }
-
 #[test]
 fn apply_rejects_compact_preview_with_tampered_old_hash() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -97,7 +96,6 @@ fn apply_rejects_compact_preview_with_tampered_old_hash() {
         "expected compact preview hash mismatch message"
     );
 }
-
 #[test]
 fn apply_rejects_multiple_inserts_at_same_byte_position() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -152,7 +150,6 @@ fn apply_rejects_multiple_inserts_at_same_byte_position() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn apply_rejects_insert_touching_replace_boundary() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -208,7 +205,6 @@ fn apply_rejects_insert_touching_replace_boundary() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn apply_json_rejects_delete_and_insert_on_same_anchor() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -269,7 +265,6 @@ fn apply_json_rejects_delete_and_insert_on_same_anchor() {
         "expected same-anchor conflict message"
     );
 }
-
 #[test]
 fn apply_json_rejects_overlapping_root_replace_and_nested_insert() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -342,7 +337,6 @@ fn apply_json_rejects_overlapping_root_replace_and_nested_insert() {
         "expected overlap conflict message"
     );
 }
-
 #[test]
 fn apply_json_same_anchor_insert_before_after_is_order_independent() {
     let before_insert = "__json-before__";
@@ -451,7 +445,6 @@ fn apply_json_same_anchor_insert_before_after_is_order_independent() {
     assert!(result_a.contains(before_insert));
     assert!(result_a.contains(after_insert));
 }
-
 #[test]
 fn apply_json_delete_changeset_second_apply_returns_target_missing() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -462,7 +455,7 @@ fn apply_json_delete_changeset_second_apply_returns_target_missing() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--delete",
         file_path.to_str().expect("path should be utf-8"),
@@ -498,7 +491,6 @@ fn apply_json_delete_changeset_second_apply_returns_target_missing() {
         "failed second apply must not mutate file"
     );
 }
-
 #[test]
 fn apply_json_replace_changeset_second_apply_returns_target_missing() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -509,7 +501,7 @@ fn apply_json_replace_changeset_second_apply_returns_target_missing() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "{\"enabled\":false,\"retries\":42}",
@@ -546,7 +538,6 @@ fn apply_json_replace_changeset_second_apply_returns_target_missing() {
         "failed second apply must not mutate file"
     );
 }
-
 #[test]
 fn apply_json_insert_before_changeset_second_apply_returns_span_hint_mismatch() {
     let file_path = copy_fixture_to_temp_json("example.json");
@@ -611,7 +602,6 @@ fn apply_json_insert_before_changeset_second_apply_returns_span_hint_mismatch() 
         "failed second apply must not mutate file"
     );
 }
-
 #[test]
 fn apply_json_non_overlapping_operations_are_order_independent() {
     let object_replacement = "{\"enabled\": false, \"retries\": 10}";
@@ -724,7 +714,6 @@ fn apply_json_non_overlapping_operations_are_order_independent() {
         "JSON non-overlapping replace operations should be order-independent"
     );
 }
-
 #[test]
 fn apply_json_replace_preview_tampering_matrix() {
     for tamper_kind in ["old_text", "new_text", "matched_span"] {
@@ -794,7 +783,6 @@ fn apply_json_replace_preview_tampering_matrix() {
         );
     }
 }
-
 #[test]
 fn apply_same_anchor_insert_before_after_is_order_independent() {
     let before_insert = "# ordered-before\n";
@@ -903,7 +891,6 @@ fn apply_same_anchor_insert_before_after_is_order_independent() {
         "same-anchor before/after ordering should not change final content"
     );
 }
-
 #[test]
 fn apply_insert_after_preserves_crlf_source_segments() {
     let mut temp_file = Builder::new()
@@ -959,7 +946,6 @@ fn apply_insert_after_preserves_crlf_source_segments() {
         "existing CRLF segments after the anchor should be preserved"
     );
 }
-
 #[test]
 fn apply_insert_before_preserves_utf8_bom_prefix() {
     let mut temp_file = Builder::new()
@@ -1016,7 +1002,6 @@ fn apply_insert_before_preserves_utf8_bom_prefix() {
         "insert text should be placed after BOM and before anchor"
     );
 }
-
 #[test]
 fn apply_insert_operation_returns_parse_failure_for_nul_python_source() {
     let mut temp_file = Builder::new()
@@ -1058,7 +1043,6 @@ fn apply_insert_operation_returns_parse_failure_for_nul_python_source() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "parse_failure");
 }
-
 #[test]
 fn apply_reports_deterministic_error_for_duplicated_same_target_operations() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1139,7 +1123,6 @@ fn apply_reports_deterministic_error_for_duplicated_same_target_operations() {
         "error message should be deterministic for duplicated same-target operations"
     );
 }
-
 #[test]
 fn apply_reports_deterministic_error_for_three_operation_conflict_permutations() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1245,7 +1228,6 @@ fn apply_reports_deterministic_error_for_three_operation_conflict_permutations()
         }
     }
 }
-
 #[test]
 fn apply_rejects_span_hint_with_start_greater_than_end() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1292,7 +1274,6 @@ fn apply_rejects_span_hint_with_start_greater_than_end() {
         "expected span_hint validation message"
     );
 }
-
 #[test]
 fn apply_rejects_zero_length_span_hint() {
     let fixture = fixture_path("ambiguous.py");
@@ -1357,7 +1338,6 @@ fn apply_rejects_zero_length_span_hint() {
         "expected zero-length span_hint validation message"
     );
 }
-
 #[test]
 fn apply_rejects_extreme_span_values_without_panicking() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1398,7 +1378,6 @@ fn apply_rejects_extreme_span_values_without_panicking() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
 }
-
 #[test]
 fn apply_rejects_non_matching_span_hint_for_unique_target() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1445,7 +1424,6 @@ fn apply_rejects_non_matching_span_hint_for_unique_target() {
         "expected span_hint mismatch message"
     );
 }
-
 #[test]
 fn apply_preserves_real_newlines_in_replacement_text() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -1496,496 +1474,4 @@ fn apply_preserves_real_newlines_in_replacement_text() {
         modified.lines().count() > 5,
         "multiline replacement should add lines"
     );
-}
-
-#[test]
-fn apply_json_mode_rejects_invalid_json_payload() {
-    let output = run_identedit_with_stdin(&["apply", "--json"], "{");
-    assert!(
-        !output.status.success(),
-        "apply should fail for malformed JSON request"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_changeset_file_invalid_utf8_contents_return_io_error() {
-    let mut changeset_file = Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .expect("changeset temp file should be created");
-    changeset_file
-        .write_all(&[0xFF, 0xFE, 0xFD])
-        .expect("invalid utf8 payload write should succeed");
-
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should fail for invalid UTF-8 changeset file"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
-}
-
-#[test]
-fn apply_changeset_file_bom_only_payload_returns_invalid_request() {
-    let mut changeset_file = Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .expect("changeset temp file should be created");
-    changeset_file
-        .write_all(&[0xEF, 0xBB, 0xBF])
-        .expect("bom-only payload write should succeed");
-
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject BOM-only changeset payload"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_changeset_file_empty_or_whitespace_payload_returns_invalid_request() {
-    for payload in ["", " ", "\n\t", "\r\n    "] {
-        let changeset_file = write_changeset_json(payload);
-        let output = run_identedit(&[
-            "apply",
-            changeset_file
-                .path()
-                .to_str()
-                .expect("changeset path should be utf-8"),
-        ]);
-        assert!(
-            !output.status.success(),
-            "apply should reject empty/whitespace file-mode payload"
-        );
-
-        let response: Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        assert_eq!(response["error"]["type"], "invalid_request");
-    }
-}
-
-#[test]
-fn apply_changeset_file_duplicate_field_is_deterministic_parse_error() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let file_literal = json_string_literal(&file_path);
-    let payload = format!(
-        "{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}],\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}]}}"
-    );
-
-    let changeset_file = write_raw_changeset_json(&payload);
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject duplicate fields in changeset file"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("duplicate field")),
-        "expected deterministic duplicate-field parse message"
-    );
-}
-
-#[test]
-fn apply_changeset_file_unknown_field_rejected_by_strict_mode() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let changeset = json!({
-        "file": file_path.to_string_lossy().to_string(),
-        "operations": [],
-        "unexpected": true
-    });
-
-    let changeset_file = write_changeset_json(&changeset.to_string());
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject unknown fields in file-mode changeset"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("unknown field `unexpected`")),
-        "expected deny_unknown_fields message in file mode"
-    );
-}
-
-#[test]
-fn apply_changeset_file_rejects_wrapped_command_payload() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let payload = json!({
-        "command": "apply",
-        "file": file_path.to_string_lossy().to_string(),
-        "operations": []
-    });
-
-    let changeset_file = write_changeset_json(&payload.to_string());
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject command-wrapped payload in file mode"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("unknown field `command`")),
-        "expected strict unknown-field rejection for wrapped command payload"
-    );
-}
-
-#[test]
-fn apply_changeset_file_raw_v1_payload_is_rejected_after_v2_cutover() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let file_literal = json_string_literal(&file_path);
-    let payload = format!("{{\"file\":\"{file_literal}\",\"operations\":[]}}");
-
-    let changeset_file = write_raw_changeset_json(&payload);
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply file mode should reject raw v1 payload post v2 cutover"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("unknown field `file`")),
-        "expected explicit v1->v2 parse diagnostic in file mode"
-    );
-}
-
-#[test]
-fn apply_changeset_file_rejects_non_object_top_level_payload() {
-    for payload in ["[]", "null", "1"] {
-        let changeset_file = write_changeset_json(payload);
-        let output = run_identedit(&[
-            "apply",
-            changeset_file
-                .path()
-                .to_str()
-                .expect("changeset path should be utf-8"),
-        ]);
-        assert!(
-            !output.status.success(),
-            "apply should reject non-object file-mode payload"
-        );
-
-        let response: Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        assert_eq!(response["error"]["type"], "invalid_request");
-    }
-}
-
-#[test]
-fn apply_changeset_file_utf8_bom_prefixed_payload_returns_invalid_request() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let changeset = json!({
-        "file": file_path.to_string_lossy().to_string(),
-        "operations": []
-    });
-
-    let mut changeset_file = Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .expect("changeset temp file should be created");
-    changeset_file
-        .write_all(&[0xEF, 0xBB, 0xBF])
-        .expect("bom prefix write should succeed");
-    changeset_file
-        .write_all(changeset.to_string().as_bytes())
-        .expect("changeset payload write should succeed");
-
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject BOM-prefixed changeset file payload"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_changeset_file_trailing_garbage_returns_invalid_request() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let changeset = json!({
-        "file": file_path.to_string_lossy().to_string(),
-        "operations": []
-    });
-    let payload = format!("{}\ntrailing-garbage", changeset);
-
-    let changeset_file = write_changeset_json(&payload);
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject trailing garbage in file-mode changeset payload"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_changeset_file_trailing_nul_returns_invalid_request() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let changeset = json!({
-        "file": file_path.to_string_lossy().to_string(),
-        "operations": []
-    });
-
-    let mut changeset_file = Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .expect("changeset temp file should be created");
-    changeset_file
-        .write_all(changeset.to_string().as_bytes())
-        .expect("changeset payload write should succeed");
-    changeset_file
-        .write_all(&[0x00])
-        .expect("trailing nul write should succeed");
-
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject file-mode changeset with trailing NUL byte"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-}
-
-#[test]
-fn apply_changeset_file_nested_duplicate_fields_are_deterministic_parse_errors() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let file_literal = json_string_literal(&file_path);
-    let payloads = [
-        format!(
-            "{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"identity\":\"b\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}"
-        ),
-        format!(
-            "{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\",\"new_text\":\"y\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}"
-        ),
-        format!(
-            "{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[{{\"target\":{{\"identity\":\"a\",\"kind\":\"function_definition\",\"expected_old_hash\":\"0000000000000000\"}},\"op\":{{\"type\":\"replace\",\"new_text\":\"x\"}},\"preview\":{{\"old_text\":\"a\",\"new_text\":\"x\",\"matched_span\":{{\"start\":0,\"start\":1,\"end\":1}}}}}}]}}],\"transaction\":{{\"mode\":\"all_or_nothing\"}}}}"
-        ),
-    ];
-
-    for payload in payloads {
-        let changeset_file = write_raw_changeset_json(&payload);
-        let output = run_identedit(&[
-            "apply",
-            changeset_file
-                .path()
-                .to_str()
-                .expect("changeset path should be utf-8"),
-        ]);
-        assert!(
-            !output.status.success(),
-            "apply should reject nested duplicate fields in file-mode changeset"
-        );
-
-        let response: Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        assert_eq!(response["error"]["type"], "invalid_request");
-        assert!(
-            response["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("duplicate field")),
-            "expected deterministic duplicate-field parse error message"
-        );
-    }
-}
-
-#[test]
-fn apply_changeset_file_duplicate_transaction_mode_key_is_parse_error() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let file_literal = json_string_literal(&file_path);
-    let payload = format!(
-        "{{\"files\":[{{\"file\":\"{file_literal}\",\"operations\":[]}}],\"transaction\":{{\"mode\":\"all_or_nothing\",\"mode\":\"all_or_nothing\"}}}}"
-    );
-
-    let changeset_file = write_raw_changeset_json(&payload);
-    let output = run_identedit(&[
-        "apply",
-        changeset_file
-            .path()
-            .to_str()
-            .expect("changeset path should be utf-8"),
-    ]);
-    assert!(
-        !output.status.success(),
-        "apply should reject duplicate transaction.mode in file-mode changeset"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("duplicate field `mode`")),
-        "expected deterministic duplicate transaction.mode parse message"
-    );
-}
-
-#[test]
-fn apply_stdin_mode_rejects_unknown_field_in_bare_changeset_payload() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let payload = json!({
-        "file": file_path.to_string_lossy().to_string(),
-        "operations": [],
-        "unexpected": true
-    });
-
-    let output = run_identedit_with_stdin(&["apply"], &payload.to_string());
-    assert!(
-        !output.status.success(),
-        "apply stdin mode should reject unknown fields in bare changeset"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("unknown field `unexpected`")),
-        "expected deny_unknown_fields message in stdin mode"
-    );
-}
-
-#[test]
-fn apply_stdin_mode_raw_v1_payload_is_rejected_after_v2_cutover() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let file_literal = json_string_literal(&file_path);
-    let payload = format!("{{\"file\":\"{file_literal}\",\"operations\":[]}}");
-
-    let output = run_identedit_with_raw_stdin(&["apply"], payload.as_bytes());
-    assert!(
-        !output.status.success(),
-        "apply stdin mode should reject raw v1 payload post v2 cutover"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("unknown field `file`")),
-        "expected explicit v1->v2 parse diagnostic in stdin mode"
-    );
-}
-
-#[test]
-fn apply_stdin_mode_empty_file_path_returns_io_error() {
-    let payload = json!({
-        "file": "",
-        "operations": []
-    });
-
-    let output = run_identedit_with_stdin(&["apply"], &payload.to_string());
-    assert!(
-        !output.status.success(),
-        "apply should fail for bare stdin payload with empty file path"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
-}
-
-#[test]
-fn apply_stdin_mode_escaped_nul_file_path_returns_io_error() {
-    let output = run_identedit_with_stdin(&["apply"], r#"{"file":"\u0000","operations":[]}"#);
-    assert!(
-        !output.status.success(),
-        "apply should fail for bare stdin payload with escaped NUL file path"
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "io_error");
 }

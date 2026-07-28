@@ -184,7 +184,7 @@ fn transform_replace_and_apply_support_lua_function_declaration() {
     let replacement = "function helper(value)\n  return value * 3\nend";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -249,7 +249,7 @@ fn transform_reports_ambiguous_target_for_duplicate_lua_function_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "function helper(value)\n  return value + 2\nend",
@@ -419,7 +419,7 @@ fn apply_reports_precondition_failed_after_lua_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "function helper(value)\n  return value * 4\nend",

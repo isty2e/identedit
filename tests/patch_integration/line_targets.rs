@@ -10,7 +10,7 @@ fn patch_line_replace_range_accepts_stdin_text_payload() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--anchor",
+            "--at",
             start_anchor.as_str(),
             "--replace-range",
             "--end-anchor",
@@ -42,7 +42,7 @@ fn patch_flag_rejects_inline_text_and_text_file_together() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "def process_data(value):\n    return value * 22",
@@ -77,7 +77,7 @@ fn patch_line_set_line_text_file_preserves_crlf() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         anchor.as_str(),
         "--set-line",
         "--text-file",
@@ -105,7 +105,7 @@ fn patch_line_replace_range_empty_stdin_deletes_range() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--anchor",
+            "--at",
             start_anchor.as_str(),
             "--replace-range",
             "--end-anchor",
@@ -135,7 +135,7 @@ fn patch_line_set_line_empty_stdin_preserves_crlf_line_endings() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--anchor",
+            "--at",
             anchor.as_str(),
             "--set-line",
             "--stdin-text",
@@ -163,7 +163,7 @@ fn patch_line_insert_after_line_text_file_multiline_preserves_crlf() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         anchor.as_str(),
         "--insert-after-line",
         "--text-file",
@@ -190,7 +190,7 @@ fn patch_set_line_stdin_text_preserves_literal_dash_payload() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--anchor",
+            "--at",
             anchor.as_str(),
             "--set-line",
             "--stdin-text",
@@ -220,7 +220,7 @@ fn patch_node_replace_stdin_text_with_line_only_flag_reports_node_guidance() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--identity",
+            "--at",
             identity,
             "--replace",
             "--stdin-text",
@@ -258,7 +258,7 @@ fn patch_line_set_line_text_file_directory_returns_io_error_without_mutation() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         anchor.as_str(),
         "--set-line",
         "--text-file",
@@ -288,7 +288,7 @@ fn patch_line_insert_after_line_stdin_dry_run_does_not_modify_file() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--anchor",
+            "--at",
             anchor.as_str(),
             "--insert-after-line",
             "--stdin-text",
@@ -322,7 +322,7 @@ fn patch_line_rejects_direct_symlink_without_mutating_target() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         anchor.as_str(),
         "--set-line",
         "changed",
@@ -362,7 +362,7 @@ fn patch_line_preserves_file_permissions() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         anchor.as_str(),
         "--set-line",
         "changed",
@@ -393,7 +393,7 @@ fn patch_set_line_stdin_utf8_bom_payload_preserves_bytes() {
     let output = run_identedit_with_stdin(
         &[
             "patch",
-            "--anchor",
+            "--at",
             anchor.as_str(),
             "--set-line",
             "--stdin-text",
@@ -461,7 +461,7 @@ fn patch_insert_before_writes_at_anchor_start() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--insert-before",
         "# inserted-before-helper\n",
@@ -491,7 +491,7 @@ fn patch_insert_after_writes_at_anchor_end() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--insert-after",
         "\n# inserted-after-helper\n",
@@ -532,7 +532,7 @@ fn patch_line_flag_set_line_applies_change() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--set-line",
         "B",
@@ -567,7 +567,7 @@ fn patch_line_flag_set_line_dry_run_previews_without_writing() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--set-line",
         "B",
@@ -604,7 +604,7 @@ fn patch_line_flag_set_line_dry_run_diff_outputs_file_diff_without_writing() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--set-line",
         "B",
@@ -647,7 +647,7 @@ fn patch_line_flag_replace_range_supports_end_anchor() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--end-anchor",
         &end_anchor,
@@ -680,7 +680,7 @@ fn patch_line_flag_insert_after_line_applies_change() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--insert-after-line",
         "x",
@@ -711,7 +711,7 @@ fn patch_line_flag_supports_auto_repair() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &stale_anchor,
         "--set-line",
         "B",
@@ -745,7 +745,7 @@ fn patch_line_flag_auto_repair_dry_run_does_not_modify_file() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &stale_anchor,
         "--set-line",
         "B",
@@ -770,22 +770,20 @@ fn patch_line_flag_auto_repair_dry_run_does_not_modify_file() {
 }
 
 #[test]
-fn patch_flag_rejects_identity_and_anchor_together() {
+fn patch_flag_rejects_at_and_config_path_together() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_named_function_handle(&file_path, "process_*");
     let identity = handle["identity"]
         .as_str()
         .expect("identity should be present");
-    let anchor = line_ref("a\nb\n", 1);
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
-        "--anchor",
-        &anchor,
-        "--replace",
-        "def process_data(value):\n    return value * 9",
+        "--config-path",
+        "process_data",
+        "--delete",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(
@@ -798,9 +796,9 @@ fn patch_flag_rejects_identity_and_anchor_together() {
         .as_str()
         .expect("error message should be present");
     assert!(
-        message.contains("Choose exactly one target selector")
-            && message.contains("--identity")
-            && message.contains("--anchor"),
+        message.contains("--config-path cannot be combined")
+            && message.contains("--at")
+            && message.contains("--config-path"),
         "mixed target error should list the valid selector families"
     );
 }
@@ -820,7 +818,7 @@ fn patch_flag_rejects_line_target_with_node_operation() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--replace",
         "x",
@@ -839,7 +837,7 @@ fn patch_flag_rejects_line_target_with_node_operation() {
         message.contains("--set-line")
             && message.contains("--replace-range")
             && message.contains("--insert-after-line")
-            && message.contains("--identity"),
+            && message.contains("--at"),
         "line-mode error should list valid line flags and point back to node targeting"
     );
 }
@@ -854,7 +852,7 @@ fn patch_flag_rejects_node_target_with_line_operation() {
 
     let output = run_identedit(&[
         "patch",
-        "--identity",
+        "--at",
         identity,
         "--set-line",
         "x",
@@ -873,7 +871,7 @@ fn patch_flag_rejects_node_target_with_line_operation() {
         message.contains("--replace")
             && message.contains("--delete")
             && message.contains("--insert-before")
-            && message.contains("--anchor"),
+            && message.contains("--at"),
         "node-mode error should list valid node flags and point to line targeting"
     );
 }
@@ -894,7 +892,7 @@ fn patch_flag_rejects_end_anchor_without_replace_range() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--end-anchor",
         &end_anchor,
@@ -925,7 +923,7 @@ fn patch_flag_rejects_multiple_line_operations() {
 
     let output = run_identedit(&[
         "patch",
-        "--anchor",
+        "--at",
         &anchor,
         "--set-line",
         "x",

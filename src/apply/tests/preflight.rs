@@ -51,10 +51,10 @@ fn build_move_changeset_with_hash(
                 OpKind::Move {
                     to: destination.to_path_buf(),
                 },
-                ChangePreview::move_operation(Some(crate::changeset::MovePreview {
+                ChangePreview::move_operation(crate::changeset::MovePreview {
                     from: source.to_path_buf(),
                     to: destination.to_path_buf(),
-                })),
+                }),
             )
             .expect("move changeset should be canonical"),
         ],
@@ -1818,23 +1818,6 @@ fn move_graph_validation_failure_skips_before_write_hook() {
 }
 
 #[test]
-fn move_validation_allows_missing_move_preview_payload_for_backward_compatibility() {
-    let directory = tempdir().expect("tempdir should be created");
-    let source = directory.path().join("source.py");
-    let destination = directory.path().join("destination.py");
-    std::fs::write(&source, "def move_me():\n    return 1\n").expect("fixture write should work");
-
-    let mut move_changeset = build_move_changeset(&source, &destination);
-    move_changeset.operations[0]
-        .replace_preview(ChangePreview::move_operation(None))
-        .expect("missing move preview payload should remain canonical");
-
-    let plans = validate_move_operation_constraints(&[move_changeset])
-        .expect("missing move preview should remain backward-compatible");
-    assert_eq!(plans.len(), 1);
-}
-
-#[test]
 fn move_validation_rejects_mismatched_move_preview_paths() {
     let directory = tempdir().expect("tempdir should be created");
     let source = directory.path().join("source.py");
@@ -1843,12 +1826,12 @@ fn move_validation_rejects_mismatched_move_preview_paths() {
 
     let mut move_changeset = build_move_changeset(&source, &destination);
     move_changeset.operations[0]
-        .replace_preview(ChangePreview::move_operation(Some(
+        .replace_preview(ChangePreview::move_operation(
             crate::changeset::MovePreview {
                 from: directory.path().join("other.py"),
                 to: destination.clone(),
             },
-        )))
+        ))
         .expect("mismatched move paths still use the canonical move preview family");
 
     let error = validate_move_operation_constraints(&[move_changeset])

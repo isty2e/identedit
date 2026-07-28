@@ -105,14 +105,8 @@ fn transform_apply_preserves_crlf_segments_for_typescript() {
         .expect("identity should be present");
 
     let replacement = "function processData(value: number): number {\r\n  return value - 1;\r\n}";
-    let transform_output = run_identedit(&[
-        "edit",
-        "--identity",
-        identity,
-        "--replace",
-        replacement,
-        path,
-    ]);
+    let transform_output =
+        run_identedit(&["edit", "--at", identity, "--replace", replacement, path]);
     assert!(
         transform_output.status.success(),
         "transform failed: {}",
@@ -166,14 +160,8 @@ fn transform_apply_preserves_cr_only_segments_for_tsx() {
         .expect("identity should be present");
 
     let replacement = "export function View(): JSX.Element {\r  return <main>Updated</main>;\r}";
-    let transform_output = run_identedit(&[
-        "edit",
-        "--identity",
-        identity,
-        "--replace",
-        replacement,
-        path,
-    ]);
+    let transform_output =
+        run_identedit(&["edit", "--at", identity, "--replace", replacement, path]);
     assert!(
         transform_output.status.success(),
         "transform failed: {}",

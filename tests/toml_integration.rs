@@ -151,7 +151,7 @@ fn transform_replace_and_apply_support_toml_pair_rewrite() {
     let replacement = "title = \"identedit-updated\"";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -271,7 +271,7 @@ fn stress_select_and_transform_cover_inline_tables_dotted_keys_and_array_tables(
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         dotted_key_identity,
         "--replace",
         "servers.primary",
@@ -339,7 +339,7 @@ fn transform_reports_ambiguous_target_for_duplicate_toml_pair_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "enabled = false",
@@ -572,7 +572,7 @@ fn transform_reports_ambiguous_target_for_duplicate_toml_table_array_pair_identi
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "name = \"deploy\"\nlabels = { team = \"platform\" }",

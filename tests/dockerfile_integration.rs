@@ -217,7 +217,7 @@ fn transform_replace_and_apply_support_dockerfile_env_instruction() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "ENV APP_HOME=/tmp",
@@ -283,7 +283,7 @@ fn transform_reports_ambiguous_target_for_duplicate_dockerfile_run_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "RUN echo patched",
@@ -478,7 +478,7 @@ fn apply_reports_precondition_failed_after_dockerfile_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "ENV APP_HOME=/opt",

@@ -119,7 +119,7 @@ fn transform_replace_and_apply_support_rust_function_item() {
     let replacement = "pub fn process_data(value: i32) -> i32 {\n    value - 1\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -187,7 +187,7 @@ fn select_transform_apply_pipeline_supports_rust_enum_rewrite() {
     let replacement = "pub enum Mode {\n    Fast,\n    Slow,\n    Turbo,\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

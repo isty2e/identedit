@@ -135,7 +135,7 @@ fn transform_replace_and_apply_support_perl_function_definition() {
     let replacement = "sub process_data {\n    my ($value) = @_;\n    return $value + 2;\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,

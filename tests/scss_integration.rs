@@ -189,7 +189,7 @@ fn transform_replace_and_apply_support_scss_mixin_statement() {
     let replacement = "@mixin card($padding) {\n  padding: $padding;\n  border-radius: 12px;\n  background-color: darken($primary, 10%);\n}";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -256,7 +256,7 @@ fn transform_reports_ambiguous_target_for_duplicate_scss_mixin_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "@mixin configure($value) {\n  color: lighten($value, 10%);\n}",
@@ -429,7 +429,7 @@ fn apply_reports_precondition_failed_after_scss_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "@mixin card($padding) {\n  padding: $padding;\n  border-radius: 12px;\n  background-color: $primary;\n}",
@@ -540,7 +540,7 @@ fn transform_replace_and_apply_preserve_crlf_scss_source_segments() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "@mixin card($padding) {\n  padding: $padding;\n  border-radius: 10px;\n}",
@@ -634,7 +634,7 @@ fn transform_reports_ambiguous_target_for_duplicate_scss_function_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "@function tone($value) {\n  @return $value * 3;\n}",

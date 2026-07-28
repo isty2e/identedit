@@ -75,7 +75,7 @@ fn assert_error_type(output: Output, expected_type: &str) -> Value {
 }
 
 #[test]
-fn jsts_non_utf8_select_transform_are_parse_failure() {
+fn jsts_non_utf8_read_is_parse_failure_and_edit_is_io_error() {
     for case in jsts_cases() {
         let mut bytes = b"function processData(value) {\n  return value + 1;\n}\n".to_vec();
         bytes.push(0xff);
@@ -103,20 +103,19 @@ fn jsts_non_utf8_select_transform_are_parse_failure() {
 
         let transform_output = run_identedit(&[
             "edit",
-            "--identity",
-            "deadbeef",
+            "--at",
+            "deadbeefdeadbeef",
             "--replace",
             "function replacement() { return 0; }",
             path,
         ]);
-        let transform_response = assert_error_type(transform_output, "parse_failure");
+        let transform_response = assert_error_type(transform_output, "io_error");
         let transform_message = transform_response["error"]["message"]
             .as_str()
             .expect("error.message should be a string");
         assert!(
-            transform_message.contains(case.provider),
-            "transform parse failure should mention '{}', got: {transform_message}",
-            case.provider
+            transform_message.contains("invalid utf-8"),
+            "edit I/O error should explain invalid UTF-8, got: {transform_message}"
         );
     }
 }
@@ -181,8 +180,8 @@ fn jsts_embedded_nul_select_transform_apply_are_parse_failure() {
 
         let transform_output = run_identedit(&[
             "edit",
-            "--identity",
-            "deadbeef",
+            "--at",
+            "deadbeefdeadbeef",
             "--replace",
             "function replacement() { return 0; }",
             path,

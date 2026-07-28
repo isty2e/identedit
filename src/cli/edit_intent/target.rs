@@ -7,12 +7,12 @@ use crate::hash::HASH_HEX_LEN;
 use crate::hashline::{HASHLINE_PUBLIC_HEX_LEN, LineAnchor};
 use crate::selector::Selector;
 
-use super::PatchArgs;
+use super::EditIntentArgs;
 
 const CANDIDATE_PREVIEW_MAX_CHARS: usize = 120;
 
 #[derive(Debug, Clone)]
-pub(super) enum PatchTargetIngress {
+pub(super) enum EditTargetIngress {
     NodeIdentity(String),
     NodeSelector { kind: String, name_pattern: String },
     NodeSymbol(String),
@@ -32,64 +32,47 @@ pub(super) enum NodeTargetSelector {
 impl NodeTargetSelector {
     pub(super) fn resolve(self, file: &Path) -> Result<SelectionHandle, IdenteditError> {
         match self {
-            Self::Identity(identity) => resolve_unique_identity_handle_for_patch(file, &identity),
+            Self::Identity(identity) => resolve_unique_identity_handle(file, &identity),
             Self::Selector { kind, name_pattern } => {
-                resolve_unique_selector_handle_for_patch(file, &kind, &name_pattern)
+                resolve_unique_selector_handle(file, &kind, &name_pattern)
             }
-            Self::Symbol(symbol) => resolve_unique_symbol_handle_for_patch(file, &symbol),
+            Self::Symbol(symbol) => resolve_unique_symbol_handle(file, &symbol),
         }
     }
 }
 
-pub(super) fn resolve_patch_target_ingress(
-    args: &PatchArgs,
-) -> Result<PatchTargetIngress, IdenteditError> {
+pub(super) fn resolve_edit_target_ingress(
+    args: &EditIntentArgs,
+) -> Result<EditTargetIngress, IdenteditError> {
     let selector_present = args.kind.is_some() || args.name.is_some();
     let symbol_present = args.symbol.is_some();
 
     if let Some(path) = args.config_path.clone() {
-        if args.at.is_some()
-            || args.identity.is_some()
-            || args.anchor.is_some()
-            || selector_present
-            || symbol_present
-        {
+        if args.at.is_some() || selector_present || symbol_present {
             return Err(IdenteditError::InvalidRequest {
-                message: "--config-path cannot be combined with --at, --identity, --anchor, --kind, --name, or --symbol. Config path mode supports --set-value, --append-value, or --delete. Use --create-missing only with --set-value.".to_string(),
+                message: "--config-path cannot be combined with --at, --kind, --name, or --symbol. Config path mode supports --set-value, --append-value, or --delete. Use --create-missing only with --set-value.".to_string(),
             });
         }
-        return Ok(PatchTargetIngress::ConfigPath(path));
+        return Ok(EditTargetIngress::ConfigPath(path));
     }
 
     if let Some(at) = args.at.as_deref() {
-        if args.identity.is_some() || args.anchor.is_some() || selector_present || symbol_present {
+        if selector_present || symbol_present {
             return Err(IdenteditError::InvalidRequest {
                 message:
-                    "Choose exactly one target selector. Use --at <target> by itself, or use --identity, --anchor, --symbol, or --kind with --name."
+                    "Choose exactly one target selector. Use --at <target> by itself, or use --symbol or --kind with --name."
                         .to_string(),
             });
         }
-        return parse_patch_at_target(at);
+        return parse_at_target(at);
     }
 
-    match (
-        args.identity.clone(),
-        args.anchor.clone(),
-        args.kind.clone(),
-        args.name.clone(),
-        args.symbol.clone(),
-    ) {
-        (Some(identity), None, None, None, None) => Ok(PatchTargetIngress::NodeIdentity(identity)),
-        (None, Some(anchor), None, None, None) => LineAnchor::parse(&anchor)
-            .map(PatchTargetIngress::LineAnchor)
-            .map_err(|error| IdenteditError::InvalidRequest {
-                message: error.to_string(),
-            }),
-        (None, None, Some(kind), Some(name_pattern), None) => {
-            Ok(PatchTargetIngress::NodeSelector { kind, name_pattern })
+    match (args.kind.clone(), args.name.clone(), args.symbol.clone()) {
+        (Some(kind), Some(name_pattern), None) => {
+            Ok(EditTargetIngress::NodeSelector { kind, name_pattern })
         }
-        (None, None, None, None, Some(symbol)) => Ok(PatchTargetIngress::NodeSymbol(symbol)),
-        (None, None, Some(_), None, None) | (None, None, None, Some(_), None) => {
+        (None, None, Some(symbol)) => Ok(EditTargetIngress::NodeSymbol(symbol)),
+        (Some(_), None, None) | (None, Some(_), None) => {
             Err(IdenteditError::InvalidRequest {
                 message:
                     "Direct symbol targeting requires both --kind and --name. Example: --kind function_definition --name process_*."
@@ -98,23 +81,23 @@ pub(super) fn resolve_patch_target_ingress(
         }
         _ => Err(IdenteditError::InvalidRequest {
             message:
-                "Choose exactly one target selector in flag mode: --at <target>, --identity <hex16>, --anchor <line:hash>, --symbol <name>, or --kind <kind> --name <glob>."
+                "Choose exactly one target selector in flag mode: --at <target>, --symbol <name>, or --kind <kind> --name <glob>."
                     .to_string(),
         }),
     }
 }
 
-fn parse_patch_at_target(raw: &str) -> Result<PatchTargetIngress, IdenteditError> {
+fn parse_at_target(raw: &str) -> Result<EditTargetIngress, IdenteditError> {
     let normalized = raw.trim();
     if normalized.eq_ignore_ascii_case("file-start") {
-        return Ok(PatchTargetIngress::FileStart);
+        return Ok(EditTargetIngress::FileStart);
     }
     if normalized.eq_ignore_ascii_case("file-end") {
-        return Ok(PatchTargetIngress::FileEnd);
+        return Ok(EditTargetIngress::FileEnd);
     }
 
     if is_hex_with_len(normalized, HASH_HEX_LEN) {
-        return Ok(PatchTargetIngress::NodeIdentity(
+        return Ok(EditTargetIngress::NodeIdentity(
             normalized.to_ascii_lowercase(),
         ));
     }
@@ -124,7 +107,7 @@ fn parse_patch_at_target(raw: &str) -> Result<PatchTargetIngress, IdenteditError
             LineAnchor::parse(normalized).map_err(|error| IdenteditError::InvalidRequest {
                 message: error.to_string(),
             })?;
-        return Ok(PatchTargetIngress::LineAnchor(anchor));
+        return Ok(EditTargetIngress::LineAnchor(anchor));
     }
 
     Err(IdenteditError::InvalidRequest {
@@ -139,11 +122,11 @@ fn is_hex_with_len(value: &str, len: usize) -> bool {
     value.len() == len && value.as_bytes().iter().all(u8::is_ascii_hexdigit)
 }
 
-fn resolve_unique_identity_handle_for_patch(
+fn resolve_unique_identity_handle(
     file: &Path,
     identity: &str,
 ) -> Result<SelectionHandle, IdenteditError> {
-    let (source_text, handles) = parse_patch_handles(file)?;
+    let (source_text, handles) = parse_target_handles(file)?;
     let matches = handles
         .iter()
         .filter(|handle| handle.identity == identity)
@@ -165,12 +148,12 @@ fn resolve_unique_identity_handle_for_patch(
     }
 }
 
-fn resolve_unique_selector_handle_for_patch(
+fn resolve_unique_selector_handle(
     file: &Path,
     kind: &str,
     name_pattern: &str,
 ) -> Result<SelectionHandle, IdenteditError> {
-    let (source_text, handles) = parse_patch_handles(file)?;
+    let (source_text, handles) = parse_target_handles(file)?;
     let selector = Selector {
         kind: kind.to_string(),
         name_pattern: Some(name_pattern.to_string()),
@@ -194,7 +177,7 @@ fn resolve_unique_selector_handle_for_patch(
     }
 }
 
-fn resolve_unique_symbol_handle_for_patch(
+fn resolve_unique_symbol_handle(
     file: &Path,
     symbol: &str,
 ) -> Result<SelectionHandle, IdenteditError> {
@@ -205,7 +188,7 @@ fn resolve_unique_symbol_handle_for_patch(
         });
     }
 
-    let (source_text, handles) = parse_patch_handles(file)?;
+    let (source_text, handles) = parse_target_handles(file)?;
     let matches = handles
         .iter()
         .filter(|handle| symbol_matches(handle, &handles, query))
@@ -228,7 +211,7 @@ fn resolve_unique_symbol_handle_for_patch(
     }
 }
 
-fn parse_patch_handles(file: &Path) -> Result<(String, Vec<SelectionHandle>), IdenteditError> {
+fn parse_target_handles(file: &Path) -> Result<(String, Vec<SelectionHandle>), IdenteditError> {
     let context = ExecutionContext::new();
     let source_text = context.read_file_utf8(file)?;
     let handles = context.parse_handles_for_source(file, source_text.as_bytes())?;

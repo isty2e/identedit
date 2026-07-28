@@ -204,7 +204,7 @@ fn transform_replace_and_apply_support_hcl_attribute() {
     let replacement = "project = \"identedit-next\"";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -271,7 +271,7 @@ fn transform_reports_ambiguous_target_for_duplicate_hcl_attribute_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "project = \"identedit-next\"",
@@ -451,7 +451,7 @@ fn apply_reports_precondition_failed_after_hcl_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "project = \"identedit-next\"",

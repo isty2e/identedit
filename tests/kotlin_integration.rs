@@ -193,7 +193,7 @@ fn transform_replace_and_apply_support_kotlin_function_declaration() {
         "fun processData(value: Int): Int {\n        return abs(value) + offset + 2\n    }";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -258,7 +258,7 @@ fn transform_reports_ambiguous_target_for_duplicate_kotlin_function_identity() {
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "fun configure(value: Int): Int {\n    return value + 2\n}",
@@ -428,7 +428,7 @@ fn apply_reports_precondition_failed_after_kotlin_source_mutation() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "fun processData(value: Int): Int {\n        return abs(value) + offset + 5\n    }",

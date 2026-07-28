@@ -121,8 +121,8 @@ fn transform_reports_parse_failure_for_syntax_invalid_jsts_variants() {
         let file_path = write_temp_source(case.suffix, case.source);
         let output = run_identedit(&[
             "edit",
-            "--identity",
-            "deadbeef",
+            "--at",
+            "deadbeefdeadbeef",
             "--replace",
             "function replacement() { return 0; }",
             file_path.to_str().expect("path should be utf-8"),

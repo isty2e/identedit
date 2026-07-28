@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use clap::Args;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -11,39 +10,9 @@ use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
 use crate::hash::{ContentHash, hash_text};
-use crate::transform::build::{build_changeset, build_delete_changeset, build_replace_changeset};
+use crate::transform::build::build_changeset;
 use crate::transform::parse::parse_handles_for_file;
 use crate::transform::resolve::resolve_target_in_handles;
-
-#[derive(Debug, Args)]
-pub struct EditBuildArgs {
-    #[arg(
-        long,
-        value_name = "IDENTITY",
-        help = "Target identity from read output (flag mode only)"
-    )]
-    pub identity: Option<String>,
-    #[arg(
-        long,
-        value_name = "TEXT",
-        help = "Replacement text for the target (--identity mode)"
-    )]
-    pub replace: Option<String>,
-    #[arg(long, help = "Delete the target node (--identity mode)")]
-    pub delete: bool,
-    #[arg(long, help = "Read edit request JSON from stdin")]
-    pub json: bool,
-    #[arg(
-        long,
-        help = "Emit verbose preview fields (old_text) instead of compact fields"
-    )]
-    pub verbose: bool,
-    #[arg(
-        value_name = "FILE",
-        help = "Input file in flag mode; omit when using --json"
-    )]
-    pub file: Option<PathBuf>,
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -281,46 +250,18 @@ impl NormalizeState {
     }
 }
 
-pub fn run_edit_build(args: EditBuildArgs) -> Result<MultiFileChangeset, IdenteditError> {
-    if args.json {
-        return run_edit_json_mode(args.verbose);
-    }
-
-    let file = args.file.ok_or_else(|| IdenteditError::InvalidRequest {
-        message: "FILE is required unless --json mode is enabled".to_string(),
-    })?;
-    let identity = args
-        .identity
-        .ok_or_else(|| IdenteditError::InvalidRequest {
-            message: "--identity is required unless --json mode is enabled".to_string(),
-        })?;
-
-    if args.replace.is_some() && args.delete {
-        return Err(IdenteditError::InvalidRequest {
-            message: "--replace and --delete cannot be used together".to_string(),
-        });
-    }
-
-    if let Some(replacement) = args.replace {
-        let file_change = build_replace_changeset(&file, &identity, replacement)?;
-        let mut changeset = wrap_single_file(file_change);
-        apply_preview_mode(&mut changeset, args.verbose);
-        return Ok(changeset);
-    }
-
-    if args.delete {
-        let file_change = build_delete_changeset(&file, &identity)?;
-        let mut changeset = wrap_single_file(file_change);
-        apply_preview_mode(&mut changeset, args.verbose);
-        return Ok(changeset);
-    }
-
-    Err(IdenteditError::InvalidRequest {
-        message: "--replace or --delete is required unless --json mode is enabled".to_string(),
-    })
+pub(crate) fn build_single_file_edit_plan(
+    file: PathBuf,
+    operation: EditOperation,
+    verbose: bool,
+) -> Result<MultiFileChangeset, IdenteditError> {
+    let file_change = build_changeset(&file, vec![operation])?;
+    let mut changeset = wrap_single_file(file_change);
+    apply_preview_mode(&mut changeset, verbose);
+    Ok(changeset)
 }
 
-fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, IdenteditError> {
+pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, IdenteditError> {
     let mut request_body = String::new();
     std::io::stdin()
         .read_to_string(&mut request_body)

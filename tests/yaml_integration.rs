@@ -131,7 +131,7 @@ fn transform_replace_and_apply_support_yaml_mapping_pair() {
     let replacement = "environment: prod";
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         replacement,
@@ -332,7 +332,7 @@ fn transform_reports_ambiguous_target_for_duplicate_yaml_mapping_pair_identity()
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "enabled: false",
@@ -546,7 +546,7 @@ fn transform_replace_and_apply_support_yaml_second_document_pair_rewrite() {
 
     let transform_output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         identity,
         "--replace",
         "timeout: 45",
@@ -613,7 +613,7 @@ fn transform_reports_ambiguous_target_for_duplicate_yaml_sequence_pair_identity(
 
     let output = run_identedit(&[
         "edit",
-        "--identity",
+        "--at",
         duplicate_identity,
         "--replace",
         "name: deploy",
