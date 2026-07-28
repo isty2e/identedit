@@ -72,14 +72,12 @@ fn collect_json_nodes(
             start: node.start_byte(),
             end: node.end_byte(),
         };
-        let normalized_text = normalize_value_text(kind, &text);
-
         handles.push(SelectionHandle::from_parts(
             path.to_path_buf(),
             span,
             kind.to_string(),
             inherited_name.clone(),
-            normalized_text,
+            text,
         ));
     }
 
@@ -116,7 +114,7 @@ fn collect_pair(node: Node<'_>, path: &Path, source: &[u8], handles: &mut Vec<Se
         key_span,
         "key".to_string(),
         Some(key_name.clone()),
-        key_name.clone(),
+        key_raw,
     ));
 
     collect_json_nodes(value_node, path, source, Some(key_name), handles);
@@ -134,14 +132,6 @@ fn normalized_kind(node_kind: &str) -> Option<&'static str> {
     }
 }
 
-fn normalize_value_text(kind: &str, text: &str) -> String {
-    if kind == "string" {
-        return decode_json_string(text).unwrap_or_else(|| text.to_string());
-    }
-
-    text.to_string()
-}
-
 fn decode_json_string(text: &str) -> Option<String> {
     serde_json::from_str::<String>(text).ok()
 }
@@ -155,7 +145,7 @@ mod tests {
     use crate::provider::StructureProvider;
 
     #[test]
-    fn parse_decodes_escaped_key_and_string_value_text() {
+    fn parse_preserves_raw_key_and_string_text_while_decoding_names() {
         let provider = JsonProvider;
         let source = br#"{"na\u006de":"va\u004Cue","quote\"key":"line\nvalue"}"#;
 
@@ -167,25 +157,25 @@ mod tests {
             .iter()
             .find(|handle| handle.kind == "key" && handle.name.as_deref() == Some("name"))
             .expect("decoded key handle should exist");
-        assert_eq!(name_key.text, "name");
+        assert_eq!(name_key.text, r#""na\u006de""#);
 
         let decoded_value = handles
             .iter()
             .find(|handle| handle.kind == "string" && handle.name.as_deref() == Some("name"))
             .expect("decoded string value handle should exist");
-        assert_eq!(decoded_value.text, "vaLue");
+        assert_eq!(decoded_value.text, r#""va\u004Cue""#);
 
         let quoted_key = handles
             .iter()
             .find(|handle| handle.kind == "key" && handle.name.as_deref() == Some("quote\"key"))
             .expect("escaped-quote key handle should exist");
-        assert_eq!(quoted_key.text, "quote\"key");
+        assert_eq!(quoted_key.text, r#""quote\"key""#);
 
         let multiline_value = handles
             .iter()
             .find(|handle| handle.kind == "string" && handle.name.as_deref() == Some("quote\"key"))
             .expect("escaped newline value handle should exist");
-        assert_eq!(multiline_value.text, "line\nvalue");
+        assert_eq!(multiline_value.text, r#""line\nvalue""#);
     }
 
     #[test]
@@ -291,13 +281,13 @@ mod tests {
             .iter()
             .find(|handle| handle.kind == "key" && handle.name.as_deref() == Some("😃"))
             .expect("emoji key handle should exist");
-        assert_eq!(emoji_key.text, "😃");
+        assert_eq!(emoji_key.text, r#""\uD83D\uDE03""#);
 
         let emoji_value = handles
             .iter()
             .find(|handle| handle.kind == "string" && handle.name.as_deref() == Some("😃"))
             .expect("emoji value handle should exist");
-        assert_eq!(emoji_value.text, "🚀");
+        assert_eq!(emoji_value.text, r#""\uD83D\uDE80""#);
     }
 
     #[test]
@@ -313,6 +303,6 @@ mod tests {
             .iter()
             .find(|handle| handle.kind == "string" && handle.name.as_deref() == Some("ctrl"))
             .expect("escaped string value handle should exist");
-        assert_eq!(escaped_value.text, "a\tb\\c\"d");
+        assert_eq!(escaped_value.text, r#""a\tb\\c\"d""#);
     }
 }
