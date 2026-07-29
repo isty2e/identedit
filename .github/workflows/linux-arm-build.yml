@@ -1,0 +1,39 @@
+name: linux-arm-build
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/linux-arm-build.yml"
+      - ".github/workflows/release-binaries.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "src/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-arm-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build ARM64 Linux release binary
+        run: cross build --locked --release --target aarch64-unknown-linux-gnu
