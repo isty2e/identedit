@@ -1,5 +1,7 @@
 # Identedit
 
+[![CI](https://github.com/isty2e/identedit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/isty2e/identedit/actions/workflows/ci.yml)
+
 Code editing for autonomous agents.
 
 ## Why
