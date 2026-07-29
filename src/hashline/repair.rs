@@ -120,7 +120,10 @@ fn normalize_repair_edit_texts(edits: &[HashlineEdit]) -> Vec<HashlineEdit> {
         .collect()
 }
 
-pub(super) fn apply_repair_merge_expansion(lines: &[String], resolved: &mut [ResolvedEdit]) {
+pub(super) fn apply_repair_merge_expansion(
+    source_layout: &super::show::SourceLayout,
+    resolved: &mut [ResolvedEdit],
+) {
     for resolved_edit in resolved.iter_mut() {
         let ResolvedOperation::ReplaceRange {
             start_line,
@@ -131,12 +134,19 @@ pub(super) fn apply_repair_merge_expansion(lines: &[String], resolved: &mut [Res
             continue;
         };
 
-        if *start_line != *end_line || replacement_lines.len() != 1 || *start_line >= lines.len() {
+        if *start_line != *end_line
+            || replacement_lines.len() != 1
+            || *start_line >= source_layout.line_count()
+        {
             continue;
         }
 
-        let current_line = &lines[*start_line - 1];
-        let next_line = &lines[*start_line];
+        let current_line = source_layout
+            .line_content(*start_line - 1)
+            .expect("validated current line should exist");
+        let next_line = source_layout
+            .line_content(*start_line)
+            .expect("validated next line should exist");
         if should_expand_single_line_merge(current_line, next_line, &replacement_lines[0]) {
             *end_line += 1;
             resolved_edit.span.end_line = *end_line;

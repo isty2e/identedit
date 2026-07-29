@@ -1087,7 +1087,7 @@ fn apply_set_line_preserves_cr_only_newlines() {
 }
 
 #[test]
-fn apply_set_line_normalizes_mixed_crlf_and_cr_source_to_lf() {
+fn apply_set_line_preserves_mixed_crlf_and_cr_source_endings() {
     let source = "a\r\nb\rc\r\n";
     let anchor = line_anchor(2, compute_line_hash("b"));
     let payload = format!(
@@ -1098,7 +1098,7 @@ fn apply_set_line_normalizes_mixed_crlf_and_cr_source_to_lf() {
     let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
 
     let applied = apply_hashline_edits(source, &edits).expect("apply should succeed");
-    assert_eq!(applied.content, "a\nB\nc\n");
+    assert_eq!(applied.content, "a\r\nB\rc\r\n");
 }
 
 #[test]
@@ -1661,8 +1661,8 @@ fn check_hashline_edits_counts_multiple_stale_anchors_in_one_edit() {
 }
 
 #[test]
-fn apply_mixed_newline_source_normalizes_to_lf() {
-    let source = "a\r\nb\nc\r\n";
+fn apply_mixed_newline_source_preserves_untouched_line_endings() {
+    let source = "a\r\nb\nc\r";
     let payload = format!(
         r#"[
   {{ "set_line": {{ "anchor": "{}", "new_text": "B" }} }}
@@ -1672,5 +1672,82 @@ fn apply_mixed_newline_source_normalizes_to_lf() {
     let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
 
     let applied = apply_hashline_edits(source, &edits).expect("apply should succeed");
-    assert_eq!(applied.content, "a\nB\nc\n");
+    assert_eq!(applied.content, "a\r\nB\nc\r");
+}
+
+#[test]
+fn apply_large_alternating_newline_source_preserves_every_untouched_terminator() {
+    let line_count = 10_000usize;
+    let target_line = 5_001usize;
+    let mut source = String::new();
+
+    for index in 0..line_count {
+        source.push_str(&format!("line-{index}"));
+        source.push_str(match index % 3 {
+            0 => "\r\n",
+            1 => "\r",
+            _ => "\n",
+        });
+    }
+
+    let old_text = format!("line-{}", target_line - 1);
+    let new_text = "updated";
+    let anchor = line_anchor(target_line, compute_line_hash(&old_text));
+    let payload = format!(
+        r#"[
+  {{ "set_line": {{ "anchor": "{anchor}", "new_text": "{new_text}" }} }}
+]"#
+    );
+    let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
+    let expected = source.replacen(&format!("{old_text}\n"), &format!("{new_text}\n"), 1);
+
+    let applied = apply_hashline_edits(&source, &edits).expect("apply should succeed");
+
+    assert_eq!(applied.content, expected);
+}
+
+#[test]
+fn apply_mixed_newline_range_uses_local_style_and_preserves_boundaries() {
+    let source = "a\r\nb\nc\r\nd\r";
+    let payload = format!(
+        r#"[
+  {{ "replace_lines": {{ "start_anchor": "{}", "end_anchor": "{}", "new_text": "x\ny" }} }}
+]"#,
+        line_ref(source, 2),
+        line_ref(source, 3)
+    );
+    let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
+
+    let applied = apply_hashline_edits(source, &edits).expect("apply should succeed");
+    assert_eq!(applied.content, "a\r\nx\ny\r\nd\r");
+}
+
+#[test]
+fn apply_mixed_newline_insert_after_uses_anchor_style_only_for_inserted_lines() {
+    let source = "a\r\nb\nc\r";
+    let payload = format!(
+        r#"[
+  {{ "insert_after": {{ "anchor": "{}", "text": "x\ny" }} }}
+]"#,
+        line_ref(source, 1)
+    );
+    let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
+
+    let applied = apply_hashline_edits(source, &edits).expect("apply should succeed");
+    assert_eq!(applied.content, "a\r\nx\r\ny\r\nb\nc\r");
+}
+
+#[test]
+fn apply_mixed_newline_delete_final_unterminated_line_preserves_no_trailing_newline() {
+    let source = "a\r\nb\nc";
+    let payload = format!(
+        r#"[
+  {{ "replace_lines": {{ "start_anchor": "{}", "new_text": "" }} }}
+]"#,
+        line_ref(source, 3)
+    );
+    let edits: Vec<HashlineEdit> = serde_json::from_str(&payload).expect("edits should parse");
+
+    let applied = apply_hashline_edits(source, &edits).expect("apply should succeed");
+    assert_eq!(applied.content, "a\r\nb");
 }

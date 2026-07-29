@@ -7,6 +7,7 @@ mod changeset;
 mod cli;
 mod error;
 mod execution_context;
+mod failed_diff;
 mod grammar;
 mod handle;
 mod hash;

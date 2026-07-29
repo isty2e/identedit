@@ -277,15 +277,10 @@ pub fn apply_hashline_edits_with_mode(
         return Err(HashlineApplyError::PreconditionFailed { check });
     }
 
-    let source_layout = show::split_source_lines(source);
-    let show::SourceLayout {
-        mut lines,
-        had_trailing_newline,
-        newline,
-    } = source_layout;
-    let mut resolved = apply::resolve_edits(&lines, &prepared_edits)?;
+    let mut source_layout = show::split_source_lines(source);
+    let mut resolved = apply::resolve_edits(source_layout.line_count(), &prepared_edits)?;
     if mode == HashlineApplyMode::Repair {
-        repair::apply_repair_merge_expansion(&lines, &mut resolved);
+        repair::apply_repair_merge_expansion(&source_layout, &mut resolved);
     }
     apply::ensure_non_overlapping(&resolved)?;
 
@@ -303,22 +298,19 @@ pub fn apply_hashline_edits_with_mode(
                 end_line,
                 replacement_lines,
             } => {
-                let start_index = start_line - 1;
-                let end_index = *end_line;
-                lines.splice(start_index..end_index, replacement_lines.clone());
+                source_layout.replace_range(*start_line, *end_line, replacement_lines.clone());
             }
             ResolvedOperation::InsertAfter {
                 anchor_line,
                 insert_lines,
             } => {
-                let insert_index = *anchor_line;
-                lines.splice(insert_index..insert_index, insert_lines.clone());
+                source_layout.insert_after(*anchor_line, insert_lines.clone());
             }
         }
     }
 
     Ok(HashlineApplyResult {
-        content: show::join_source_lines(&lines, had_trailing_newline, newline),
+        content: source_layout.into_content(),
         operations_total: prepared_edits.len(),
         operations_applied: prepared_edits.len(),
     })

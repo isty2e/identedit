@@ -2,7 +2,7 @@ use super::{HashedLine, compute_line_hash};
 
 pub(super) fn show_hashed_lines(source: &str) -> Vec<HashedLine> {
     split_source_lines(source)
-        .lines
+        .into_line_contents()
         .into_iter()
         .enumerate()
         .map(|(index, content)| HashedLine {
@@ -33,24 +33,19 @@ pub(super) fn split_multiline_text(text: &str) -> Vec<String> {
 }
 
 #[derive(Debug, Clone)]
+struct SourceLine {
+    content: String,
+    terminator: String,
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct SourceLayout {
-    pub(super) lines: Vec<String>,
-    pub(super) had_trailing_newline: bool,
-    pub(super) newline: &'static str,
+    lines: Vec<SourceLine>,
 }
 
 pub(super) fn split_source_lines(source: &str) -> SourceLayout {
-    let lines = split_line_contents(source);
-    SourceLayout {
-        lines,
-        had_trailing_newline: source.ends_with('\n') || source.ends_with('\r'),
-        newline: detect_newline_style(source),
-    }
-}
-
-fn split_line_contents(source: &str) -> Vec<String> {
     if source.is_empty() {
-        return Vec::new();
+        return SourceLayout { lines: Vec::new() };
     }
 
     let bytes = source.as_bytes();
@@ -61,17 +56,25 @@ fn split_line_contents(source: &str) -> Vec<String> {
     while index < bytes.len() {
         match bytes[index] {
             b'\n' => {
-                lines.push(source[start..index].to_string());
+                lines.push(SourceLine {
+                    content: source[start..index].to_string(),
+                    terminator: "\n".to_string(),
+                });
                 index += 1;
                 start = index;
             }
             b'\r' => {
-                lines.push(source[start..index].to_string());
-                if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
+                let terminator = if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
                     index += 2;
+                    "\r\n"
                 } else {
                     index += 1;
-                }
+                    "\r"
+                };
+                lines.push(SourceLine {
+                    content: source[start..index - terminator.len()].to_string(),
+                    terminator: terminator.to_string(),
+                });
                 start = index;
             }
             _ => {
@@ -81,54 +84,118 @@ fn split_line_contents(source: &str) -> Vec<String> {
     }
 
     if start < source.len() {
-        lines.push(source[start..].to_string());
+        lines.push(SourceLine {
+            content: source[start..].to_string(),
+            terminator: String::new(),
+        });
     }
 
-    lines
+    SourceLayout { lines }
 }
 
-pub(super) fn join_source_lines(
-    lines: &[String],
-    had_trailing_newline: bool,
-    newline: &str,
-) -> String {
-    if lines.is_empty() {
-        return String::new();
+impl SourceLayout {
+    pub(super) fn line_count(&self) -> usize {
+        self.lines.len()
     }
 
-    let mut content = lines.join(newline);
-    if had_trailing_newline {
-        content.push_str(newline);
+    pub(super) fn line_content(&self, index: usize) -> Option<&str> {
+        self.lines.get(index).map(|line| line.content.as_str())
     }
-    content
-}
 
-fn detect_newline_style(source: &str) -> &'static str {
-    if source.contains("\r\n") && !contains_lone_lf(source) && !contains_lone_cr(source) {
-        "\r\n"
-    } else if source.contains('\r') && !source.contains('\n') {
-        "\r"
-    } else {
-        "\n"
-    }
-}
+    pub(super) fn replace_range(
+        &mut self,
+        start_line: usize,
+        end_line: usize,
+        replacement_contents: Vec<String>,
+    ) {
+        let start_index = start_line - 1;
+        let end_index = end_line;
+        let original_line_count = self.lines.len();
+        let source_had_trailing_newline = self
+            .lines
+            .last()
+            .is_some_and(|line| !line.terminator.is_empty());
+        let final_terminator = self.lines[end_index - 1].terminator.clone();
+        let newline = self.preferred_newline(start_index);
+        let replacement_count = replacement_contents.len();
+        let replacement = replacement_contents
+            .into_iter()
+            .enumerate()
+            .map(|(index, content)| SourceLine {
+                content,
+                terminator: if index + 1 == replacement_count {
+                    final_terminator.clone()
+                } else {
+                    newline.clone()
+                },
+            });
 
-fn contains_lone_lf(source: &str) -> bool {
-    let bytes = source.as_bytes();
-    for (index, byte) in bytes.iter().enumerate() {
-        if *byte == b'\n' && (index == 0 || bytes[index - 1] != b'\r') {
-            return true;
+        self.lines.splice(start_index..end_index, replacement);
+
+        if replacement_count == 0
+            && end_index == original_line_count
+            && !source_had_trailing_newline
+            && let Some(last_line) = self.lines.last_mut()
+        {
+            last_line.terminator.clear();
         }
     }
-    false
-}
 
-fn contains_lone_cr(source: &str) -> bool {
-    let bytes = source.as_bytes();
-    for (index, byte) in bytes.iter().enumerate() {
-        if *byte == b'\r' && (index + 1 >= bytes.len() || bytes[index + 1] != b'\n') {
-            return true;
-        }
+    pub(super) fn insert_after(&mut self, anchor_line: usize, contents: Vec<String>) {
+        let anchor_index = anchor_line - 1;
+        let original_terminator = self.lines[anchor_index].terminator.clone();
+        let newline = self.preferred_newline(anchor_index);
+        self.lines[anchor_index].terminator = newline.clone();
+
+        let inserted_count = contents.len();
+        let inserted = contents
+            .into_iter()
+            .enumerate()
+            .map(|(index, content)| SourceLine {
+                content,
+                terminator: if index + 1 == inserted_count {
+                    original_terminator.clone()
+                } else {
+                    newline.clone()
+                },
+            });
+        self.lines
+            .splice(anchor_index + 1..anchor_index + 1, inserted);
     }
-    false
+
+    pub(super) fn into_content(self) -> String {
+        let capacity = self
+            .lines
+            .iter()
+            .map(|line| line.content.len() + line.terminator.len())
+            .sum();
+        let mut content = String::with_capacity(capacity);
+        for line in self.lines {
+            content.push_str(&line.content);
+            content.push_str(&line.terminator);
+        }
+        content
+    }
+
+    fn into_line_contents(self) -> Vec<String> {
+        self.lines.into_iter().map(|line| line.content).collect()
+    }
+
+    fn preferred_newline(&self, index: usize) -> String {
+        self.lines
+            .get(index)
+            .filter(|line| !line.terminator.is_empty())
+            .or_else(|| {
+                self.lines[..index]
+                    .iter()
+                    .rev()
+                    .find(|line| !line.terminator.is_empty())
+            })
+            .or_else(|| {
+                self.lines[index.saturating_add(1)..]
+                    .iter()
+                    .find(|line| !line.terminator.is_empty())
+            })
+            .map_or_else(|| "\n".to_string(), |line| line.terminator.clone())
+    }
 }
