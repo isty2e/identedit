@@ -65,31 +65,6 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
-  release-build:
-    name: release-build-${{ matrix.os }}
-    if: github.event_name != 'pull_request'
-    needs:
-      - quality
-      - test
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release-${{ matrix.os }}
-
       - name: Build release binary
+        if: github.event_name != 'pull_request'
         run: cargo build --locked --release
