@@ -581,9 +581,10 @@ fn rename_file_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
     // SAFETY: both pointers reference live, NUL-terminated path buffers for the duration
-    // of the call, and renameat2 does not retain either pointer.
+    // of the syscall, and renameat2 does not retain either pointer.
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             source.as_ptr(),
             libc::AT_FDCWD,
@@ -693,8 +694,8 @@ fn path_to_windows_wide(path: &Path) -> io::Result<Vec<u16>> {
     Ok(encoded)
 }
 
-#[cfg(all(test, windows))]
-mod windows_tests {
+#[cfg(all(test, any(target_os = "linux", target_os = "macos", windows)))]
+mod rename_no_replace_tests {
     use std::fs;
 
     use tempfile::tempdir;
