@@ -6,73 +6,63 @@ Code editing for autonomous agents.
 
 ## Why
 
-Agents edit code through tools designed for humans — `sed`, `patch`, regex-based find-and-replace. These work when a human is watching, but break down in autonomous workflows:
+Agents often edit code through text-oriented tools such as `sed`, unified patches, and regex replacement. Those tools become unreliable when target text repeats, files change between read and write, or several files must change together.
 
-- **No structural awareness.** `sed` treats code as flat text. An agent can't say "replace function X" — it has to construct fragile regex patterns that break when formatting changes.
-- **No precondition checking.** `patch` applies blindly. If another agent (or the same agent in a different step) already modified the file, the edit silently corrupts the codebase.
-- **No diagnosable failures.** When edits fail, agents get cryptic error messages instead of structured diagnostics they can act on.
+Identedit treats edits as verified operations:
 
-Identedit solves these by treating edits as **verified structural operations** rather than text substitution.
+- **Precondition-verified.** Every edit checks that its target still matches what the agent read.
+- **Transactional.** Multi-file edits are preflighted together, and committed changes are rolled back if a later commit fails. Incomplete rollback is reported explicitly.
+- **Structural or line-anchored.** Agents can address functions and classes, exact lines, file boundaries, or nested config paths.
+- **Diagnosable.** Failures return structured errors with recovery information.
 
-## What It Does
+## Choose an entry point
 
-Three entry points covering different editing needs:
+Use `patch` for one verified edit:
 
-**`patch`** — one-shot verified edit (most common):
 ```bash
-identedit patch src/example.py --symbol process_data --replace 'def process_data(...): ...'
-identedit patch src/example.py --symbol Processor.process_data --replace 'def process_data(...): ...'
-identedit patch src/example.py --at abc123def4567890 --replace 'def process_data(...): ...'
-identedit patch src/example.py --at "42:9e0f1a2b3c4d" --set-line "    return x + y"
+identedit patch src/example.py --symbol process_data \
+  --replace 'def process_data(x, y):
+    return x + y'
+
 identedit patch config.yaml --config-path server.port --set-value 8080
-identedit patch config.json --config-path items --append-value 4
 ```
 
-**`read` → `edit` → `apply`** — multi-op or multi-file atomic pipeline:
+Use `read` -> `edit` -> `apply` for multiple operations, moves, or multi-file transactions:
+
 ```bash
-identedit read --kind function_definition example.py --json   # get handles
-identedit edit --json < request.json                          # build changeset (dry-run)
-identedit edit --json < request.json | identedit apply        # commit to disk
+identedit read --kind function_definition src/example.py --json
+identedit edit --json < request.json > changeset.json
+identedit apply --dry-run changeset.json
+identedit apply changeset.json
 ```
 
-**`read --mode line`** — line-level precision edits:
+Use line anchors when structural targeting is too coarse:
+
 ```bash
-identedit read --mode line example.py   # display LINE:HASH|content
-identedit patch example.py --at "3:a1b2c3d4e5f6" --replace-range "..." --end-anchor "5:7f6e5d4c3b2a"
+identedit read --mode line src/example.py
+identedit patch src/example.py --at "4:9e0f1a2b3c4d" \
+  --set-line "    return x + y"
 ```
 
-**Failed diff handoff** — recover exact candidates after a patch context failure, without writing:
+Use failed-diff handoff to discover exact candidates after a conventional patch loses its context. This mode never writes:
+
 ```bash
-identedit patch --from-diff failed.diff example.py
-cat failed.diff | identedit patch --from-diff - example.py
+identedit patch --from-diff failed.diff src/example.py
 ```
 
-Use the canonical CLI entry points: `read`, `edit`, `apply`, `patch`, `merge`, `grammar`.
-These commands, their JSON schemas, exit status, and documented diagnostics are the supported interface. Identedit does not expose a supported Rust library API.
-
-### Key Properties
-
-- **Precondition-verified.** Every edit checks that the target hasn't changed since the agent last read it. No silent corruption.
-- **Transactional.** Multi-file edits are all-or-nothing with automatic rollback on failure.
-- **Diagnosable.** Failures return structured JSON with specific error types and recovery suggestions.
-- **Move.** Structural units can be moved within or across files atomically.
-- **Two granularities.** Structure-level for large changes, line-level for small ones. Same safety guarantees for both.
-
-## Supported Languages
-
-Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL, Dockerfile
+The supported CLI commands are `read`, `edit`, `apply`, `patch`, `merge`, and `grammar`. Identedit does not expose a supported Rust library API.
 
 ## Install
 
-### Prebuilt binaries (GitHub Releases)
+### Prebuilt binaries
 
-1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and pick your tag (for example `v0.4.0`).
-2. Download the matching asset:
+1. Open [GitHub Releases](https://github.com/isty2e/identedit/releases) and choose a version.
+2. Download the archive for your platform:
    - `identedit-<tag>-x86_64-unknown-linux-gnu.tar.gz`
    - `identedit-<tag>-aarch64-unknown-linux-gnu.tar.gz`
    - `identedit-<tag>-x86_64-apple-darwin.tar.gz`
    - `identedit-<tag>-aarch64-apple-darwin.tar.gz`
-3. Extract and place `identedit` on your `PATH`.
+3. Verify the accompanying SHA-256 checksum, extract the archive, and place `identedit` on your `PATH`.
 
 ### From source
 
@@ -80,144 +70,86 @@ Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#
 cargo install --path .
 ```
 
-## Platform Notes
+Core editing commands are intended to run on macOS, Linux, and Windows. `identedit grammar install` currently requires macOS or Linux.
 
-- Core editing commands (`read`, `edit`, `apply`, `patch`, `merge`) are intended to run on macOS, Linux, and Windows.
-- `identedit grammar install` is currently supported only on macOS and Linux hosts.
-- On Windows hosts, use bundled grammars for now, or install grammar artifacts on macOS/Linux and copy the compiled library plus manifest entry.
+## Common workflows
 
-## Quickstart
+### Preview a structural replacement
 
-### One-shot patch (most common)
+Use `--symbol` for a unique local name or containing-name path. Ambiguous targets fail without writing and return candidate context.
 
 ```bash
-# Replace a function by name (no read step needed)
-identedit patch src/example.py --symbol process_data \
-  --replace 'def process_data(x, y):
-    return x + y'
-
-# Replace a method by containing-name path
 identedit patch src/example.py --symbol Processor.process_data \
-  --replace 'def process_data(self, x, y):
-        return x + y'
+  --replace --text-file /tmp/new_body.py --dry-run --diff
 
-# Same thing using identity hash (when you already have read output)
-identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
-    return x + y'
+identedit patch src/example.py --symbol Processor.process_data \
+  --replace --text-file /tmp/new_body.py
+```
 
-# Patch a specific line
-identedit read --mode line src/example.py
-identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
+Use `--kind` plus `--name` when kind-specific glob matching is required:
 
-# Update a config key
+```bash
+identedit patch src/example.py \
+  --kind function_definition --name 'process_*' \
+  --replace --text-file /tmp/new_body.py
+```
+
+### Edit a nested config value
+
+```bash
 identedit patch config.yaml --config-path server.port --set-value 8080
-
-# Keys containing dots or other non-bare characters use bracket-quoted JSON string segments
-identedit patch config.yaml --config-path 'services["sidecar.port"].enabled' --set-value true
-
-# Append to an array-valued config path
 identedit patch config.json --config-path items --append-value 4
-
-# Create a YAML block scalar leaf value without shell quoting the block
-cat <<'EOF' | identedit patch .github/workflows/ci.yml \
-  --config-path jobs.build.steps[0].run --set-value --create-missing --stdin-text
-|
-  cargo test
-  cargo clippy --all-targets -- -D warnings
-EOF
-
-# Create a missing key in the second document of a multi-document YAML stream
-identedit patch manifests.yaml --config-path spec.replicas \
-  --document-index 1 --set-value 3 --create-missing
+identedit patch config.toml --config-path database.enabled --delete
 ```
 
-### Multi-file atomic edit
+Config paths use dot-separated bare keys and bracket-quoted JSON strings for literal keys:
 
 ```bash
-# 1. Read — discover structures
-identedit read --kind function_definition src/example.py --json
-
-# 2. Edit — build changeset (dry-run, no file modification)
-identedit edit --json < request.json
-
-# 3. Apply — commit to disk (all-or-nothing)
-identedit edit --json < request.json | identedit apply
+identedit patch config.yaml \
+  --config-path 'services["sidecar.port"].enabled' --set-value true
 ```
 
-### Failed patch context recovery
+### Build an atomic multi-file edit
+
+`edit` only builds a changeset. `apply --dry-run` validates it without writing. If a later commit fails, `apply` attempts guarded rollback and reports any incomplete recovery.
 
 ```bash
-# Preview every exact candidate. This command never writes.
-identedit patch --from-diff /tmp/failed.diff src/example.py > /tmp/handoff.json
+identedit edit --json < request.json > changeset.json
+identedit apply --dry-run changeset.json
+identedit apply changeset.json
 ```
 
-Each changed block reports `unique`, `ambiguous`, or `missing` together with its source hunk and block index. Candidate `target` and `op` objects use the canonical `patch --json` schema, so an inspected candidate can be promoted into an explicit patch request. Multi-file/create/delete/rename diffs are rejected by this prototype.
+## Safety boundary
 
-### Large new_text (10+ lines)
+- `edit` and `apply --dry-run` never modify files.
+- `patch --dry-run --diff` prints a unified diff without writing.
+- Failed-diff handoff discovers candidates but never applies them.
+- Line repair is opt-in and fails rather than choosing an ambiguous remap.
+- Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests and linters after non-trivial edits.
+- Use direct editing when placement depends on project-specific comment semantics or unsupported config-format behavior.
 
-```bash
-# Write replacement body to a temp file, then use --text-file
-cat <<'EOF' > /tmp/new_block.py
-def process_data(x, y):
-    return x + y
-EOF
+## Supported languages
 
-identedit patch src/example.py --kind function_definition --name process_data \
-  --replace --text-file /tmp/new_block.py
-```
+Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL, Dockerfile
 
-Use `--symbol` for a unique local name (`process_data`) or containing-name path (`Processor.process_data`). If a symbol is ambiguous or missing, patch fails without writing. Ambiguous responses include `error.candidates` with identity, span, line, qualified name, and preview context. Use `--kind` + `--name` when you need kind-specific glob matching such as `--name "process_*"`.
+Additional tree-sitter grammars can be installed on supported hosts.
 
-Or via the `edit` pipeline with `jq --rawfile`:
+## Documentation
 
-```bash
-jq -n --rawfile new_text /tmp/new_block.py '{
-  command:"edit", file:"src/example.py",
-  operations:[{
-    target:{type:"node", identity:"0123456789abcdef", kind:"function_definition", expected_old_hash:"fedcba9876543210"},
-    op:{type:"replace", new_text:$new_text}
-  }]
-}' | identedit edit --json | identedit apply
-```
-
-### Safe Defaults
-
-- `edit` is always a dry-run. No files modified until explicit `apply`.
-- `patch --dry-run` validates and previews without writing files.
-- `edit|patch --from-diff` only discovers candidate targets; it never writes or auto-selects an ambiguous candidate.
-- Line-anchored patch defaults to strict mode. `--auto-repair` is explicit opt-in.
-- `apply --dry-run` validates and returns a summary without writing.
-- Content precondition hashes use 16 hexadecimal characters; line anchors use `LINE:12-hex`.
-- Uppercase and surrounding whitespace are accepted at ingress and serialize canonically in lowercase. Display-form anchors such as `7:ABCDEF012345|content` are accepted and serialize as canonical `7:abcdef012345`.
-- Malformed hash and anchor values fail before target resolution.
-- Config path edits are validated against the target format (JSON/YAML/TOML) before writing.
-- Config paths use dot-separated bare keys by default (`service.port`). For literal keys containing dots, spaces, slashes, colons, brackets, or quotes, use bracket-quoted JSON string segments: `services["sidecar.port"]`, `jobs["build/test"].steps[0]["run:script"]`, `root["quote\"key"]`.
-- Multi-document YAML requires an explicit `--document-index <N>` for `--create-missing`; indices are 0-based. Existing-path edits may still omit it only when the path resolves uniquely across documents.
-- YAML/TOML `--create-missing` preserves existing key order and blank-line groups. It inserts into clearly sorted groups or same-prefix runs, and otherwise appends conservatively without reordering existing keys.
-- YAML `--create-missing` can create explicit block scalar leaf values (`|`, `|-`, `|+`, `>`, `>-`, `>+`) under existing block mappings. It does not auto-create sequences or accept multiline mapping/sequence fragments.
-- YAML create-missing quotes unsafe or implicit-scalar-looking string keys when rendering new entries, so `["true"]`, `["null"]`, `["123"]`, and `["app: conf"]` stay string mapping keys.
-- YAML anchors/aliases are allowed when they are outside the edited path. Create-missing rejects edits inside referenced anchor values or mappings with YAML merge keys because those changes have non-local semantics. YAML tags remain unsupported for create-missing.
-- Use line mode or direct editing when the desired placement depends on project-specific comment semantics, cross-section moves, array/table-array restructuring, YAML anchor/merge semantics, or multiline YAML mappings/sequences.
-- Most commands emit JSON; `read --mode line` defaults to plain text unless `--json` is set.
-- Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests/lints after non-trivial edits.
-
-## Error Recovery (Agent Loop)
-
-1. If `patch` fails with `precondition_failed` or `target_missing`: re-run `read`, rebuild request, retry once.
-2. If `ambiguous_target`: inspect `error.candidates`, then retry with a qualified symbol, identity, or JSON `span_hint`.
-3. Maximum 2 attempts per target. If the second attempt fails, fall back to direct file editing.
-
-## Docs
-
-- Agent workflow guide: [`skills/identedit/SKILL.md`](skills/identedit/SKILL.md)
+- Agent routing and operating rules: [`skills/identedit/SKILL.md`](skills/identedit/SKILL.md)
+- CLI output, hashes, anchors, and error envelope: [`protocol.md`](skills/identedit/references/protocol.md)
+- Structural and multi-file pipeline: [`structural-pipeline.md`](skills/identedit/references/structural-pipeline.md)
+- Line-anchored editing and repair: [`line-editing.md`](skills/identedit/references/line-editing.md)
+- JSON/YAML/TOML path editing: [`config-path-patching.md`](skills/identedit/references/config-path-patching.md)
+- Failed unified-diff recovery: [`failed-diff-handoff.md`](skills/identedit/references/failed-diff-handoff.md)
+- Transactions and error recovery: [`transactions.md`](skills/identedit/references/transactions.md)
+- Bundled and dynamic languages: [`languages.md`](skills/identedit/references/languages.md)
+- Command flags and defaults: `identedit <command> --help`
 
 ## Feedback
 
-If identedit friction appears, open or update a GitHub issue:
+Open or update a [GitHub issue](https://github.com/isty2e/identedit/issues) with:
 
-- https://github.com/isty2e/identedit/issues
-
-Include:
-- What you were trying to do
-- What happened, including the error or unexpected output
-- What you expected instead
+- what you were trying to do;
+- what happened, including the error or unexpected output;
+- what you expected instead.
