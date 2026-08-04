@@ -3,267 +3,233 @@ name: identedit
 description: "Precision code editing with precondition safety. USE WHEN: multi-file atomic edits, repeated target text, config-path edits, or a previous edit attempt failed or landed in the wrong place. NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
 ---
 
-# Identedit — Agent-Oriented Code Editing
+# Identedit - agent-oriented code editing
 
 Identedit is a surgical editor for cases where target stability matters more than raw editing speed.
 
-Two modes:
-- **Structural**: AST-level `read` / `edit` / `apply` for functions, classes, blocks, file boundaries, and moves.
-- **Line-anchored**: `read --mode line` plus `patch` / `apply --repair` for exact line or range edits.
+It supports two targeting modes:
 
-## 10-Second Trigger
+- **Structural:** functions, classes, blocks, file boundaries, and moves.
+- **Line-anchored:** exact lines and ranges with strict precondition checks.
+
+## 10-second trigger
 
 Use identedit when any condition matches:
-- 2+ files must succeed or fail together.
-- Large file and repeated target text make direct patching risky.
-- A previous edit attempt failed from context mismatch.
-- A previous edit attempt landed in the wrong location.
-- You need insert-at-file-start/end with precondition safety.
-- You need a nested JSON/YAML/TOML config key edit by path.
+
+- Two or more files must succeed or fail together.
+- Repeated target text makes direct patching risky.
+- A previous edit attempt failed from context mismatch or landed in the wrong location.
 - You need multiple operations on the same file in one verified plan.
+- You need a precondition-checked file-boundary insertion.
+- You need a nested JSON, YAML, or TOML edit by path.
 
 Otherwise prefer direct file editing for speed.
 
-## Quick Commands
+## Route the task
 
-Use this table as a command lookup once you already know identedit is the right tool.
-
-| Task | Command |
+| Situation | Command or tool |
 |---|---|
-| Replace a unique function/symbol by name | `identedit patch file --symbol foo --replace 'new body'` |
-| Replace a method by containing path | `identedit patch file --symbol Class.method --replace 'new body'` |
-| Replace using identity hash | `identedit patch file --at <identity-hex16> --replace 'new body'` |
-| Insert at end of file | `identedit patch file --at file-end --insert 'new code'` |
-| Update a config key | `identedit patch file --config-path key.path --set-value 42` |
-| Append to a config array | `identedit patch file --config-path items --append-value 4` |
-| Create a missing config key | `identedit patch file --config-path a.b --set-value 1 --create-missing` |
-| Edit a specific line | `identedit patch file --at "LINE:HASH" --set-line 'new line'` |
-| Replace with large text | `identedit patch file --symbol foo --replace --text-file /tmp/body.py` |
-| Preview before writing | `identedit patch file --symbol foo --replace --text-file /tmp/body.py --dry-run --diff` |
-| Recover candidate targets from a failed diff | `identedit patch --from-diff failed.diff file` |
-| Regex replace inside one function/class | `identedit patch file --symbol foo --scoped-regex 'old' --scoped-replacement 'new'` |
-| Multi-op or multi-file atomic | `identedit edit --json` then `identedit apply` |
-| Move a structure | `identedit edit --json` with `move_before` / `move_after` |
+| Replace a unique function or method | `identedit patch file --symbol Class.method --replace 'new body'` |
+| Replace an already-read node | `identedit patch file --at <identity-hex16> --replace 'new body'` |
+| Preview one patch | Add `--dry-run --diff` |
+| Insert at a file boundary | `identedit patch file --at file-end --insert 'new code'` |
+| Edit one exact line | `identedit patch file --at "LINE:HASH" --set-line 'new line'` |
+| Replace inside one function or class | `identedit patch file --symbol foo --scoped-regex 'old' --scoped-replacement 'new'` |
+| Set, append, or delete a config path | `identedit patch file --config-path key.path <operation>` |
+| Recover candidates from a failed diff | `identedit patch --from-diff failed.diff file` |
+| Multiple operations or files | `identedit edit --json` then `identedit apply` |
+| Move a structural unit | `identedit edit --json` with `move_before` or `move_after` |
+| Trivial one-line change | Direct file editing |
+| Rewrite most of a file | File rewrite |
+| Bulk text or path rename | `repren` or `git mv` |
 
-## Quick Choice
+## Default flow: `patch`
 
-Use this table to decide whether identedit is worth the overhead versus direct editing.
-
-| Situation | Use |
-|---|---|
-| Multi-file atomic edit/rollback required | `identedit edit --json` + `identedit apply` |
-| Same pattern appears multiple times in a large file | `identedit patch` |
-| Add new function/import at end of file | `identedit patch --at file-end --insert 'text'` |
-| Multiple ops on the same file | `identedit edit --json` with `operations[]` |
-| Append item to a config array | `identedit patch --config-path items --append-value 4` |
-| Regex must stay inside one function/class | `identedit patch --symbol foo --scoped-regex ...` |
-| One-line typo / trivial rename | Direct file editing |
-| Rewriting most of a file | File rewrite |
-| Bulk rename across many files | `repren` |
-| File-system rename or package move | shell (`mv`, `git mv`) |
-
-## Default Flow: `patch`
-
-Most uses fit in one command:
+Most structural edits fit in one command. Use `--symbol` when the target has a unique local or qualified name:
 
 ```bash
-# Replace a function by name; no read step needed.
-identedit patch src/example.py --symbol process_data \
-  --replace 'def process_data(x, y):
-    return x + y'
-
-# Replace a method by containing-name path.
 identedit patch src/example.py --symbol Processor.process_data \
   --replace 'def process_data(self, x, y):
         return x + y'
+```
 
-# Use identity from read output when you already have it.
-identedit patch src/example.py --at <identity-hex16> --replace 'def process_data(x, y):
-    return x + y'
+For a non-trivial replacement, preview the same request before applying it:
 
-# Patch a specific line.
-identedit read --mode line src/example.py
-identedit patch src/example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
-
-# Append at file end.
-identedit patch src/example.py --at file-end --insert 'def new_helper():
-    pass'
-
-# Config key update.
-identedit patch config.yaml --config-path server.port --set-value 8080
-
-# Config key with a literal dot.
-identedit patch config.yaml --config-path 'services["sidecar.port"].enabled' --set-value true
-
-# Preview as unified diff without writing.
-identedit patch src/example.py --symbol process_data \
+```bash
+identedit patch src/example.py --symbol Processor.process_data \
   --replace --text-file /tmp/new_body.py --dry-run --diff
+
+identedit patch src/example.py --symbol Processor.process_data \
+  --replace --text-file /tmp/new_body.py
 ```
 
-`--symbol` targets a unique named node directly. It accepts a local name (`process_data`) or containing-name path (`Processor.process_data`). Ambiguous targets fail without writing and return `error.candidates` with identity, kind, name, qualified name, span, line, and preview.
+Ambiguous symbols fail without writing and return `error.candidates`. Use a qualified symbol, an identity from `read`, or `--kind` plus a narrower `--name` glob.
 
-Use `--kind` + `--name` for kind-specific glob matching, e.g. `--kind function_definition --name "process_*"`.
+## Large text payloads
 
-For non-trivial replacements, prefer `--dry-run --diff` first.
-
-## Failed Diff Handoff
-
-When a direct patch fails from context drift, recover exact line candidates without applying it:
+Use `--text-file` or `--stdin-text` instead of shell-quoting multiline text:
 
 ```bash
-identedit patch --from-diff failed.diff src/example.py > handoff.json
-# Or stream the diff:
-cat failed.diff | identedit patch --from-diff - src/example.py > handoff.json
-```
-
-The command is always preview-only. Each changed block reports `unique`, `ambiguous`, or `missing` and preserves every exact line-boundary candidate in source order. For a `unique` result, `candidate.target` and `candidate.op` can be copied directly into a `patch --json` request. Inspect `candidate.preview` before choosing an ambiguous candidate; never auto-select the first one.
-
-Use this for a one-file unified diff, an `apply_patch` `*** Update File` block, or a bare hunk plus explicit `FILE`. It rejects multi-file/create/delete/rename diffs and conflicting file paths.
-
-See `references/failed-diff-handoff.md` for the response schema and a safe preview-to-apply example.
-
-## Large Text Payloads
-
-Use `--text-file` or `--stdin-text` for multi-line payloads instead of shell-quoted strings.
-
-```bash
-cat <<'EOF' > /tmp/new_block.py
-def target_fn(...):
-    ...
-EOF
-
 identedit patch /abs/path/file.py --symbol target_fn \
   --replace --text-file /tmp/new_block.py
-```
 
-```bash
 identedit patch /abs/path/file.py --symbol target_fn \
   --replace --stdin-text < /tmp/new_block.py
 ```
 
-These work with text-taking flags such as `--replace`, `--insert`, `--set-line`, `--replace-range`, `--insert-after-line`, `--set-value`, `--append-value`, `--scoped-replacement`, `--insert-before`, and `--insert-after`.
+Text sources work with every text-taking flag. For JSON edit requests, use `jq --rawfile` to place file contents in `op.new_text` without shell quoting.
 
-For the `edit` pipeline, use `jq --rawfile` instead. See `references/structural-pipeline.md`.
+## Multi-step structural pipeline
 
-## Multi-Step Structural Pipeline
-
-Use this for multi-op, multi-file, handle-table, or move workflows.
+Use this flow for multiple operations, multiple files, handle tables, or moves:
 
 ```bash
-# 1. Read handles and precondition hashes.
+# Discover canonical handles and preconditions.
 identedit read --kind function_definition example.py --json
 
-# 2. Build an edit plan. This is always dry-run.
+# Build a plan without modifying files.
 identedit edit --json < request.json > changeset.json
 
-# 3. Validate or commit.
+# Validate, then commit.
 identedit apply --dry-run changeset.json
 identedit apply changeset.json
 ```
 
-`read` defaults to human-readable text. Add `--json` when you need handles for `edit`. Add `--verbose` only when you need full matched text.
+`read` defaults to human-readable text. Add `--json` when its output will feed an edit request. See [`structural-pipeline.md`](references/structural-pipeline.md) for request shapes, operations, handle refs, and merge workflows.
 
-For schema details and operations, read `references/structural-pipeline.md`.
+A single-file request has `file` and `operations`:
 
-## Line-Anchored Editing
+```json
+{
+  "command": "edit",
+  "file": "example.py",
+  "operations": [
+    {
+      "target": {
+        "type": "node",
+        "identity": "ca465ff1a2b3c4d5",
+        "kind": "function_definition",
+        "expected_old_hash": "20ba467fa1b2c3d4"
+      },
+      "op": {
+        "type": "replace",
+        "new_text": "def process_data(x, y):\n    return x + y"
+      }
+    }
+  ]
+}
+```
 
-Use line mode when structural targeting is too coarse.
+For a batch, replace `file` and `operations` with `files`, where each entry contains its own `file` and `operations`. Use exactly one request shape. Copy identities and precondition hashes from `read --json`; do not synthesize them.
+
+## Line-anchored editing
+
+Use line mode when structural targeting is too coarse:
 
 ```bash
 identedit read --mode line example.py
-identedit patch example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
-identedit patch example.py --at "3:3c4d5e6f7a8b" \
-  --replace-range "def process_data(x, y):\n    return x + y" \
-  --end-anchor "4:9e0f1a2b3c4d"
+identedit patch example.py --at "4:9e0f1a2b3c4d" \
+  --set-line "    return x + y"
 ```
 
-Line anchors are `LINE:HASH` with a 12-char blake3 hex hash. Matching is exact; no prefix matching. Use `--auto-repair` once if strict matching fails but deterministic remap is possible.
+Line anchors use `LINE:12-hex-hash` and match exactly. Available flag operations are `--set-line`, `--replace-range` with optional `--end-anchor`, and `--insert-after-line`. Re-read before retrying a stale anchor. Use `--auto-repair` only for one bounded retry when deterministic remapping is acceptable.
 
-For line JSON and repair details, read `references/line-editing.md`.
+## Config path editing
 
-## Config Path Patching
-
-Use config-aware path targeting for nested JSON/YAML/TOML edits.
+Use config-aware targeting for nested JSON, YAML, or TOML values:
 
 ```bash
 identedit patch config.yaml --config-path service.retries --set-value 5
 identedit patch config.json --config-path items --append-value 4
-identedit patch config.toml --config-path database.settings.enabled --delete
-identedit patch config.yaml --config-path 'services["sidecar.port"].enabled' --set-value true
-identedit patch manifests.yaml --config-path spec.replicas \
-  --document-index 1 --set-value 3 --create-missing
+identedit patch config.toml --config-path database.enabled --delete
 ```
 
-Important limits:
-- `--create-missing` creates missing map/table keys only; arrays/sequences are never auto-expanded.
-- `append` requires an existing array/sequence.
-- `delete` and `append` reject `--create-missing`.
-- YAML anchors/merge keys and tags have conservative restrictions.
-- Use line/direct editing when placement depends on project-local comment semantics, array/table-array restructuring, YAML anchor/merge semantics, or multiline YAML mappings/sequences.
+Path rules required for safe use:
 
-For path syntax and format-specific rules, read `references/config-path-patching.md`.
+- Bare keys are dot-separated: `service.retries`.
+- Array or sequence indices use numeric brackets: `items[0].name`.
+- Literal keys containing dots or other punctuation use bracket-quoted JSON strings: `services["sidecar.port"]`.
+- `--create-missing` creates map or standard-table keys, not array or sequence elements.
+- Append requires an existing array or sequence. Delete and append reject `--create-missing`.
+- Multi-document YAML creation requires `--document-index <N>`.
+- Fall back to line or direct editing for YAML anchors, merge keys, tags, sequence growth, TOML table arrays, or placement that depends on local comment semantics.
 
-## Retry Discipline
+## Failed-diff handoff
 
-Maximum 2 identedit attempts per target: original attempt plus one retry. Do not loop.
-
-```text
-identedit patch fails
-|
-├── precondition_failed / target_missing
-|   └── re-run identedit read -> rebuild request -> retry once
-|       └── if it fails again, fall back to direct file editing
-|
-├── ambiguous_target
-|   └── inspect error.candidates -> choose qualified symbol/identity/span_hint -> retry once
-|       └── if still ambiguous, fall back to direct file editing
-|
-└── parse_failure / no_provider / other hard error
-    └── fall back to direct file editing immediately
-```
-
-For line-anchored edits: re-run `read --mode line`, retry strict once, then try `--auto-repair` only as that bounded retry.
-
-## Post-Edit Verification
-
-Identedit verifies edit preconditions, not semantic correctness. After non-trivial code edits, run the narrowest useful project verifier yourself.
+When a conventional patch fails because its context drifted, discover exact candidates without writing:
 
 ```bash
-identedit patch src/foo.py --symbol process_data --replace --text-file /tmp/process_data.py --dry-run --diff
-identedit patch src/foo.py --symbol process_data --replace --text-file /tmp/process_data.py
+identedit patch --from-diff failed.diff src/example.py > handoff.json
+```
+
+Inspect every candidate preview. Never choose candidate zero by convention. The handoff rejects unsupported multi-file, create, delete, and rename diffs.
+
+After verifying that one changed block has one intended `unique` candidate, promote that candidate explicitly:
+
+```bash
+jq '{
+  command: "patch",
+  file,
+  target: .changes[0].candidates[0].target,
+  op: .changes[0].candidates[0].op
+}' handoff.json | identedit patch --json
+```
+
+For multiple blocks, build an `edit --json` request so the selected operations can commit together.
+
+## Retry discipline
+
+Allow at most one retry per target:
+
+| Failure | Next action |
+|---|---|
+| `precondition_failed` or `target_missing` | Re-run `read`, rebuild the request, retry once |
+| `ambiguous_target` | Inspect candidates and retry with a qualified symbol, identity, or span hint |
+| `parse_failure`, `no_provider`, or another hard error | Fall back to direct editing |
+| Second failure for the same target | Stop using identedit for that target |
+
+For line edits, re-run `read --mode line` before the bounded retry. Use repair only within that same retry budget. Load [`transactions.md`](references/transactions.md) when apply, rollback, or resource errors are involved.
+
+## Post-edit verification
+
+Identedit verifies edit preconditions, not semantic correctness. After a non-trivial edit, run the narrowest project verifier that can detect a bad result:
+
+```bash
+identedit patch src/foo.py --symbol process_data \
+  --replace --text-file /tmp/process_data.py --dry-run --diff
+identedit patch src/foo.py --symbol process_data \
+  --replace --text-file /tmp/process_data.py
 python -m compileall src/foo.py
 pytest tests/test_foo.py -q
 ```
 
-For multi-file edits:
+If project verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
 
-```bash
-identedit edit --json < /tmp/edit-request.json > /tmp/changeset.json
-identedit apply --dry-run /tmp/changeset.json
-identedit apply /tmp/changeset.json
-<project-specific verifier command>
-```
+## Output rules
 
-If the verifier fails, treat it as a workflow failure, not an identedit failure. Inspect verifier output and repair with one bounded follow-up edit attempt.
-
-## Output Contract
-
-- `edit`, `apply`, `patch`, and errors emit JSON by default.
-- `read` defaults to human-readable text in both AST and line modes.
-- Use `read --json` for structured handles or line anchors.
+- Parse documented JSON output rather than grepping it.
+- `read` defaults to text; add `--json` for structured handles or line anchors.
+- `edit`, `apply`, `patch`, and runtime request errors emit JSON unless a documented output mode says otherwise.
+- Invalid command-line syntax is reported by the argument parser on stderr, not as a JSON error response.
 - `patch --dry-run --diff` emits unified diff text.
-- Parse JSON output when available; do not grep JSON text.
+- Content hashes and node identities use 16 hexadecimal characters. Line anchors use `LINE:12-hex`.
+- Hashes and anchors serialize in lowercase and match exactly; prefix matching is not supported.
+- Runtime errors use `{ "error": { "type": "...", "message": "...", "suggestion": "..." } }`; `suggestion` is optional.
+
+These rules are sufficient for ordinary use. The protocol reference adds the complete error-type list and normalization details when it is bundled with the skill.
 
 ## References
 
-Load these only when the task needs the details:
-- `references/structural-pipeline.md`: `read --json`, `edit --json`, handle refs, operations, file-level targets, merge, pipe workflows.
-- `references/line-editing.md`: line anchor format, line JSON, strict/repair behavior.
-- `references/config-path-patching.md`: JSON/YAML/TOML path syntax, create-missing policy, anchors/tags/comments.
-- `references/failed-diff-handoff.md`: failed unified diff recovery, candidate status, and explicit apply handoff.
-- `references/transactions.md`: multi-file transaction details, apply wrapper shape, rollback drill, error table.
-- `references/languages.md`: bundled languages and `grammar install` tiers.
+The skill is self-contained for ordinary operation. If the optional reference files are bundled, load only the one needed for advanced or exhaustive details:
 
-## Tool Pairing
+- [`protocol.md`](references/protocol.md): supported interface, output modes, hashes, anchors, exit behavior, and error envelope.
+- [`structural-pipeline.md`](references/structural-pipeline.md): read/edit/apply schemas, operations, file targets, handle refs, merge, and pipes.
+- [`line-editing.md`](references/line-editing.md): line operations, anchor format, line endings, and repair.
+- [`config-path-patching.md`](references/config-path-patching.md): path syntax and JSON/YAML/TOML behavior.
+- [`failed-diff-handoff.md`](references/failed-diff-handoff.md): failed unified-diff discovery and explicit apply handoff.
+- [`transactions.md`](references/transactions.md): multi-file apply, rollback drill, and error recovery.
+- [`languages.md`](references/languages.md): bundled languages and dynamic grammar installation.
 
-Use `ast-grep` for pattern-based discovery and identedit for verified application. Use `repren` for bulk text refactoring, simultaneous renames, case-preserving variants, and file/directory renames.
+## Tool pairing
+
+Use `ast-grep` for structural discovery and identedit for verified application. Use `repren` for bulk text refactoring, simultaneous renames, case-preserving variants, and file or directory renames.
