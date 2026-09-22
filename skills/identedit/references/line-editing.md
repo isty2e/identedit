@@ -34,9 +34,11 @@ identedit patch example.py --at "4:9e0f1a2b3c4d" --set-line "    return x + y"
 ```bash
 identedit patch example.py \
   --at "3:3c4d5e6f7a8b" \
-  --replace-range "def process_data(x, y):\n    return x + y" \
+  --replace-range --text-file /tmp/new_lines.py \
   --end-anchor "4:9e0f1a2b3c4d"
 ```
+
+`/tmp/new_lines.py` contains the replacement lines with actual newlines, not literal `\n` characters. Copy anchors from the current `read` output; the values above only illustrate the format.
 
 ```bash
 identedit patch example.py --at "4:9e0f1a2b3c4d" --insert-after-line "    # added line"
