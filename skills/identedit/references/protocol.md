@@ -65,6 +65,10 @@ Errors use this shape:
 
 `suggestion` is optional. `ambiguous_target` may also include a `candidates` array with structured target context.
 
+Line checks rejected by `patch` or `apply --repair` keep the `invalid_request` type and expose an optional `line_check` object containing `ok`, `summary`, and `mismatches` (including remap candidates). Read that object directly; diagnostics are no longer JSON encoded inside `message`. Other precondition failures may still use `precondition_failed` without `line_check`.
+
+If apply input declares `command: "edit"` and fails changeset parsing, the error retains the parse reason and suggests `identedit edit --json < request.json | identedit apply`. This is guidance only: input is never converted or applied automatically.
+
 Current error types are:
 
 - `no_provider`

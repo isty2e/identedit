@@ -17,6 +17,8 @@ struct ErrorBody {
     suggestion: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     candidates: Vec<TargetCandidateContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_check: Option<Box<crate::hashline::HashlineCheckResult>>,
 }
 
 impl ErrorBody {
@@ -30,6 +32,7 @@ impl ErrorBody {
             message: message.into(),
             suggestion,
             candidates: vec![],
+            line_check: None,
         }
     }
 
@@ -44,6 +47,7 @@ impl ErrorBody {
             message: message.into(),
             suggestion,
             candidates,
+            line_check: None,
         }
     }
 }
@@ -55,6 +59,18 @@ pub fn render_error_response(error: &IdenteditError) -> String {
 
 fn error_response(error: &IdenteditError) -> ErrorResponse {
     match error {
+        IdenteditError::EditRequestPassedToApply { .. } => ErrorResponse {
+            error: ErrorBody::new("invalid_request", error.to_string(), Some(
+                "Build a changeset first: identedit edit --json < request.json | identedit apply. No files were changed.".to_string()
+            )),
+        },
+        IdenteditError::LinePreconditionFailed { check } => {
+            let mut body = ErrorBody::new("invalid_request", error.to_string(), Some(
+                "Refresh anchors with identedit read --mode line <file>, inspect the target, and rebuild the request before retrying.".to_string()
+            ));
+            body.line_check = Some(check.clone());
+            ErrorResponse { error: body }
+        },
         IdenteditError::NoProvider {
             extension: _,
             supported_extensions,

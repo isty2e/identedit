@@ -162,6 +162,8 @@ Allow at most one retry per target; a second failure means stop using identedit 
 
 Line repair shares the same retry budget. References are optional; use reported recovery details rather than blindly retrying a transaction error.
 
+For `invalid_request` with `error.line_check`, inspect its mismatches and remap candidates, then refresh line anchors before the bounded retry. Do not parse diagnostics out of `message`. If apply received an edit request, compile it with `edit --json` first; apply accepts the resulting changeset.
+
 - `read` defaults to text; `--json` returns structured handles or line anchors.
 - `edit`, `apply`, `patch`, and runtime request errors emit JSON unless a documented mode says otherwise. Parse JSON, not grep output.
 - `patch --dry-run --diff` emits unified diff. Invalid CLI syntax uses argument-parser diagnostics on stderr, not JSON.
