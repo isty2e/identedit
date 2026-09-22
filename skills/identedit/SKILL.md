@@ -96,6 +96,8 @@ identedit patch example.py --symbol target_fn --replace --stdin-text < /tmp/new_
 
 For a non-trivial patch, preview the same request with `--dry-run --diff` before applying it. This emits unified diff without writing; without those flags, `patch` applies immediately.
 
+For a short location check, omit `--diff`: successful `patch`/`apply` execution or dry-run JSON includes `locations` with up to 16 resolved ranges or insertion points, original byte/line coordinates, and an omitted count. These are **pre-edit locations**, not fresh anchors or proof of a change; check `dry_run`, `transaction.status`, or `changed` for the outcome. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. Full field definitions: [protocol](references/protocol.md#resolved-edit-locations).
+
 ```bash
 identedit patch example.py --symbol target_fn --replace --text-file /tmp/new_body.py --dry-run --diff
 identedit patch example.py --symbol target_fn --replace --text-file /tmp/new_body.py

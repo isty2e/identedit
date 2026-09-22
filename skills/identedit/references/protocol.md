@@ -27,6 +27,39 @@ Run `identedit <command> --help` for the complete flag surface. Identedit does n
 
 Consumers should parse documented JSON output rather than grep its rendered text. Capture stderr separately when command construction itself may be invalid.
 
+## Resolved edit locations
+
+Successful edit execution and dry-run validation through `patch` or `apply` include a bounded `locations` object in JSON, in both default and verbose output. Discovery-only `patch --from-diff` keeps its candidate response instead:
+
+```json
+{
+  "basis": "pre_edit",
+  "total": 1,
+  "omitted": 0,
+  "entries": [
+    {
+      "kind": "text",
+      "file": "example.py",
+      "operation_index": 0,
+      "span": {"start": 9, "end": 35},
+      "start_line": 2,
+      "end_line": 3
+    }
+  ]
+}
+```
+
+- Coordinates come from the resolved plan and the original snapshot used for validation, including any line-anchor repair. They are not copied from requested hints or recomputed from the file after writing.
+- `span` is a half-open byte range. Line numbers are 1-based; for nonempty spans, `end_line` is the last intersecting line. CRLF counts as one terminator; standalone CR and LF also end a line.
+- Inserts have a zero-width span at the resolved insertion point. At EOF, the line number is the final line without a terminator, or the following line after a terminal newline; an empty file uses line 1.
+- `operation_index` is zero-based within each file's operations. A same-file move has two entries with the same index: the source range and the destination insertion point. Counts measure locations, not operations.
+- Whole-file moves have `kind: "file_move"`, `source`, `destination`, and `operation_index`, with no text coordinates. Paths are those of the validated move plan: the source is canonicalized; the destination retains the planned spelling.
+- At most 16 entries are returned across the whole response, even with `--verbose`. `total` includes all resolved locations; `omitted` counts those not shown. This limit does not limit execution. Text plans appear in preflight file order, then whole-file moves in execution order; within a text plan, entries follow operation order.
+
+Locations describe checked targets, not a minimal byte diff: config edits can replace a containing object, and line edits can adjust adjacent line terminators. A no-op may still report a checked location. Use the existing `changed`, `dry_run`, or `transaction.status` fields to interpret the outcome; locations alone do not mean a file was changed. Error responses, including rollback failures, do not include success locations.
+
+Post-edit coordinates, fresh edit anchors, source snippets, and semantic validation are outside this receipt contract. The bounded receipt supports a quick location check, not a second read view; richer output is deferred until usage shows a concrete need. For full text preview, use `patch --dry-run --diff`; read again for current edit addresses.
+
 ## Hashes and identities
 
 Content hashes and node identities contain exactly 16 ASCII hexadecimal characters. Line hashes contain exactly 12 ASCII hexadecimal characters.

@@ -23,12 +23,13 @@ use super::io::{AtomicWritePhase, write_text_atomically_tracked_with_hook};
 use super::replacements::{
     apply_replacements_to_text, matched_changes_to_replacements, validate_preview_consistency,
 };
-use super::{ApplyFileResult, ApplyFileStatus};
+use super::{ApplyFileResult, ApplyFileStatus, EditLocations};
 
 #[derive(Debug)]
 pub(super) struct PreflightFilePlan {
     pub(super) file: PathBuf,
     pub(super) operations_total: usize,
+    pub(super) locations: EditLocations,
     original_text: String,
     original_permissions: std::fs::Permissions,
     pub(super) updated_text: String,
@@ -79,6 +80,7 @@ pub(super) fn preflight_resolved_text_update(
     Ok(PreflightFilePlan {
         file: file.to_path_buf(),
         operations_total,
+        locations: EditLocations::default(),
         original_text: source_text,
         original_permissions,
         updated_text,
@@ -186,12 +188,26 @@ fn preflight_changeset(
     validate_change_conflicts(&matched_changes)?;
     validate_preview_consistency(changeset, &matched_changes)?;
     let replacements = matched_changes_to_replacements(matched_changes)?;
+    let locations = EditLocations::for_text(
+        &changeset.file,
+        &source_text,
+        replacements.iter().map(|replacement| {
+            (
+                replacement.index,
+                crate::handle::Span {
+                    start: replacement.start,
+                    end: replacement.end,
+                },
+            )
+        }),
+    );
     let original_text = source_text.clone();
     let updated_text = apply_replacements_to_text(&changeset.file, source_text, replacements)?;
 
     Ok(PreflightFilePlan {
         file: changeset.file.clone(),
         operations_total: changeset.operations.len(),
+        locations,
         original_text,
         original_permissions,
         updated_text,
