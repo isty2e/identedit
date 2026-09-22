@@ -372,6 +372,116 @@ fn file_move_reports_paths_instead_of_a_fabricated_span() {
     assert_eq!(fs::read_to_string(destination).unwrap(), "original");
 }
 
+fn move_plan(file: &Path, destination: &Path, text: &str) -> Value {
+    json!({"file":file,"operations":[{
+        "target":{"type":"file","expected_file_hash":common::hash_text(text)},
+        "op":{"type":"move","to":destination},
+        "preview":{"move":{"from":file,"to":destination}}
+    }]})
+}
+
+fn apply_plan_in_directory(directory: &Path, files: Vec<Value>, dry_run: bool) -> Value {
+    let plan_path = directory.join("plan.json");
+    fs::write(
+        &plan_path,
+        json!({"files":files,"transaction":{"mode":"all_or_nothing"}}).to_string(),
+    )
+    .unwrap();
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_identedit"));
+    command.current_dir(directory).arg("apply").arg(&plan_path);
+    if dry_run {
+        command.arg("--dry-run");
+    }
+    success(command.output().unwrap())
+}
+
+fn reported_missing_destination(
+    response: &Value,
+    directory: &Path,
+    name: &str,
+) -> std::path::PathBuf {
+    let destination = Path::new(
+        response["locations"]["entries"][0]["destination"]
+            .as_str()
+            .unwrap(),
+    );
+    assert!(destination.is_absolute());
+    assert!(!destination.components().any(|part| matches!(
+        part,
+        std::path::Component::CurDir | std::path::Component::ParentDir
+    )));
+    assert_eq!(destination.file_name().unwrap(), name);
+    assert_eq!(
+        fs::canonicalize(destination.parent().unwrap()).unwrap(),
+        fs::canonicalize(directory).unwrap()
+    );
+    destination.to_path_buf()
+}
+
+#[test]
+fn file_move_receipt_reports_normalized_missing_destinations() {
+    for relative in [true, false] {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("old.txt");
+        fs::write(&source, "original").unwrap();
+        fs::create_dir(dir.path().join("nested")).unwrap();
+        let submitted = if relative {
+            Path::new("./nested/../new.txt").to_path_buf()
+        } else {
+            dir.path().join("nested/../new.txt")
+        };
+        let files = vec![move_plan(&source, &submitted, "original")];
+        let preview = apply_plan_in_directory(dir.path(), files.clone(), true);
+        let expected = reported_missing_destination(&preview, dir.path(), "new.txt");
+        if !relative {
+            assert_eq!(expected, dir.path().join("new.txt"));
+        }
+        let entry = json!({"kind":"file_move","source":fs::canonicalize(&source).unwrap(),
+            "destination":expected,"operation_index":0});
+        assert_locations(&preview, vec![entry.clone()], 1);
+        assert!(source.exists());
+        assert!(!expected.exists());
+
+        let applied = apply_plan_in_directory(dir.path(), files, false);
+        assert_locations(&applied, vec![entry], 1);
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(expected).unwrap(), "original");
+    }
+}
+
+#[test]
+fn file_move_receipt_canonicalizes_existing_chain_destinations() {
+    let dir = tempdir().unwrap();
+    let first = dir.path().join("a.txt");
+    let second = dir.path().join("b.txt");
+    fs::write(&first, "first").unwrap();
+    fs::write(&second, "second").unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    let canonical = fs::canonicalize(dir.path()).unwrap();
+    let files = vec![
+        move_plan(&first, Path::new("./nested/../b.txt"), "first"),
+        move_plan(&second, Path::new("./nested/../c.txt"), "second"),
+    ];
+    let preview = apply_plan_in_directory(dir.path(), files.clone(), true);
+    let destination = reported_missing_destination(&preview, dir.path(), "c.txt");
+    let entries = vec![
+        json!({"kind":"file_move","source":canonical.join("b.txt"),"destination":destination,"operation_index":0}),
+        json!({"kind":"file_move","source":canonical.join("a.txt"),"destination":canonical.join("b.txt"),"operation_index":0}),
+    ];
+    assert_locations(&preview, entries.clone(), 2);
+    assert_eq!(fs::read_to_string(&first).unwrap(), "first");
+    assert_eq!(fs::read_to_string(&second).unwrap(), "second");
+
+    let applied = apply_plan_in_directory(dir.path(), files, false);
+    assert_locations(&applied, entries, 2);
+    assert!(!first.exists());
+    assert_eq!(fs::read_to_string(&second).unwrap(), "first");
+    assert_eq!(
+        fs::read_to_string(canonical.join("c.txt")).unwrap(),
+        "second"
+    );
+}
+
 #[test]
 fn same_file_move_reports_source_and_destination_under_one_operation() {
     let dir = tempdir().unwrap();
