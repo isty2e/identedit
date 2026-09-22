@@ -206,12 +206,8 @@ fn map_hashline_apply_error(error: HashlineApplyError) -> IdenteditError {
 
 fn hashline_precondition_failed_error(check: HashlineCheckResult) -> IdenteditError {
     let diagnostic_check = canonicalize_check_for_diagnostics(check);
-    let serialized_check = serde_json::to_string_pretty(&diagnostic_check)
-        .unwrap_or_else(|_| "{\"ok\":false}".to_string());
-    IdenteditError::InvalidRequest {
-        message: format!(
-            "Hashline preconditions failed; refresh anchors with 'identedit read --mode line --json <file>' and retry.\n{serialized_check}"
-        ),
+    IdenteditError::LinePreconditionFailed {
+        check: Box::new(diagnostic_check),
     }
 }
 

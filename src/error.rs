@@ -49,6 +49,16 @@ pub enum IdenteditError {
     #[error("Invalid request: {message}")]
     InvalidRequest { message: String },
 
+    #[error(
+        "Apply expects a compiled changeset, but the input appears to be an edit request: {source}"
+    )]
+    EditRequestPassedToApply { source: serde_json::Error },
+
+    #[error("Hashline preconditions failed")]
+    LinePreconditionFailed {
+        check: Box<crate::hashline::HashlineCheckResult>,
+    },
+
     #[error("File '{path}' is busy: another apply operation is in progress")]
     ResourceBusy { path: String },
 

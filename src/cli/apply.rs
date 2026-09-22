@@ -90,7 +90,7 @@ fn run_apply_json_mode() -> Result<MultiFileChangeset, IdenteditError> {
         .map_err(|error| IdenteditError::StdinRead { source: error })?;
 
     let request: StdinApplyRequest = serde_json::from_str(&request_body)
-        .map_err(|error| IdenteditError::InvalidJsonRequest { source: error })?;
+        .map_err(|error| apply_input_error(&request_body, error))?;
 
     if request.command != "apply" {
         return Err(IdenteditError::InvalidRequest {
@@ -289,12 +289,8 @@ fn map_hashline_check_error(error: HashlineCheckError) -> IdenteditError {
 }
 
 fn hashline_precondition_failed_error(check: HashlineCheckResult) -> IdenteditError {
-    let serialized_check =
-        serde_json::to_string_pretty(&check).unwrap_or_else(|_| "{\"ok\":false}".to_string());
-    IdenteditError::InvalidRequest {
-        message: format!(
-            "Hashline preconditions failed during apply --repair.\n{serialized_check}"
-        ),
+    IdenteditError::LinePreconditionFailed {
+        check: Box::new(check),
     }
 }
 
@@ -340,8 +336,7 @@ fn parse_failure_injection(
 
 fn read_changeset_from_file(path: &Path) -> Result<MultiFileChangeset, IdenteditError> {
     let content = fs::read_to_string(path).map_err(|error| IdenteditError::io(path, error))?;
-    serde_json::from_str(&content)
-        .map_err(|error| IdenteditError::InvalidJsonRequest { source: error })
+    serde_json::from_str(&content).map_err(|error| apply_input_error(&content, error))
 }
 
 fn read_changeset_from_stdin() -> Result<MultiFileChangeset, IdenteditError> {
@@ -350,6 +345,19 @@ fn read_changeset_from_stdin() -> Result<MultiFileChangeset, IdenteditError> {
         .read_to_string(&mut request_body)
         .map_err(|error| IdenteditError::StdinRead { source: error })?;
 
-    serde_json::from_str(&request_body)
-        .map_err(|error| IdenteditError::InvalidJsonRequest { source: error })
+    serde_json::from_str(&request_body).map_err(|error| apply_input_error(&request_body, error))
+}
+
+fn apply_input_error(body: &str, source: serde_json::Error) -> IdenteditError {
+    // Inspect only after strict deserialization fails; this never admits input.
+    let is_edit_request = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .is_some_and(|value| {
+            value.get("command").and_then(|command| command.as_str()) == Some("edit")
+        });
+    if is_edit_request {
+        IdenteditError::EditRequestPassedToApply { source }
+    } else {
+        IdenteditError::InvalidJsonRequest { source }
+    }
 }
