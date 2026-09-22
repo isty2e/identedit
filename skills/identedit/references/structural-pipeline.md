@@ -40,7 +40,27 @@ Output shape:
 }
 ```
 
-`read` defaults to compact handles without `text`. Use `--verbose` only when you explicitly need matched text payloads for debugging.
+JSON node handles omit `text` by default. Use `--verbose` for exact matched text. Symbol reads also include a separate source window, described below.
+
+### Symbol with context
+
+```bash
+identedit read example.py --symbol Processor.process_data --context 3
+identedit read example.py --symbol Processor.process_data --context 3 --json
+```
+
+`--symbol` uses the same exact local or containing-name match as `patch --symbol`. Each file must have one match; missing or ambiguous targets fail the entire read without partial output. It cannot be combined with kind/name/exclusion filters. `--context` requires `--symbol`, defaults to zero, and adds up to N lines on each side without truncating the symbol. These options require positional files; JSON-stdin selector requests do not support them.
+
+Text output shows a `# node --at ID` header, exact byte extent, and one line-anchored source window. `# context` and `# target lines` label the regions. The first and last target lines can contain bytes outside the node; the byte extent defines the node replacement, not whole visible lines. No display indentation is added. Even with `--verbose`, text output prints code only once.
+
+JSON keeps the single node in `handles[]` and adds `windows[]`, one entry per file:
+
+- `kind: "symbol"`, `file`, `total_lines`, `start_line`, `end_line`, `omitted_before`, `omitted_after` describe the visible window.
+- `target_lines: {start, end}` gives the inclusive original lines intersecting the node.
+- `target_start_column` and `target_end_column` are 1-based UTF-8 byte columns on those lines; the end is exclusive. They are not character or display columns. Line terminator bytes are counted if the node contains them.
+- `lines: [{line, anchor, text}]` contains the complete window, including context; these records are not extra selected nodes.
+
+`summary.matches` counts node handles, not context lines. `--verbose` adds exact raw node `text` to the JSON handle; without it, source appears only in the window. Metadata, addresses and full-file hashes come from the same loaded bytes. Feed the node's existing fields to `edit` as usual; do not use the surrounding window as replacement text.
 
 Fields for `edit`:
 - `identity` + `expected_old_hash`: copy into a `node` target.

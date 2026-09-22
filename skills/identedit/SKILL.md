@@ -13,6 +13,7 @@ Use for repeated targets, context-mismatch recovery, config paths, precondition-
 
 | I need to... | Use | Details |
 |---|---|---|
+| Inspect one symbol and nearby code, with edit-ready addresses | `read file --symbol Class.method --context 3` | [Symbols](#function-or-method) |
 | Replace a function by name, without looking up an identity | `patch file --symbol Class.method --replace --text-file body.txt` | [Symbols](#function-or-method) |
 | Change text only inside one function/class | `patch file --symbol name --scoped-regex 'old' --scoped-replacement 'new'` | [Symbols](#function-or-method) |
 | Edit an exact line/range among repeated text | `read --mode line file`, then `patch file --at "LINE:HASH"` | [Lines](#exact-line-or-range) |
@@ -41,7 +42,9 @@ def process_data(self, x, y):
         return x + y
 ```
 
-The first line starts at `def`; subsequent lines retain their intended file indentation. No dedent or reindent is performed. Decorators and comments outside the selected span stay untouched. Inspect `read --json --verbose` if the boundary is unclear.
+The first line starts at `def`; subsequent lines retain their intended file indentation. No dedent or reindent is performed. Decorators and comments outside the selected span stay untouched.
+
+Need to inspect the target first? `identedit read src/example.py --symbol Processor.process_data --context 3` shows the complete symbol plus up to three surrounding lines on each side. Copy the identity after `# node --at` for a node edit, or a `LINE:HASH` for a line edit. Context is labeled separately; boundary lines can contain text outside the exact node span. Preserve source indentation after the `|` marker for line edits. Add `--json --verbose` when you need the exact raw node `text` rather than its line view.
 
 To change text only inside a symbol:
 
@@ -62,6 +65,8 @@ Use this when structural targeting is too coarse. Read content and anchors toget
 identedit read --mode line example.py
 identedit patch example.py --at "4:9e0f1a2b3c4d" --set-line '    return x + y'
 ```
+
+For a large file, use `read --mode line --offset 40 --limit 30 example.py`. Offset is a positive, 1-based original line number; anchors are not renumbered. Omitted-line counts show that the view is partial. These bounds apply per file.
 
 For several lines, use `--replace-range --text-file /tmp/new_lines.txt` with optional `--end-anchor "LINE:HASH"`. For insertion, use `--insert-after-line`. These are line operations; `--replace` and `--insert-after` address nodes.
 

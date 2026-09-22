@@ -1,14 +1,21 @@
 use super::{HashedLine, compute_line_hash};
 
 pub(super) fn show_hashed_lines(source: &str) -> Vec<HashedLine> {
+    let mut start = 0;
     split_source_lines(source)
-        .into_line_contents()
+        .lines
         .into_iter()
         .enumerate()
-        .map(|(index, content)| HashedLine {
-            line: index + 1,
-            hash: compute_line_hash(&content),
-            content,
+        .map(|(index, line)| {
+            let end = start + line.content.len() + line.terminator.len();
+            let span = crate::handle::Span { start, end };
+            start = end;
+            HashedLine {
+                line: index + 1,
+                hash: compute_line_hash(&line.content),
+                content: line.content,
+                span,
+            }
         })
         .collect()
 }
@@ -177,10 +184,6 @@ impl SourceLayout {
         content
     }
 
-    fn into_line_contents(self) -> Vec<String> {
-        self.lines.into_iter().map(|line| line.content).collect()
-    }
-
     fn preferred_newline(&self, index: usize) -> String {
         self.lines
             .get(index)
@@ -197,5 +200,37 @@ impl SourceLayout {
                     .find(|line| !line.terminator.is_empty())
             })
             .map_or_else(|| "\n".to_string(), |line| line.terminator.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::show_hashed_lines;
+    use crate::hashline::compute_line_hash;
+
+    #[test]
+    fn hashed_line_spans_partition_original_bytes_including_terminators() {
+        for source in [
+            "",
+            "\n",
+            "\r\n\r",
+            "\u{feff}\u{3b1}\r\n\r\u{d55c}\u{ae00}\nlast",
+            "a\n\n",
+        ] {
+            let lines = show_hashed_lines(source);
+            let mut end = 0;
+            for (index, line) in lines.iter().enumerate() {
+                assert_eq!(line.line, index + 1);
+                assert_eq!(line.span.start, end);
+                assert!(line.span.end > line.span.start);
+                let original = &source[line.span.start..line.span.end];
+                assert_eq!(original.trim_end_matches(['\r', '\n']), line.content);
+                assert_eq!(line.hash, compute_line_hash(&line.content));
+                let wire = serde_json::to_value(line).unwrap();
+                assert!(wire.get("span").is_none());
+                end = line.span.end;
+            }
+            assert_eq!(end, source.len());
+        }
     }
 }

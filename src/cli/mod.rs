@@ -14,6 +14,7 @@ mod grammar;
 mod line_patch;
 mod merge;
 mod merge_plan;
+mod node_selection;
 mod patch;
 mod read;
 mod read_select;
