@@ -8,6 +8,7 @@ mod repair;
 mod show;
 
 pub use anchor::{LineAnchor, LineHash};
+pub(crate) use show::source_line_spans;
 
 pub const HASHLINE_PUBLIC_HEX_LEN: usize = 12;
 const HASHLINE_DISPLAY_MIN_HEX_LEN: usize = 8;
@@ -169,6 +170,13 @@ pub struct HashlineApplyResult {
     pub content: String,
     pub operations_total: usize,
     pub operations_applied: usize,
+    pub locations: Vec<HashlineEditLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HashlineEditLocation {
+    pub edit_index: usize,
+    pub span: crate::handle::Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,6 +295,29 @@ pub fn apply_hashline_edits_with_mode(
     }
     apply::ensure_non_overlapping(&resolved)?;
 
+    let line_spans: Vec<_> = source_line_spans(source).collect();
+    let locations = resolved
+        .iter()
+        .map(|edit| {
+            let first = &line_spans[edit.span.start_line - 1];
+            let last = &line_spans[edit.span.end_line - 1];
+            let span = match edit.span.kind {
+                LineSpanKind::Replace => crate::handle::Span {
+                    start: first.start,
+                    end: last.end,
+                },
+                LineSpanKind::InsertAfter => crate::handle::Span {
+                    start: last.end,
+                    end: last.end,
+                },
+            };
+            HashlineEditLocation {
+                edit_index: edit.edit_index,
+                span,
+            }
+        })
+        .collect();
+
     resolved.sort_by(|left, right| {
         right
             .sort_key()
@@ -316,6 +347,7 @@ pub fn apply_hashline_edits_with_mode(
         content: source_layout.into_content(),
         operations_total: prepared_edits.len(),
         operations_applied: prepared_edits.len(),
+        locations,
     })
 }
 

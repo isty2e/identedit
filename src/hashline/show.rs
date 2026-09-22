@@ -1,4 +1,30 @@
 use super::{HashedLine, compute_line_hash};
+use crate::handle::Span;
+
+pub(crate) fn source_line_spans(source: &str) -> impl Iterator<Item = Span> + '_ {
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        if start == source.len() {
+            return None;
+        }
+
+        let end = match source[start..].find(['\r', '\n']) {
+            Some(relative) => {
+                let offset = start + relative;
+                offset
+                    + if source[offset..].starts_with("\r\n") {
+                        2
+                    } else {
+                        1
+                    }
+            }
+            None => source.len(),
+        };
+        let span = Span { start, end };
+        start = end;
+        Some(span)
+    })
+}
 
 pub(super) fn show_hashed_lines(source: &str) -> Vec<HashedLine> {
     let mut start = 0;
@@ -51,51 +77,24 @@ pub(super) struct SourceLayout {
 }
 
 pub(super) fn split_source_lines(source: &str) -> SourceLayout {
-    if source.is_empty() {
-        return SourceLayout { lines: Vec::new() };
-    }
-
-    let bytes = source.as_bytes();
-    let mut lines = Vec::new();
-    let mut start = 0usize;
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\n' => {
-                lines.push(SourceLine {
-                    content: source[start..index].to_string(),
-                    terminator: "\n".to_string(),
-                });
-                index += 1;
-                start = index;
+    let lines = source_line_spans(source)
+        .map(|span| {
+            let line = &source[span.start..span.end];
+            let terminator = if line.ends_with("\r\n") {
+                "\r\n"
+            } else if line.ends_with('\r') {
+                "\r"
+            } else if line.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+            SourceLine {
+                content: line[..line.len() - terminator.len()].to_string(),
+                terminator: terminator.to_string(),
             }
-            b'\r' => {
-                let terminator = if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
-                    index += 2;
-                    "\r\n"
-                } else {
-                    index += 1;
-                    "\r"
-                };
-                lines.push(SourceLine {
-                    content: source[start..index - terminator.len()].to_string(),
-                    terminator: terminator.to_string(),
-                });
-                start = index;
-            }
-            _ => {
-                index += 1;
-            }
-        }
-    }
-
-    if start < source.len() {
-        lines.push(SourceLine {
-            content: source[start..].to_string(),
-            terminator: String::new(),
-        });
-    }
+        })
+        .collect();
 
     SourceLayout { lines }
 }

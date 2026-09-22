@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::apply::apply_resolved_text_update;
+use crate::apply::{EditLocations, apply_resolved_text_update};
 use crate::error::IdenteditError;
 use crate::hashline::{
     HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult,
@@ -37,6 +37,7 @@ pub struct HashlinePatchResponse {
     pub changed: bool,
     pub operations_total: usize,
     pub operations_applied: usize,
+    pub locations: EditLocations,
 }
 
 #[derive(Debug)]
@@ -140,6 +141,14 @@ fn apply_hashline_patch_request(
         apply_hashline_edits_with_mode(&verified.source, &verified.edits, verified.applied_mode)
             .map_err(map_hashline_apply_error)?;
     let changed = verified.source != applied.content;
+    let locations = EditLocations::for_text(
+        &verified.file,
+        &verified.source,
+        applied
+            .locations
+            .into_iter()
+            .map(|location| (location.edit_index, location.span)),
+    );
 
     if changed {
         apply_resolved_text_update(
@@ -163,6 +172,7 @@ fn apply_hashline_patch_request(
         changed,
         operations_total: applied.operations_total,
         operations_applied: applied.operations_applied,
+        locations,
     };
 
     Ok(HashlinePatchExecution {
