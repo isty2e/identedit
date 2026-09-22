@@ -25,6 +25,18 @@ Use JSON only when needed:
 identedit read --mode line example.py --json
 ```
 
+### Bounded reads
+
+```bash
+identedit read --mode line --offset 40 --limit 30 example.py
+```
+
+`--offset` is a positive, 1-based original line number (default `1`); `--limit` is a positive maximum line count (default: all remaining lines). Bounds apply separately to each file. Empty files and offsets past EOF succeed with no handles. Text output reports the window and omitted-line counts, including empty windows. Addresses and indentation remain those of the original file.
+
+Bounded JSON adds `windows[]`, one entry per file, with `kind: "line"`, `file`, `total_lines`, `start_line`, `end_line`, `omitted_before`, and `omitted_after`. Start/end line numbers are inclusive, or both `null` for an empty window. Selected line handles stay in `handles[]`; `summary.matches` counts those handles. `file_preconditions` still hashes each complete file, not the page. With no bounds, existing full-file output is unchanged.
+
+The bounds limit output, not file loading. LF, CRLF, and bare CR each delimit one logical line; a trailing terminator does not create a phantom final line. The displayed text omits terminators. To read a complete symbol with nearby anchored lines instead, use `read --symbol NAME --context N`.
+
 ## Patch Lines
 
 ```bash

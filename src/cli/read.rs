@@ -14,6 +14,10 @@ use crate::hash::{ContentHash, hash_bytes};
 use crate::hashline::{LineAnchor, LineHash, show_hashed_lines};
 use crate::provider::ProviderRegistry;
 
+mod window;
+
+use window::ReadWindow;
+
 #[derive(Debug, Args)]
 pub struct ReadArgs {
     #[arg(
@@ -35,6 +39,30 @@ pub struct ReadArgs {
         help = "Optional glob pattern for symbol names (ast mode only)"
     )]
     pub name: Option<String>,
+    #[arg(
+        long,
+        value_name = "NAME",
+        help = "Read one exact symbol (e.g. Class.method), with node identity and line anchors"
+    )]
+    pub symbol: Option<String>,
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Context lines on each side of --symbol (default: 0); never truncates the symbol"
+    )]
+    pub context: Option<usize>,
+    #[arg(
+        long,
+        value_name = "N",
+        help = "First line to read, 1-based (line mode only)"
+    )]
+    pub offset: Option<usize>,
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Maximum lines to read (positive, line mode only)"
+    )]
+    pub limit: Option<usize>,
     #[arg(
         long = "exclude-kind",
         value_name = "KIND",
@@ -65,6 +93,8 @@ pub struct ReadResponse {
     pub handles: Vec<ReadHandle>,
     pub summary: ReadSummary,
     pub file_preconditions: Vec<FilePrecondition>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    windows: Vec<ReadWindow>,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,6 +138,8 @@ pub enum ReadCommandOutput {
 }
 
 pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
+    validate_read_options(&args)?;
+
     if args.files.is_empty() {
         if !args.json {
             return Err(IdenteditError::InvalidRequest {
@@ -150,6 +182,7 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
     let provider_registry = ProviderRegistry::default();
     let mut handles = Vec::new();
     let mut file_preconditions = Vec::new();
+    let mut windows = Vec::new();
     let mut seen_canonical_paths = HashSet::with_capacity(args.files.len());
     #[cfg(unix)]
     let mut seen_file_keys = HashSet::with_capacity(args.files.len());
@@ -195,32 +228,44 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
             ReadMode::Ast => {
                 let provider = provider_registry.provider_for(file)?;
                 let parsed_handles = provider.parse(file, &source)?;
-                let filtered_handles = filter_ast_handles(
-                    parsed_handles,
-                    args.kind.as_deref(),
-                    compiled_name_pattern.as_ref(),
-                    &args.exclude_kinds,
-                );
-                handles.extend(
-                    filtered_handles
-                        .into_iter()
-                        .map(|handle| ReadHandle::from_selection_handle(handle, args.verbose)),
-                );
+                if let Some(symbol) = args.symbol.as_deref() {
+                    let source_text = source_utf8(file, &source)?;
+                    let handle = super::node_selection::resolve_symbol(
+                        file,
+                        source_text,
+                        &parsed_handles,
+                        symbol,
+                    )?;
+                    windows.push(ReadWindow::symbol(
+                        file.clone(),
+                        source_text,
+                        handle.span,
+                        args.context.unwrap_or(0),
+                    )?);
+                    handles.push(ReadHandle::from_selection_handle(handle, args.verbose));
+                } else {
+                    let filtered_handles = filter_ast_handles(
+                        parsed_handles,
+                        args.kind.as_deref(),
+                        compiled_name_pattern.as_ref(),
+                        &args.exclude_kinds,
+                    );
+                    handles.extend(
+                        filtered_handles
+                            .into_iter()
+                            .map(|handle| ReadHandle::from_selection_handle(handle, args.verbose)),
+                    );
+                }
             }
             ReadMode::Line => {
-                if args.kind.is_some() || args.name.is_some() || !args.exclude_kinds.is_empty() {
-                    return Err(IdenteditError::InvalidRequest {
-                        message: "--mode line does not accept --kind/--name/--exclude-kind filters"
-                            .to_string(),
-                    });
+                let source_text = source_utf8(file, &source)?;
+                let mut lines = show_hashed_lines(source_text);
+                if args.offset.is_some() || args.limit.is_some() {
+                    let (window, selected) =
+                        ReadWindow::page(file.clone(), lines, args.offset.unwrap_or(1), args.limit);
+                    windows.push(window);
+                    lines = selected;
                 }
-                let source_text = String::from_utf8(source.clone()).map_err(|error| {
-                    IdenteditError::io(
-                        file,
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, error),
-                    )
-                })?;
-                let lines = show_hashed_lines(&source_text);
                 handles.extend(lines.into_iter().map(|line| {
                     ReadHandle::Line {
                         file: file.clone(),
@@ -246,6 +291,7 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
         },
         handles,
         file_preconditions,
+        windows,
     };
 
     if args.json {
@@ -255,6 +301,60 @@ pub fn run_read(args: ReadArgs) -> Result<ReadCommandOutput, IdenteditError> {
     Ok(ReadCommandOutput::Text(render_human_readable(
         &response, args.mode,
     )))
+}
+
+fn source_utf8<'a>(file: &std::path::Path, source: &'a [u8]) -> Result<&'a str, IdenteditError> {
+    std::str::from_utf8(source).map_err(|error| {
+        IdenteditError::io(
+            file,
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+        )
+    })
+}
+
+fn validate_read_options(args: &ReadArgs) -> Result<(), IdenteditError> {
+    let filters = args.kind.is_some() || args.name.is_some() || !args.exclude_kinds.is_empty();
+    let paging = args.offset.is_some() || args.limit.is_some();
+    let message = if args.files.is_empty()
+        && (paging || args.symbol.is_some() || args.context.is_some())
+    {
+        Some(
+            "Bounded reads require FILE arguments; --symbol/--context/--offset/--limit are not supported in --json stdin selector mode",
+        )
+    } else if args.mode == ReadMode::Line
+        && (filters || args.symbol.is_some() || args.context.is_some())
+    {
+        Some(
+            "--mode line accepts --offset/--limit, not --kind/--name/--exclude-kind/--symbol/--context; use --mode ast for symbols",
+        )
+    } else if args.mode == ReadMode::Ast && paging {
+        Some(
+            "--offset/--limit require --mode line; use --symbol NAME --context N for a complete AST target with context",
+        )
+    } else if args.offset == Some(0) || args.limit == Some(0) {
+        Some("--offset and --limit must be positive; --offset is a 1-based original line number")
+    } else if args.symbol.is_some() && filters {
+        Some(
+            "--symbol cannot be combined with --kind/--name/--exclude-kind; choose one selection method",
+        )
+    } else if args.context.is_some() && args.symbol.is_none() {
+        Some("--context requires --symbol NAME; use --mode line --offset/--limit for a line range")
+    } else if args
+        .symbol
+        .as_deref()
+        .is_some_and(|symbol| symbol.trim().is_empty())
+    {
+        Some("--symbol must not be empty")
+    } else {
+        None
+    };
+
+    if let Some(message) = message {
+        return Err(IdenteditError::InvalidRequest {
+            message: message.to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn filter_ast_handles(
@@ -292,6 +392,9 @@ fn filter_ast_handles(
 }
 
 fn render_human_readable(response: &ReadResponse, mode: ReadMode) -> String {
+    if !response.windows.is_empty() {
+        return window::render_windows(response);
+    }
     match mode {
         ReadMode::Ast => render_ast_text(&response.handles),
         ReadMode::Line => render_line_text(&response.handles),
@@ -427,6 +530,7 @@ impl ReadResponse {
             handles,
             summary,
             file_preconditions,
+            windows: Vec::new(),
         }
     }
 }

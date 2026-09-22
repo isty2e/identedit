@@ -18,6 +18,9 @@ pub struct HashedLine {
     pub line: usize,
     pub hash: LineHash,
     pub content: String,
+    /// Original byte extent, including the line terminator when present.
+    #[serde(skip)]
+    pub span: crate::handle::Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

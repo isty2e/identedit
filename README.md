@@ -74,6 +74,17 @@ Core editing commands are intended to run on macOS, Linux, and Windows. `idented
 
 ## Common workflows
 
+### Inspect an edit target
+
+Read a complete symbol with nearby code and both node and line addresses, or read a bounded range of lines:
+
+```bash
+identedit read src/example.py --symbol Processor.process_data --context 3
+identedit read --mode line --offset 40 --limit 30 src/example.py
+```
+
+Line numbers stay relative to the original file. The output labels context and reports omitted lines; it does not reindent source. Add `--json` for structured output.
+
 ### Preview a structural replacement
 
 Use `--symbol` for a unique local name or containing-name path. Ambiguous targets fail without writing and return candidate context.
