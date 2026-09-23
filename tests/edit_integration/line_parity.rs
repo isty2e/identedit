@@ -384,11 +384,19 @@ fn commit_failure_rolls_back_line_edits_in_both_files() {
     assert!(edit.status.success());
     let plan: Value = serde_json::from_slice(&edit.stdout).unwrap();
 
-    let failed = run_identedit_with_stdin(
-        &["apply", "--inject-failure-after-writes", "1"],
-        &plan.to_string(),
-    );
+    let plan_file = Builder::new().suffix(".json").tempfile().unwrap();
+    fs::write(plan_file.path(), plan.to_string()).unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_identedit"))
+        .args(["apply", "--inject-failure-after-writes", "1"])
+        .arg(plan_file.path())
+        .env("IDENTEDIT_EXPERIMENTAL", "1")
+        .output()
+        .unwrap();
     assert!(!failed.status.success());
+    let response: Value = serde_json::from_slice(&failed.stdout).unwrap();
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("Injected apply failure for rollback rehearsal"));
+    assert!(message.contains("after 1 committed writes"));
     assert_eq!(fs::read_to_string(&first).unwrap(), first_source);
     assert_eq!(fs::read_to_string(&second).unwrap(), second_source);
 }
