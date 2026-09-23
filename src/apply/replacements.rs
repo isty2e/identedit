@@ -29,6 +29,11 @@ pub(super) fn matched_changes_to_replacements(
                 end: matched.matched_span.end,
                 new_text,
             }),
+            OpKind::SetLine { .. }
+            | OpKind::ReplaceLines { .. }
+            | OpKind::InsertAfterLine { .. } => {
+                unreachable!("logical line operations must be resolved before apply")
+            }
             OpKind::Delete => replacements.push(ResolvedReplacement {
                 index: matched.index,
                 old_text: matched.old_text,
@@ -158,8 +163,13 @@ pub(super) fn validate_preview_consistency(
             });
         }
 
-        let op_new_text = match operation.op() {
+        let op_new_text = match &matched.op {
             OpKind::Replace { new_text } => new_text,
+            OpKind::SetLine { .. }
+            | OpKind::ReplaceLines { .. }
+            | OpKind::InsertAfterLine { .. } => {
+                unreachable!("logical line operations must be resolved before preview validation")
+            }
             OpKind::Delete => "",
             OpKind::InsertBefore { new_text } => new_text,
             OpKind::InsertAfter { new_text } => new_text,
@@ -177,7 +187,7 @@ pub(super) fn validate_preview_consistency(
         if preview.new_text != *op_new_text {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
-                    "Operation {} preview.new_text does not match op payload",
+                    "Operation {} preview.new_text does not match resolved edit text",
                     matched.index
                 ),
             });
@@ -213,7 +223,11 @@ fn validate_target_preview_span_consistency(
             start: span_hint.end,
             end: span_hint.end,
         },
-        OpKind::Insert { .. } | OpKind::Move { .. } => preview.matched_span,
+        OpKind::Insert { .. }
+        | OpKind::Move { .. }
+        | OpKind::SetLine { .. }
+        | OpKind::ReplaceLines { .. }
+        | OpKind::InsertAfterLine { .. } => preview.matched_span,
     };
 
     if preview.matched_span != expected_preview_span {

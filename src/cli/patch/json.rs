@@ -289,6 +289,11 @@ fn run_patch_json_line(
             message: format!("Invalid line patch operation payload: {error}"),
         }
     })?;
+    if end_anchor.is_some() && !matches!(line_op, LinePatchOp::ReplaceLines { .. }) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "line target end_anchor is only valid with replace_lines; remove end_anchor for set_line or insert_after".to_string(),
+        });
+    }
     let edit = match line_op {
         LinePatchOp::SetLine { new_text } => HashlineEdit::SetLine {
             set_line: SetLineEdit { anchor, new_text },

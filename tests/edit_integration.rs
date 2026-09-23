@@ -68,6 +68,8 @@ fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
 mod boundary_conflicts;
 #[path = "edit_integration/flag_mode_and_resolution.rs"]
 mod flag_mode_and_resolution;
+#[path = "edit_integration/line_parity.rs"]
+mod line_parity;
 #[path = "edit_integration/preview_generation.rs"]
 mod preview_generation;
 #[path = "edit_integration/request_validation.rs"]

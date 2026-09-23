@@ -1227,7 +1227,7 @@ fn transform_json_mode_supports_line_target_replace_lines_operation() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     let operation = &response["files"][0]["operations"][0];
     assert_eq!(operation["target"]["type"], "line");
-    assert_eq!(operation["op"]["type"], "replace");
+    assert_eq!(operation["op"]["type"], "replace_lines");
     assert_eq!(operation["preview"]["matched_span"]["start"], 2);
     assert_eq!(operation["preview"]["matched_span"]["end"], 6);
     assert_compact_preview_old_state(&operation["preview"], "b\nc\n");
@@ -1300,7 +1300,7 @@ fn line_range_edit_captures_current_interior_and_repair_refreshes_preview() {
         "repair should refresh the line preview from current content: {}",
         String::from_utf8_lossy(&repaired.stderr)
     );
-    assert_eq!(fs::read_to_string(&file_path).unwrap(), "replacement");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "replacement\n");
 }
 #[test]
 fn transform_json_mode_supports_line_target_insert_after_line_operation() {
@@ -1342,7 +1342,7 @@ fn transform_json_mode_supports_line_target_insert_after_line_operation() {
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     let operation = &response["files"][0]["operations"][0];
     assert_eq!(operation["target"]["type"], "line");
-    assert_eq!(operation["op"]["type"], "insert_after");
+    assert_eq!(operation["op"]["type"], "insert_after_line");
     assert_eq!(operation["preview"]["matched_span"]["start"], 2);
     assert_eq!(operation["preview"]["matched_span"]["end"], 2);
     assert_compact_preview_old_state(&operation["preview"], "");

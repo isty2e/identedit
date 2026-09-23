@@ -5,11 +5,15 @@ use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 use crate::hash::{ContentHash, hash_text};
-use crate::hashline::{LineAnchor, LineHash, compute_line_hash};
+use crate::hashline::{
+    HashlineApplyMode, HashlineEdit, InsertAfterEdit, LineAnchor, LineHash, ReplaceLinesEdit,
+    SetLineEdit, apply_hashline_edits_with_mode, compute_line_hash,
+};
 
 pub(super) struct ResolvedOperationView {
     pub(super) old_text: String,
     pub(super) matched_span: Span,
+    pub(super) effective_op: Option<OpKind>,
     pub(super) move_insert_at: Option<usize>,
     pub(super) anchor_identity: Option<String>,
     pub(super) anchor_kind: String,
@@ -118,6 +122,7 @@ pub(super) fn resolve_operation_view(
             Ok(ResolvedOperationView {
                 old_text,
                 matched_span,
+                effective_op: None,
                 move_insert_at: None,
                 anchor_identity: Some(anchor.identity.clone()),
                 anchor_kind: anchor.kind.clone(),
@@ -130,6 +135,7 @@ pub(super) fn resolve_operation_view(
             Ok(ResolvedOperationView {
                 old_text: String::new(),
                 matched_span: Span { start, end: start },
+                effective_op: None,
                 move_insert_at: None,
                 anchor_identity: None,
                 anchor_kind: "file".to_string(),
@@ -142,6 +148,7 @@ pub(super) fn resolve_operation_view(
             Ok(ResolvedOperationView {
                 old_text: String::new(),
                 matched_span: Span { start: end, end },
+                effective_op: None,
                 move_insert_at: None,
                 anchor_identity: None,
                 anchor_kind: "file".to_string(),
@@ -179,6 +186,26 @@ fn resolve_line_operation_view(
         });
     }
 
+    let anchor_span = Span {
+        start: start_line.full_start,
+        end: start_line.full_end,
+    };
+
+    if matches!(
+        op,
+        OpKind::SetLine { .. } | OpKind::ReplaceLines { .. } | OpKind::InsertAfterLine { .. }
+    ) {
+        return resolve_logical_line_edit(
+            source_text,
+            &ranges,
+            anchor,
+            end_anchor,
+            op,
+            &start_line,
+            &end_line,
+        );
+    }
+
     match op {
         OpKind::Replace { .. } => {
             let matched_span = Span {
@@ -189,13 +216,11 @@ fn resolve_line_operation_view(
             Ok(ResolvedOperationView {
                 old_text,
                 matched_span,
+                effective_op: None,
                 move_insert_at: None,
                 anchor_identity: None,
                 anchor_kind: "line".to_string(),
-                anchor_span: Span {
-                    start: start_line.full_start,
-                    end: start_line.full_end,
-                },
+                anchor_span,
             })
         }
         OpKind::InsertAfter { .. } => {
@@ -210,17 +235,119 @@ fn resolve_line_operation_view(
                     start: insert_at,
                     end: insert_at,
                 },
+                effective_op: None,
                 move_insert_at: None,
                 anchor_identity: None,
                 anchor_kind: "line".to_string(),
-                anchor_span: Span {
-                    start: start_line.full_start,
-                    end: start_line.full_end,
-                },
+                anchor_span,
             })
         }
         _ => unreachable!("EditOperation guarantees line target compatibility"),
     }
+}
+
+fn resolve_logical_line_edit(
+    source_text: &str,
+    ranges: &[LineRange],
+    anchor: &LineAnchor,
+    end_anchor: Option<&LineAnchor>,
+    op: &OpKind,
+    start_line: &LineRange,
+    end_line: &LineRange,
+) -> Result<ResolvedOperationView, IdenteditError> {
+    let (edit, mut matched_span) = match op {
+        OpKind::SetLine { new_text } => (
+            HashlineEdit::SetLine {
+                set_line: SetLineEdit {
+                    anchor: anchor.clone(),
+                    new_text: new_text.clone(),
+                },
+            },
+            Span {
+                start: start_line.full_start,
+                end: start_line.full_end,
+            },
+        ),
+        OpKind::ReplaceLines { new_text } => (
+            HashlineEdit::ReplaceLines {
+                replace_lines: ReplaceLinesEdit {
+                    start_anchor: anchor.clone(),
+                    end_anchor: end_anchor.cloned(),
+                    new_text: new_text.clone(),
+                },
+            },
+            Span {
+                start: start_line.full_start,
+                end: end_line.full_end,
+            },
+        ),
+        OpKind::InsertAfterLine { text } => (
+            HashlineEdit::InsertAfter {
+                insert_after: InsertAfterEdit {
+                    anchor: anchor.clone(),
+                    text: text.clone(),
+                },
+            },
+            Span {
+                start: start_line.full_end,
+                end: start_line.full_end,
+            },
+        ),
+        _ => unreachable!("caller selects logical line operations"),
+    };
+
+    let updated = apply_hashline_edits_with_mode(source_text, &[edit], HashlineApplyMode::Strict)
+        .map_err(|error| IdenteditError::InvalidRequest {
+            message: error.to_string(),
+        })?
+        .content;
+
+    if !updated.starts_with(&source_text[..matched_span.start]) {
+        // Deleting an unterminated final line also removes the preceding separator.
+        let Some(previous) = start_line
+            .line
+            .checked_sub(2)
+            .and_then(|index| ranges.get(index))
+        else {
+            return Err(IdenteditError::InvalidRequest {
+                message: "Line edit changed text before its target".to_string(),
+            });
+        };
+        matched_span.start = previous.full_start;
+    }
+
+    let suffix = &source_text[matched_span.end..];
+    let replacement_end = updated.len().checked_sub(suffix.len());
+    let Some(replacement_end) = replacement_end.filter(|end| *end >= matched_span.start) else {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Line edit produced an invalid replacement span".to_string(),
+        });
+    };
+    if !updated.starts_with(&source_text[..matched_span.start]) || !updated.ends_with(suffix) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Line edit changed text outside its resolved span".to_string(),
+        });
+    }
+
+    let new_text = updated[matched_span.start..replacement_end].to_string();
+    let effective_op = if matches!(op, OpKind::InsertAfterLine { .. }) {
+        OpKind::InsertAfter { new_text }
+    } else {
+        OpKind::Replace { new_text }
+    };
+
+    Ok(ResolvedOperationView {
+        old_text: source_text[matched_span.start..matched_span.end].to_string(),
+        matched_span,
+        effective_op: Some(effective_op),
+        move_insert_at: None,
+        anchor_identity: None,
+        anchor_kind: "line".to_string(),
+        anchor_span: Span {
+            start: start_line.full_start,
+            end: start_line.full_end,
+        },
+    })
 }
 
 fn resolve_same_file_move_view(
@@ -254,6 +381,7 @@ fn resolve_same_file_move_view(
     Ok(ResolvedOperationView {
         old_text: source_anchor.text.clone(),
         matched_span: source_anchor.span,
+        effective_op: None,
         move_insert_at: Some(destination_offset),
         anchor_identity: Some(source_anchor.identity),
         anchor_kind: source_anchor.kind,
@@ -308,6 +436,9 @@ fn resolve_destination_offset(
 fn edit_view_for_node_operation(op: &OpKind, anchor: &SelectionHandle) -> (String, Span) {
     match op {
         OpKind::Replace { .. } => (anchor.text.clone(), anchor.span),
+        OpKind::SetLine { .. } | OpKind::ReplaceLines { .. } | OpKind::InsertAfterLine { .. } => {
+            unreachable!("EditOperation rejects logical line operations on node targets")
+        }
         OpKind::Delete => (anchor.text.clone(), anchor.span),
         OpKind::InsertBefore { .. } => (
             String::new(),
@@ -700,4 +831,130 @@ fn resolve_line_anchor(
     }
 
     Ok(range)
+}
+
+#[cfg(test)]
+mod line_resolution_tests {
+    use super::*;
+
+    fn anchor(line: usize, content: &str) -> LineAnchor {
+        LineAnchor::parse(&format!("{line}:{}", compute_line_hash(content))).unwrap()
+    }
+
+    #[test]
+    fn logical_line_resolution_reproduces_hashline_for_mixed_terminators() {
+        let contents = ["α", "beta", "γ"];
+        let separators = ["\n", "\r\n", "\r"];
+        let final_separators = ["", "\n", "\r\n", "\r"];
+
+        for first in separators {
+            for second in separators {
+                for final_separator in final_separators {
+                    let source = format!("α{first}beta{second}γ{final_separator}");
+
+                    for start in 1..=3 {
+                        for end in start..=3 {
+                            let start_anchor = anchor(start, contents[start - 1]);
+                            let end_anchor = (end != start).then(|| anchor(end, contents[end - 1]));
+
+                            for (op, edit) in [
+                                (
+                                    OpKind::SetLine {
+                                        new_text: String::new(),
+                                    },
+                                    HashlineEdit::SetLine {
+                                        set_line: SetLineEdit {
+                                            anchor: start_anchor.clone(),
+                                            new_text: String::new(),
+                                        },
+                                    },
+                                ),
+                                (
+                                    OpKind::SetLine {
+                                        new_text: "X\nY".to_string(),
+                                    },
+                                    HashlineEdit::SetLine {
+                                        set_line: SetLineEdit {
+                                            anchor: start_anchor.clone(),
+                                            new_text: "X\nY".to_string(),
+                                        },
+                                    },
+                                ),
+                                (
+                                    OpKind::ReplaceLines {
+                                        new_text: String::new(),
+                                    },
+                                    HashlineEdit::ReplaceLines {
+                                        replace_lines: ReplaceLinesEdit {
+                                            start_anchor: start_anchor.clone(),
+                                            end_anchor: end_anchor.clone(),
+                                            new_text: String::new(),
+                                        },
+                                    },
+                                ),
+                                (
+                                    OpKind::ReplaceLines {
+                                        new_text: "X\nY".to_string(),
+                                    },
+                                    HashlineEdit::ReplaceLines {
+                                        replace_lines: ReplaceLinesEdit {
+                                            start_anchor: start_anchor.clone(),
+                                            end_anchor: end_anchor.clone(),
+                                            new_text: "X\nY".to_string(),
+                                        },
+                                    },
+                                ),
+                                (
+                                    OpKind::InsertAfterLine {
+                                        text: "X\nY".to_string(),
+                                    },
+                                    HashlineEdit::InsertAfter {
+                                        insert_after: InsertAfterEdit {
+                                            anchor: start_anchor.clone(),
+                                            text: "X\nY".to_string(),
+                                        },
+                                    },
+                                ),
+                            ] {
+                                let op_end_anchor = matches!(op, OpKind::ReplaceLines { .. })
+                                    .then_some(end_anchor.as_ref())
+                                    .flatten();
+                                let resolved = resolve_line_operation_view(
+                                    &source,
+                                    &start_anchor,
+                                    op_end_anchor,
+                                    &op,
+                                )
+                                .unwrap();
+                                let expected = apply_hashline_edits_with_mode(
+                                    &source,
+                                    &[edit],
+                                    HashlineApplyMode::Strict,
+                                )
+                                .unwrap()
+                                .content;
+                                let span = resolved.matched_span;
+                                assert_eq!(resolved.old_text, source[span.start..span.end]);
+                                let new_text = match resolved.effective_op.unwrap() {
+                                    OpKind::Replace { new_text }
+                                    | OpKind::InsertAfter { new_text } => new_text,
+                                    _ => unreachable!(),
+                                };
+                                let actual = format!(
+                                    "{}{}{}",
+                                    &source[..span.start],
+                                    new_text,
+                                    &source[span.end..]
+                                );
+                                assert_eq!(
+                                    actual, expected,
+                                    "source={source:?}, start={start}, end={end}, op={op:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

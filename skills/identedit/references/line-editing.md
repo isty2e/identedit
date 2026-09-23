@@ -67,6 +67,10 @@ Line operations:
 - `--replace-range` with optional `--end-anchor`
 - `--insert-after-line`
 
+`edit` flag mode accepts the same operations and keeps their logical-line meaning in the generated changeset. In `edit --json`, use `op.type: "set_line"` or `"replace_lines"` with `new_text`, and `"insert_after_line"` with `text`. `apply` rechecks the resolved line and preview before writing. An empty `set_line` makes a blank line; an empty `replace_lines` deletes the selected line range. Empty `insert_after_line` text is invalid. `end_anchor` is accepted only for range replacement; `patch --json` rejects it for `set_line` and `insert_after` rather than ignoring it.
+
+The generic changeset operations `replace` and `insert_after` remain raw byte-text operations, even when given a line target. Use the line-specific operations for automatic line terminator handling.
+
 ## Line Ending Preservation
 
 - Untouched lines retain their original `LF`, `CRLF`, or `CR` terminators, including in mixed files.

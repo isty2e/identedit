@@ -259,6 +259,12 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
                 ),
             })?;
 
+        let logical_line_op = matches!(
+            operation.op(),
+            crate::changeset::OpKind::SetLine { .. }
+                | crate::changeset::OpKind::ReplaceLines { .. }
+                | crate::changeset::OpKind::InsertAfterLine { .. }
+        );
         let Some(preview) = operation.text_preview_mut() else {
             return Err(IdenteditError::InvalidRequest {
                 message: format!(
@@ -268,7 +274,32 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
             });
         };
 
+        let preview_old_matches_resolved = preview.matched_span == matched_change.matched_span
+            && match preview.old_text.as_deref() {
+                Some(old_text) => old_text == matched_change.old_text,
+                None => {
+                    preview.old_hash.as_ref() == Some(&hash_text(&matched_change.old_text))
+                        && preview.old_len == Some(matched_change.old_text.len())
+                }
+            };
+
         preview.matched_span = matched_change.matched_span;
+        if logical_line_op {
+            let resolved_new_text = match matched_change.op {
+                crate::changeset::OpKind::Replace { new_text }
+                | crate::changeset::OpKind::InsertAfter { new_text } => new_text,
+                _ => unreachable!("logical line operation resolves to a text update"),
+            };
+            if preview_old_matches_resolved && preview.new_text != resolved_new_text {
+                return Err(IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Operation {} preview.new_text does not match resolved edit text",
+                        original_index
+                    ),
+                });
+            }
+            preview.new_text = resolved_new_text;
+        }
         if preview.old_text.is_some() {
             preview.old_text = Some(matched_change.old_text);
             preview.old_hash = None;

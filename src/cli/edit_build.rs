@@ -541,13 +541,13 @@ fn parse_stdin_operation_kind(
             ParsedOperationKind::Canonical(OpKind::Insert { new_text })
         }
         StdinEditOp::SetLine { new_text } => {
-            ParsedOperationKind::Canonical(OpKind::Replace { new_text })
+            ParsedOperationKind::Canonical(OpKind::SetLine { new_text })
         }
         StdinEditOp::ReplaceLines { new_text } => {
-            ParsedOperationKind::Canonical(OpKind::Replace { new_text })
+            ParsedOperationKind::Canonical(OpKind::ReplaceLines { new_text })
         }
         StdinEditOp::InsertAfterLine { text } => {
-            ParsedOperationKind::Canonical(OpKind::InsertAfter { new_text: text })
+            ParsedOperationKind::Canonical(OpKind::InsertAfterLine { text })
         }
         StdinEditOp::MoveBefore { destination } => {
             ParsedOperationKind::Canonical(OpKind::MoveBefore {

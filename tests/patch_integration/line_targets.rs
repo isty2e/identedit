@@ -1103,6 +1103,44 @@ fn patch_json_line_target_set_line_applies_change() {
 }
 
 #[test]
+fn patch_json_rejects_unused_end_anchor_without_writing() {
+    let source = "alpha\nbeta\ngamma\n";
+    for op in [
+        json!({ "type": "set_line", "new_text": "BETA" }),
+        json!({ "type": "insert_after", "text": "X" }),
+    ] {
+        for end_anchor in [line_ref(source, 3), "3:00000000".to_string()] {
+            let file = create_temp_text_file(source);
+            let request = json!({
+                "command": "patch",
+                "file": file,
+                "target": {
+                    "type": "line",
+                    "anchor": line_ref(source, 2),
+                    "end_anchor": end_anchor,
+                },
+                "op": op,
+            });
+
+            let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+            assert!(
+                !output.status.success(),
+                "unused end_anchor must be rejected: {request}"
+            );
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["error"]["type"], "invalid_request");
+            assert!(
+                response["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("end_anchor")
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), source);
+        }
+    }
+}
+
+#[test]
 fn patch_json_line_target_options_dry_run_does_not_modify_file() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
