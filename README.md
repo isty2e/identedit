@@ -17,12 +17,11 @@ Identedit treats edits as verified operations:
 
 ## Choose an entry point
 
-Use `patch` for one verified edit:
+Use `patch` for one verified edit. For multiline replacement, put the exact new node text in `/tmp/new_body.py`; Identedit does not reindent or trim it:
 
 ```bash
 identedit patch src/example.py --symbol process_data \
-  --replace 'def process_data(x, y):
-    return x + y'
+  --replace --text-file /tmp/new_body.py
 
 identedit patch config.yaml --config-path server.port --set-value 8080
 ```

@@ -16,7 +16,7 @@ Use for repeated targets, context-mismatch recovery, config paths, precondition-
 | Inspect one symbol and nearby code, with edit-ready addresses | `read file --symbol Class.method --context 3` | [Symbols](#function-or-method) |
 | Replace a function by name, without looking up an identity | `patch file --symbol Class.method --replace --text-file body.txt` | [Symbols](#function-or-method) |
 | Change text only inside one function/class | `patch file --symbol name --scoped-regex 'old' --scoped-replacement 'new'` | [Symbols](#function-or-method) |
-| Edit an exact line/range among repeated text | `read --mode line file`, then `patch file --at "LINE:HASH"` | [Lines](#exact-line-or-range) |
+| Edit an exact line/range among repeated text | `read --mode line file`, then `patch file --at "LINE:HASH" --replace 'new text'` | [Lines](#exact-line-or-range) |
 | Preview a patch without writing | Add `--dry-run --diff` | [Preview](#text-preview-and-verification) |
 | Supply multiline text without shell escaping | `--text-file body.txt` or `--stdin-text` | [Text input](#text-preview-and-verification) |
 | Add code at the start/end of a file | `patch file --at file-end --insert --text-file code.txt` (or `file-start`) | [Text input](#text-preview-and-verification) |
@@ -44,7 +44,7 @@ def process_data(self, x, y):
 
 The first line starts at `def`; subsequent lines retain their intended file indentation. No dedent or reindent is performed. Decorators and comments outside the selected span stay untouched.
 
-Need to inspect the target first? `identedit read src/example.py --symbol Processor.process_data --context 3` shows the complete symbol plus up to three surrounding lines on each side. Copy the identity after `# node --at` for a node edit, or a `LINE:HASH` for a line edit. Context is labeled separately; boundary lines can contain text outside the exact node span. Preserve source indentation after the `|` marker for line edits. Add `--json --verbose` when you need the exact raw node `text` rather than its line view.
+`identedit read src/example.py --symbol Processor.process_data --context 3` shows the complete symbol and up to three surrounding lines per side. Copy the identity after `# node --at` for a node edit. Context is labeled separately; boundary lines may extend beyond the node span. Use `--json --verbose` for the exact raw node `text`. For line edits, copy a `LINE:HASH` and preserve indentation after the `|` marker.
 
 To change text only inside a symbol:
 
@@ -59,14 +59,14 @@ Ambiguity fails without writing and returns `error.candidates`. Inspect them; re
 
 ### Exact line or range
 
-Use this when structural targeting is too coarse. Read content and anchors together, then copy the intended anchor:
+When structural targeting is too coarse, read the content and anchors together:
 
 ```bash
 identedit read --mode line example.py
 identedit patch example.py --at "4:9e0f1a2b" --replace '    return x + y'
 ```
 
-For a large file, use `read --mode line --offset 40 --limit 30 example.py`. Offset is a positive, 1-based original line number; anchors are not renumbered. Omitted-line counts show that the view is partial. These bounds apply per file.
+For a large file, use `read --mode line --offset 40 --limit 30 example.py`. Bounds apply per file; the positive 1-based offset and anchors retain original line numbers. Omitted-line counts mark partial views.
 
 For several lines, use `--replace --text-file /tmp/new_lines.txt --end-anchor "LINE:HASH"`. Use `--delete` to remove one line or a range, and `--insert-after` to add logical lines. These verbs work for both node and line targets; line targets preserve the file's newline layout.
 
@@ -96,14 +96,9 @@ Use `--text-file` or `--stdin-text` for multiline payloads; do not encode newlin
 identedit patch example.py --symbol target_fn --replace --stdin-text < /tmp/new_body.py
 ```
 
-For a non-trivial patch, preview the same request with `--dry-run --diff` before applying it. This emits unified diff without writing; without those flags, `patch` applies immediately.
+For a non-trivial patch, run the same request with `--dry-run --diff`, inspect the unified diff, then rerun without those flags to apply it. The preview does not write; plain `patch` does.
 
-For a short location check, omit `--diff`: successful `patch`/`apply` execution or dry-run JSON includes `locations` with up to 16 resolved ranges or insertion points, original byte/line coordinates, and an omitted count. These are **pre-edit locations**, not fresh anchors or proof of a change; check `dry_run`, `transaction.status`, or `changed` for the outcome. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. Full field definitions: [protocol](references/protocol.md#resolved-edit-locations).
-
-```bash
-identedit patch example.py --symbol target_fn --replace --text-file /tmp/new_body.py --dry-run --diff
-identedit patch example.py --symbol target_fn --replace --text-file /tmp/new_body.py
-```
+For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
 
 Identedit checks preconditions, not semantic correctness. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
 
