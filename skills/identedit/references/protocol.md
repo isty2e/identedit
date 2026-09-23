@@ -81,6 +81,7 @@ Line numbers start at `1`. Ingress also accepts display-form anchors such as:
 ```
 
 The canonical serialized form is `7:abcdef01`; the display suffix is not part of the address.
+For a range, only the supplied boundary anchors are checked against the current file. See [line editing](line-editing.md) for the interior-line and changeset rules.
 
 ## Error envelope
 

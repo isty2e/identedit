@@ -1,6 +1,6 @@
 # Line-Anchored Editing Reference
 
-Use this when structural targeting is too coarse but a line/range needs precondition safety.
+Use this when structural targeting is too coarse but an exact line location matters. A line anchor checks one line; it does not guard a whole multi-line range.
 
 ## Read Anchors
 
@@ -18,6 +18,7 @@ Default text output:
 ```
 
 Each anchor is `LINE:HASH`, where `HASH` is an 8-character hex prefix of the BLAKE3 content hash. Matching is exact; prefix matching is not supported.
+The hash covers line content, not its `LF`, `CRLF`, or `CR` terminator.
 Refresh any 12-char anchors saved from older versions with `read --mode line`; they are not accepted as new inputs.
 
 Use JSON only when needed:
@@ -34,7 +35,7 @@ identedit read --mode line --offset 40 --limit 30 example.py
 
 `--offset` is a positive, 1-based original line number (default `1`); `--limit` is a positive maximum line count (default: all remaining lines). Bounds apply separately to each file. Empty files and offsets past EOF succeed with no handles. Text output reports the window and omitted-line counts, including empty windows. Addresses and indentation remain those of the original file.
 
-Bounded JSON adds `windows[]`, one entry per file, with `kind: "line"`, `file`, `total_lines`, `start_line`, `end_line`, `omitted_before`, and `omitted_after`. Start/end line numbers are inclusive, or both `null` for an empty window. Selected line handles stay in `handles[]`; `summary.matches` counts those handles. `file_preconditions` still hashes each complete file, not the page. With no bounds, existing full-file output is unchanged.
+Bounded JSON adds `windows[]`, one entry per file, with `kind: "line"`, `file`, `total_lines`, `start_line`, `end_line`, `omitted_before`, and `omitted_after`. Start/end line numbers are inclusive, or both `null` for an empty window. Selected line handles stay in `handles[]`; `summary.matches` counts those handles. `file_preconditions` still hashes each complete file, not the page; line patch/edit does not use it as an implicit guard. With no bounds, existing full-file output is unchanged.
 
 The bounds limit output, not file loading. LF, CRLF, and bare CR each delimit one logical line; a trailing terminator does not create a phantom final line. The displayed text omits terminators. To read a complete symbol with nearby anchored lines instead, use `read --symbol NAME --context N`.
 
@@ -52,6 +53,10 @@ identedit patch example.py \
 ```
 
 `/tmp/new_lines.py` contains the replacement lines with actual newlines, not literal `\n` characters. Copy anchors from the current `read` output; the values above only illustrate the format.
+
+With `--end-anchor`, strict patch checks only the start and end lines. It replaces the current lines between them even if those lines changed after `read`. `edit --json` behaves the same way when creating a changeset. Default `apply` then checks the full old range captured by that changeset before writing. `apply --repair` instead refreshes line previews from the current file, so do not use it as an old-range guard. None of these paths compares the interior with an earlier `read`.
+
+**Current non-goal:** line ranges do not provide whole-range read-to-write stale detection. Maintainers retain endpoint-only addressing without requiring an additional range guard. Revisit this if field reports show materially harmful interior overwrites. When old interior text must still match, use a node target with its expected content hash where available or a conventional patch that matches the old hunk.
 
 ```bash
 identedit patch example.py --at "4:9e0f1a2b" --insert-after-line "    # added line"

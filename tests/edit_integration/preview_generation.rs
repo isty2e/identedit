@@ -1235,6 +1235,73 @@ fn transform_json_mode_supports_line_target_replace_lines_operation() {
     let after = fs::read_to_string(&file_path).expect("fixture should be readable");
     assert_eq!(after, source, "transform must remain dry-run");
 }
+
+#[test]
+fn line_range_edit_captures_current_interior_and_repair_refreshes_preview() {
+    let original = "alpha\nbeta\ngamma\n";
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file.write_all(original.as_bytes()).unwrap();
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+    let start_anchor = line_ref(original, 1);
+    let end_anchor = line_ref(original, 3);
+
+    fs::write(&file_path, "alpha\nCHANGED\ngamma\n").unwrap();
+
+    let request = json!({
+        "command": "edit",
+        "file": file_path.to_string_lossy(),
+        "operations": [{
+            "target": {
+                "type": "line",
+                "anchor": start_anchor,
+                "end_anchor": end_anchor
+            },
+            "op": {
+                "type": "replace_lines",
+                "new_text": "replacement"
+            }
+        }]
+    });
+    let edit = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
+    assert!(
+        edit.status.success(),
+        "edit should accept changed interior with unchanged endpoints: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+    let changeset: Value = serde_json::from_slice(&edit.stdout).expect("changeset should be JSON");
+    assert_compact_preview_old_state(
+        &changeset["files"][0]["operations"][0]["preview"],
+        "alpha\nCHANGED\ngamma\n",
+    );
+
+    let later_content = "alpha\nCHANGED AGAIN\ngamma\n";
+    fs::write(&file_path, later_content).unwrap();
+    let apply = run_identedit_with_stdin(&["apply"], &changeset.to_string());
+    assert!(
+        !apply.status.success(),
+        "apply must reject changes after the edit preview was created"
+    );
+    let response: Value = serde_json::from_slice(&apply.stdout).expect("error should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("preview.old_hash")
+    );
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), later_content);
+
+    let repaired = run_identedit_with_stdin(&["apply", "--repair"], &changeset.to_string());
+    assert!(
+        repaired.status.success(),
+        "repair should refresh the line preview from current content: {}",
+        String::from_utf8_lossy(&repaired.stderr)
+    );
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "replacement");
+}
 #[test]
 fn transform_json_mode_supports_line_target_insert_after_line_operation() {
     let source = "a\nb\n";
