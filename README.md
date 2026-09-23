@@ -10,7 +10,7 @@ Agents often edit code through text-oriented tools such as `sed`, unified patche
 
 Identedit treats edits as verified operations:
 
-- **Precondition-verified.** Every edit checks that its target still matches what the agent read.
+- **Precondition-checked.** Edits validate their supplied target conditions before writing. A line-range edit checks its boundary anchors, not the lines between them; see the [line editing reference](skills/identedit/references/line-editing.md).
 - **Transactional.** Multi-file edits are preflighted together, and committed changes are rolled back if a later commit fails. Incomplete rollback is reported explicitly.
 - **Structural or line-anchored.** Agents can address functions and classes, exact lines, file boundaries, or nested config paths.
 - **Diagnosable.** Failures return structured errors with recovery information.
@@ -40,7 +40,7 @@ Use line anchors when structural targeting is too coarse:
 
 ```bash
 identedit read --mode line src/example.py
-identedit patch src/example.py --at "4:9e0f1a2b3c4d" \
+identedit patch src/example.py --at "4:9e0f1a2b" \
   --set-line "    return x + y"
 ```
 

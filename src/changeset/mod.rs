@@ -96,9 +96,12 @@ pub enum TransactionMode {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OpKind {
     Replace { new_text: String },
+    SetLine { new_text: String },
+    ReplaceLines { new_text: String },
     Delete,
     InsertBefore { new_text: String },
     InsertAfter { new_text: String },
+    InsertAfterLine { text: String },
     Insert { new_text: String },
     MoveBefore { destination: Box<TransformTarget> },
     MoveAfter { destination: Box<TransformTarget> },
@@ -109,9 +112,12 @@ impl OpKind {
     pub(crate) fn kind_name(&self) -> &'static str {
         match self {
             Self::Replace { .. } => "replace",
+            Self::SetLine { .. } => "set_line",
+            Self::ReplaceLines { .. } => "replace_lines",
             Self::Delete => "delete",
             Self::InsertBefore { .. } => "insert_before",
             Self::InsertAfter { .. } => "insert_after",
+            Self::InsertAfterLine { .. } => "insert_after_line",
             Self::Insert { .. } => "insert",
             Self::MoveBefore { .. } => "move_before",
             Self::MoveAfter { .. } => "move_after",
@@ -355,7 +361,14 @@ fn valid_target_operation_pair(target: &TransformTarget, op: &OpKind) -> bool {
         }
         TransformTarget::File { .. } => matches!(op, OpKind::Move { .. }),
         TransformTarget::Line { .. } => {
-            matches!(op, OpKind::Replace { .. } | OpKind::InsertAfter { .. })
+            matches!(
+                op,
+                OpKind::Replace { .. }
+                    | OpKind::InsertAfter { .. }
+                    | OpKind::SetLine { .. }
+                    | OpKind::ReplaceLines { .. }
+                    | OpKind::InsertAfterLine { .. }
+            )
         }
     }
 }
@@ -399,13 +412,13 @@ fn validate_target_operation_details(
                 end_anchor: Some(_),
                 ..
             },
-            OpKind::InsertAfter { .. }
+            OpKind::InsertAfter { .. } | OpKind::InsertAfterLine { .. } | OpKind::SetLine { .. }
         )
     ) {
         return Err(OperationModelError::InvalidTargetOperationDetails {
             target: "line",
-            operation: "insert_after",
-            message: "end_anchor is only valid for replace operations",
+            operation: op.kind_name(),
+            message: "end_anchor is only valid for replace or replace_lines operations",
         });
     }
 
@@ -721,7 +734,7 @@ mod tests {
             }),
             "line" => json!({
                 "type": "line",
-                "anchor": "1:0123456789ab"
+                "anchor": "1:01234567"
             }),
             other => panic!("unsupported test target type: {other}"),
         }
@@ -730,9 +743,12 @@ mod tests {
     fn wire_op(op_type: &str) -> Value {
         match op_type {
             "replace" => json!({ "type": "replace", "new_text": "replacement" }),
+            "set_line" => json!({ "type": "set_line", "new_text": "replacement" }),
+            "replace_lines" => json!({ "type": "replace_lines", "new_text": "replacement" }),
             "delete" => json!({ "type": "delete" }),
             "insert_before" => json!({ "type": "insert_before", "new_text": "before" }),
             "insert_after" => json!({ "type": "insert_after", "new_text": "after" }),
+            "insert_after_line" => json!({ "type": "insert_after_line", "text": "after" }),
             "insert" => json!({ "type": "insert", "new_text": "inserted" }),
             "move_before" | "move_after" => json!({
                 "type": op_type,
@@ -746,8 +762,10 @@ mod tests {
     fn text_preview(op_type: &str) -> Value {
         let new_text = match op_type {
             "replace" => "replacement",
+            "set_line" | "replace_lines" => "replacement",
             "insert_before" => "before",
             "insert_after" => "after",
+            "insert_after_line" => "after",
             "insert" => "inserted",
             "delete" | "move_before" | "move_after" => "",
             other => panic!("operation does not use text preview: {other}"),
@@ -793,7 +811,10 @@ mod tests {
             ),
             "file_start" | "file_end" => op_type == "insert",
             "file" => op_type == "move",
-            "line" => matches!(op_type, "replace" | "insert_after"),
+            "line" => matches!(
+                op_type,
+                "replace" | "insert_after" | "set_line" | "replace_lines" | "insert_after_line"
+            ),
             _ => false,
         }
     }
@@ -812,6 +833,9 @@ mod tests {
             ("file", "move"),
             ("line", "replace"),
             ("line", "insert_after"),
+            ("line", "set_line"),
+            ("line", "replace_lines"),
+            ("line", "insert_after_line"),
         ];
 
         for &(target_type, op_type) in VALID_PAIRS {
@@ -839,9 +863,12 @@ mod tests {
         const TARGET_TYPES: &[&str] = &["node", "file_start", "file_end", "file", "line"];
         const OP_TYPES: &[&str] = &[
             "replace",
+            "set_line",
+            "replace_lines",
             "delete",
             "insert_before",
             "insert_after",
+            "insert_after_line",
             "insert",
             "move_before",
             "move_after",
@@ -864,6 +891,18 @@ mod tests {
                     "{target_type}/{op_type} produced an unexpected diagnostic: {error}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn line_operations_reject_unused_end_anchor_at_ingress() {
+        for op_type in ["set_line", "insert_after_line", "insert_after"] {
+            let mut wire = wire_change_op("line", op_type);
+            wire["target"]["end_anchor"] = json!("2:01234567");
+
+            let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains("end_anchor"), "{op_type}: {message}");
         }
     }
 
@@ -1039,12 +1078,13 @@ mod tests {
     #[test]
     fn change_op_rejects_malformed_line_anchors_at_ingress() {
         let malformed_anchors = [
-            "0:0123456789ab",
-            "1:0123456789a",
-            "1:0123456789abc",
-            "1:0123456789ag",
+            "0:01234567",
+            "1:0123456",
+            "1:012345678",
+            "1:0123456789ab",
+            "1:0123456g",
             "1:éééééé",
-            "1:0123456789ab:tail",
+            "1:01234567:tail",
         ];
 
         for anchor in malformed_anchors {
@@ -1074,11 +1114,11 @@ mod tests {
         assert_eq!(serialized_node["preview"]["old_hash"], "abcdef0123456789");
 
         let mut line_wire = wire_change_op("line", "replace");
-        line_wire["target"]["anchor"] = json!(" 7:ABCDEF012345|display text ");
+        line_wire["target"]["anchor"] = json!(" 7:ABCDEF01|display text ");
         let line: ChangeOp =
             serde_json::from_value(line_wire).expect("display-form line anchor should parse");
         let serialized_line = serde_json::to_value(line).expect("line operation should serialize");
-        assert_eq!(serialized_line["target"]["anchor"], "7:abcdef012345");
+        assert_eq!(serialized_line["target"]["anchor"], "7:abcdef01");
     }
 
     #[test]
@@ -1099,8 +1139,8 @@ mod tests {
             wire_target("file"),
             json!({
                 "type": "line",
-                "anchor": "1:0123456789ab",
-                "end_anchor": "2:abcdef012345"
+                "anchor": "1:01234567",
+                "end_anchor": "2:abcdef01"
             }),
         ];
 
@@ -1153,8 +1193,8 @@ mod tests {
         let wire = json!({
             "target": {
                 "type": "line",
-                "anchor": "1:0123456789ab",
-                "end_anchor": "2:abcdef012345"
+                "anchor": "1:01234567",
+                "end_anchor": "2:abcdef01"
             },
             "op": wire_op("insert_after"),
             "preview": text_preview("insert_after")

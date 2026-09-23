@@ -6,6 +6,28 @@ use tempfile::Builder;
 mod common;
 
 #[test]
+fn read_text_line_mode_emits_eight_character_hashes() {
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file.write_all(b"alpha\nbeta\n").unwrap();
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = common::run_identedit(&[
+        "read",
+        "--mode",
+        "line",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(output.status.success());
+
+    let text = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    assert!(text.contains(&format!("1:{}|alpha", common::compute_line_hash("alpha"))));
+    assert!(text.contains(&format!("2:{}|beta", common::compute_line_hash("beta"))));
+}
+
+#[test]
 fn select_mode_line_returns_line_handles_with_anchors() {
     let source = "alpha\nbeta\n";
     let mut temp_file = Builder::new()
@@ -44,6 +66,7 @@ fn select_mode_line_returns_line_handles_with_anchors() {
     let (_, hash) = anchor
         .split_once(':')
         .expect("line handle anchor should contain a separator");
+    assert_eq!(hash.len(), 8);
     assert_eq!(hash.len(), common::LINE_HASH_HEX_LEN);
     assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_eq!(anchor, format!("1:{}", common::compute_line_hash("alpha")));

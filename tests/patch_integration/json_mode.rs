@@ -1,13 +1,30 @@
 use super::*;
 
 #[test]
+fn patch_json_line_target_rejects_previous_twelve_character_anchor() {
+    let file_path = create_temp_text_file("alpha\n");
+    let request = json!({
+        "command": "patch",
+        "file": file_path,
+        "target": { "type": "line", "anchor": "1:aaaaaaaaaaaa" },
+        "op": { "type": "set_line", "new_text": "changed" }
+    });
+
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+    assert!(!output.status.success(), "old line anchor must be rejected");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "alpha\n");
+}
+
+#[test]
 fn patch_json_mode_rejects_flag_text_source_options() {
     let request = json!({
         "command": "patch",
         "file": "/tmp/example.py",
         "target": {
             "type": "line",
-            "anchor": "1:aaaaaaaaaaaa"
+            "anchor": "1:aaaaaaaa"
         },
         "op": {
             "type": "set_line",

@@ -70,7 +70,7 @@ fn parse_flag_edit_intent_builds_node_intent_for_symbol_selector() {
 #[test]
 fn parse_flag_edit_intent_builds_line_intent() {
     let mut args = base_args(PathBuf::from("fixture.py"));
-    args.at = Some("12:0123456789ab".to_string());
+    args.at = Some("12:01234567".to_string());
     args.set_line = Some(Some("replacement".to_string()));
 
     let intent = parse_flag_edit_intent(&args).expect("line intent should parse");
@@ -80,7 +80,7 @@ fn parse_flag_edit_intent_builds_line_intent() {
 
     match intent.edit {
         HashlineEdit::SetLine { set_line } => {
-            assert_eq!(set_line.anchor.to_string(), "12:0123456789ab");
+            assert_eq!(set_line.anchor.to_string(), "12:01234567");
             assert_eq!(set_line.new_text, "replacement");
         }
         other => panic!("expected set-line edit, got {other:?}"),

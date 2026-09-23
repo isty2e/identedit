@@ -116,14 +116,15 @@ fn build_changeset_with_handles(
 
     for (index, instruction) in instructions.into_iter().enumerate() {
         reject_move_operation(instruction.op(), index)?;
-        let preview_new_text = op_new_text(instruction.op()).to_string();
         let resolved = resolve_operation_view(file, source_text, &handle_index, &instruction)?;
         let canonical_target = canonicalize_operation_target(instruction.target(), &resolved);
         let op = instruction.op().clone();
+        let effective_op = resolved.effective_op.clone().unwrap_or_else(|| op.clone());
+        let preview_new_text = op_new_text(&effective_op).to_string();
 
         matched_changes.push(MatchedChange {
             index,
-            op: op.clone(),
+            op: effective_op,
             old_text: resolved.old_text.clone(),
             matched_span: resolved.matched_span,
             move_insert_at: resolved.move_insert_at,
@@ -219,9 +220,12 @@ pub(crate) fn resolve_changeset_targets_in_handles(
             &handle_index,
             operation.operation(),
         )?;
+        let effective_op = resolved
+            .effective_op
+            .unwrap_or_else(|| operation.op().clone());
         matched.push(MatchedChange {
             index,
-            op: operation.op().clone(),
+            op: effective_op,
             old_text: resolved.old_text,
             matched_span: resolved.matched_span,
             move_insert_at: resolved.move_insert_at,
@@ -236,6 +240,9 @@ pub(crate) fn resolve_changeset_targets_in_handles(
 fn op_new_text(op: &OpKind) -> &str {
     match op {
         OpKind::Replace { new_text } => new_text,
+        OpKind::SetLine { .. } | OpKind::ReplaceLines { .. } | OpKind::InsertAfterLine { .. } => {
+            unreachable!("logical line operations must be resolved before preview generation")
+        }
         OpKind::Delete => "",
         OpKind::InsertBefore { new_text } => new_text,
         OpKind::InsertAfter { new_text } => new_text,

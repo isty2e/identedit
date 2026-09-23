@@ -63,12 +63,14 @@ Use this when structural targeting is too coarse. Read content and anchors toget
 
 ```bash
 identedit read --mode line example.py
-identedit patch example.py --at "4:9e0f1a2b3c4d" --set-line '    return x + y'
+identedit patch example.py --at "4:9e0f1a2b" --set-line '    return x + y'
 ```
 
 For a large file, use `read --mode line --offset 40 --limit 30 example.py`. Offset is a positive, 1-based original line number; anchors are not renumbered. Omitted-line counts show that the view is partial. These bounds apply per file.
 
 For several lines, use `--replace-range --text-file /tmp/new_lines.txt` with optional `--end-anchor "LINE:HASH"`. For insertion, use `--insert-after-line`. These are line operations; `--replace` and `--insert-after` address nodes.
+
+`--replace-range` checks the supplied start and end anchors, not the lines between them. If an interior line changed since `read` while both anchors still match, strict patch replaces that changed line too. Default `apply` protects the range captured by `edit`, but `apply --repair` refreshes line previews from the current file. If the old interior text must still match, use a node target with its content hash where available, or a conventional patch matching the old hunk.
 
 Re-read stale anchors before retrying. `--auto-repair` is opt-in for one bounded retry when deterministic remapping is acceptable; never guess among ambiguous candidates.
 
@@ -174,7 +176,7 @@ For `invalid_request` with `error.line_check`, inspect its mismatches and remap 
 - `read` defaults to text; `--json` returns structured handles or line anchors.
 - `edit`, `apply`, `patch`, and runtime request errors emit JSON unless a documented mode says otherwise. Parse JSON, not grep output.
 - `patch --dry-run --diff` emits unified diff. Invalid CLI syntax uses argument-parser diagnostics on stderr, not JSON.
-- Node identities/content hashes: 16 hex characters. Line anchors: `LINE:12-hex`. Both serialize lowercase and match exactly; no prefix matching.
+- Node identities/content hashes: 16 hex characters. Line anchors: `LINE:8-hex`. Both serialize lowercase and match exactly; no prefix matching.
 - Runtime error shape: `{"error":{"type":"...","message":"...","suggestion":"..."}}`; `suggestion` is optional.
 
 ## Optional references

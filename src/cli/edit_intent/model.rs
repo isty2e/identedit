@@ -96,7 +96,7 @@ impl LineEditIntent {
                     anchor: set_line.anchor,
                     end_anchor: None,
                 },
-                OpKind::Replace {
+                OpKind::SetLine {
                     new_text: set_line.new_text,
                 },
             ),
@@ -105,7 +105,7 @@ impl LineEditIntent {
                     anchor: replace_lines.start_anchor,
                     end_anchor: replace_lines.end_anchor,
                 },
-                OpKind::Replace {
+                OpKind::ReplaceLines {
                     new_text: replace_lines.new_text,
                 },
             ),
@@ -114,8 +114,8 @@ impl LineEditIntent {
                     anchor: insert_after.anchor,
                     end_anchor: None,
                 },
-                OpKind::InsertAfter {
-                    new_text: insert_after.text,
+                OpKind::InsertAfterLine {
+                    text: insert_after.text,
                 },
             ),
         };

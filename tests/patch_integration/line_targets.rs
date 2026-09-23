@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn patch_line_rejects_previous_twelve_character_anchor_without_mutation() {
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let original = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let old_anchor = format!("1:{}0000", common::compute_line_hash("alpha"));
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        &old_anchor,
+        "--set-line",
+        "changed",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(!output.status.success(), "old line anchor must be rejected");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), original);
+}
+
+#[test]
 fn patch_line_replace_range_accepts_stdin_text_payload() {
     let file_path = create_temp_text_file("alpha\nbeta\ngamma\ndelta\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
@@ -225,7 +246,7 @@ fn patch_node_replace_stdin_text_with_line_only_flag_reports_node_guidance() {
             "--replace",
             "--stdin-text",
             "--end-anchor",
-            "1:aaaaaaaaaaaa",
+            "1:aaaaaaaa",
             file_path.to_str().expect("path should be utf-8"),
         ],
         "def process_data(value):\n    return value * 44",
@@ -666,6 +687,108 @@ fn patch_line_flag_replace_range_supports_end_anchor() {
 }
 
 #[test]
+fn patch_line_range_checks_only_read_boundary_anchors() {
+    let file_path = create_temp_text_file("alpha\nbeta\ngamma\n");
+    let read = run_identedit(&[
+        "read",
+        "--mode",
+        "line",
+        "--json",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(read.status.success());
+    let response: Value = serde_json::from_slice(&read.stdout).expect("read output should be JSON");
+    let start_anchor = response["handles"][0]["anchor"].as_str().unwrap();
+    let end_anchor = response["handles"][2]["anchor"].as_str().unwrap();
+
+    fs::write(&file_path, "alpha\nCHANGED\ngamma\n").unwrap();
+
+    let output = run_identedit(&[
+        "patch",
+        file_path.to_str().expect("path should be utf-8"),
+        "--at",
+        start_anchor,
+        "--end-anchor",
+        end_anchor,
+        "--replace-range",
+        "replacement",
+    ]);
+    assert!(
+        output.status.success(),
+        "unchanged endpoints should permit strict range replacement: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("patch output should be JSON");
+    assert_eq!(response["applied_mode"], "strict");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "replacement\n");
+}
+
+#[test]
+fn patch_json_line_range_checks_only_read_boundary_anchors() {
+    let original = "alpha\nbeta\ngamma\n";
+    let file_path = create_temp_text_file(original);
+    let start_anchor = line_ref(original, 1);
+    let end_anchor = line_ref(original, 3);
+    fs::write(&file_path, "alpha\nCHANGED\ngamma\n").unwrap();
+
+    let request = json!({
+        "command": "patch",
+        "file": file_path.to_string_lossy(),
+        "target": {
+            "type": "line",
+            "anchor": start_anchor,
+            "end_anchor": end_anchor
+        },
+        "op": {
+            "type": "replace_lines",
+            "new_text": "replacement"
+        }
+    });
+    let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+
+    assert!(
+        output.status.success(),
+        "unchanged endpoints should permit JSON strict range replacement: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("patch output should be JSON");
+    assert_eq!(response["applied_mode"], "strict");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "replacement\n");
+}
+
+#[test]
+fn patch_line_range_rejects_changed_boundary_without_writing() {
+    let original = "alpha\nbeta\ngamma\n";
+    let file_path = create_temp_text_file(original);
+    let start_anchor = line_ref(original, 1);
+    let end_anchor = line_ref(original, 3);
+    let changed = "ALPHA\nbeta\ngamma\n";
+    fs::write(&file_path, changed).unwrap();
+
+    let output = run_identedit(&[
+        "patch",
+        file_path.to_str().expect("path should be utf-8"),
+        "--at",
+        &start_anchor,
+        "--end-anchor",
+        &end_anchor,
+        "--replace-range",
+        "replacement",
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "changed boundary must be rejected"
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("error should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert_eq!(response["error"]["line_check"]["summary"]["mismatched"], 1);
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), changed);
+}
+
+#[test]
 fn patch_line_flag_insert_after_line_applies_change() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
@@ -977,6 +1100,44 @@ fn patch_json_line_target_set_line_applies_change() {
 
     let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
     assert_eq!(modified, "a\nB\n");
+}
+
+#[test]
+fn patch_json_rejects_unused_end_anchor_without_writing() {
+    let source = "alpha\nbeta\ngamma\n";
+    for op in [
+        json!({ "type": "set_line", "new_text": "BETA" }),
+        json!({ "type": "insert_after", "text": "X" }),
+    ] {
+        for end_anchor in [line_ref(source, 3), "3:00000000".to_string()] {
+            let file = create_temp_text_file(source);
+            let request = json!({
+                "command": "patch",
+                "file": file,
+                "target": {
+                    "type": "line",
+                    "anchor": line_ref(source, 2),
+                    "end_anchor": end_anchor,
+                },
+                "op": op,
+            });
+
+            let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
+            assert!(
+                !output.status.success(),
+                "unused end_anchor must be rejected: {request}"
+            );
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["error"]["type"], "invalid_request");
+            assert!(
+                response["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("end_anchor")
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), source);
+        }
+    }
 }
 
 #[test]

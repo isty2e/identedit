@@ -56,7 +56,7 @@ The prototype rejects:
           "candidate_index": 0,
           "target": {
             "type": "line",
-            "anchor": "12:0123456789ab"
+            "anchor": "12:01234567"
           },
           "op": {
             "type": "replace_lines",

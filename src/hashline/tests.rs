@@ -25,7 +25,8 @@ fn hashline_display(line: usize, content: &str) -> String {
 #[test]
 fn compute_line_hash_uses_fixed_hex_length() {
     let hash = compute_line_hash("project = \"identedit\"");
-    assert_eq!(hash.len(), HASHLINE_PUBLIC_HEX_LEN);
+    assert_eq!(hash.len(), 8);
+    assert_eq!(HASHLINE_PUBLIC_HEX_LEN, 8);
 }
 
 #[test]
@@ -44,10 +45,10 @@ fn show_hashed_lines_returns_empty_for_empty_source() {
 
 #[test]
 fn line_anchor_normalizes_display_suffix_and_upper_hex() {
-    let parsed = LineAnchor::parse("12:ABCDEF123456|source text").expect("anchor should parse");
+    let parsed = LineAnchor::parse("12:ABCDEF12|source text").expect("anchor should parse");
     assert_eq!(parsed.line(), 12);
-    assert_eq!(parsed.hash().as_str(), "abcdef123456");
-    assert_eq!(parsed.to_string(), "12:abcdef123456");
+    assert_eq!(parsed.hash().as_str(), "abcdef12");
+    assert_eq!(parsed.to_string(), "12:abcdef12");
 }
 
 #[test]
@@ -106,9 +107,16 @@ fn line_anchor_accepts_exact_public_hash_length() {
 }
 
 #[test]
+fn line_anchor_rejects_previous_twelve_character_hash() {
+    let error = LineAnchor::parse("7:abcdef012345")
+        .expect_err("old twelve-character line anchors must not be accepted");
+    assert!(error.to_string().contains("exactly 8 hex chars"));
+}
+
+#[test]
 fn line_anchor_rejects_non_hex_and_unicode_hashes() {
     let mut hash = "a".repeat(HASHLINE_PUBLIC_HEX_LEN);
-    hash.replace_range(10..11, "z");
+    hash.replace_range(6..7, "z");
     let anchor = format!("7:{hash}");
     let error = LineAnchor::parse(&anchor).expect_err("non-hex hash should fail");
     assert!(
@@ -126,9 +134,9 @@ fn line_anchor_rejects_non_hex_and_unicode_hashes() {
 
 #[test]
 fn line_anchor_serde_round_trip_uses_the_canonical_wire_string() {
-    let parsed = LineAnchor::parse("  7:ABCDEF012345|display text  ").expect("anchor should parse");
+    let parsed = LineAnchor::parse("  7:ABCDEF01|display text  ").expect("anchor should parse");
     let serialized = serde_json::to_string(&parsed).expect("anchor should serialize");
-    assert_eq!(serialized, "\"7:abcdef012345\"");
+    assert_eq!(serialized, "\"7:abcdef01\"");
 
     let reparsed: LineAnchor =
         serde_json::from_str(&serialized).expect("anchor should deserialize");
@@ -1508,7 +1516,7 @@ fn apply_out_of_range_anchor_is_reported_as_precondition_mismatch() {
     let source = "alpha\nbeta";
     let payload = r#"
 [
-  { "set_line": { "anchor": "99:abcdef123456", "new_text": "x" } }
+  { "set_line": { "anchor": "99:abcdef12", "new_text": "x" } }
 ]
 "#;
     let edits: Vec<HashlineEdit> = serde_json::from_str(payload).expect("edits should parse");

@@ -38,6 +38,8 @@ pub(crate) fn validate_change_conflicts(
             matches!(
                 matched.op,
                 OpKind::Replace { .. }
+                    | OpKind::SetLine { .. }
+                    | OpKind::ReplaceLines { .. }
                     | OpKind::Delete
                     | OpKind::MoveBefore { .. }
                     | OpKind::MoveAfter { .. }
@@ -46,7 +48,10 @@ pub(crate) fn validate_change_conflicts(
         let has_insert = group.iter().any(|matched| {
             matches!(
                 matched.op,
-                OpKind::InsertBefore { .. } | OpKind::InsertAfter { .. } | OpKind::Insert { .. }
+                OpKind::InsertBefore { .. }
+                    | OpKind::InsertAfter { .. }
+                    | OpKind::Insert { .. }
+                    | OpKind::InsertAfterLine { .. }
             )
         });
         if has_anchor_rewrite && has_insert {
