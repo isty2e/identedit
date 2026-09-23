@@ -60,17 +60,6 @@ enum StdinEditOp {
     Insert {
         new_text: String,
     },
-    SetLine {
-        new_text: String,
-    },
-    #[serde(alias = "replace_range")]
-    ReplaceLines {
-        new_text: String,
-    },
-    #[serde(rename = "insert_after_line", alias = "line_insert_after")]
-    InsertAfterLine {
-        text: String,
-    },
     MoveBefore {
         destination: Value,
     },
@@ -445,10 +434,8 @@ fn parse_edit_operation(
         }
 
         let target = parse_edit_target_from_wire(target_wire, handle_table)?;
-        return Ok(ParsedEditInstruction {
-            target,
-            op: parse_stdin_operation_kind(operation.op, handle_table)?,
-        });
+        let op = parse_stdin_operation_kind(operation.op, &target, handle_table)?;
+        return Ok(ParsedEditInstruction { target, op });
     }
 
     let identity = operation
@@ -468,10 +455,10 @@ fn parse_edit_operation(
                 message: "missing field `expected_old_hash`".to_string(),
             })?;
 
-    Ok(ParsedEditInstruction {
-        target: TransformTarget::node(identity, kind, operation.span_hint, expected_old_hash),
-        op: parse_stdin_operation_kind(operation.op, handle_table)?,
-    })
+    let target = TransformTarget::node(identity, kind, operation.span_hint, expected_old_hash);
+    let op = parse_stdin_operation_kind(operation.op, &target, handle_table)?;
+
+    Ok(ParsedEditInstruction { target, op })
 }
 
 fn parse_edit_target_from_wire(
@@ -524,30 +511,35 @@ fn parse_edit_target_from_wire(
 
 fn parse_stdin_operation_kind(
     operation: StdinEditOp,
+    target: &TransformTarget,
     handle_table: Option<&StdinHandleTableWire>,
 ) -> Result<ParsedOperationKind, IdenteditError> {
     let parsed = match operation {
-        StdinEditOp::Replace { new_text } => {
-            ParsedOperationKind::Canonical(OpKind::Replace { new_text })
-        }
-        StdinEditOp::Delete => ParsedOperationKind::Canonical(OpKind::Delete),
+        StdinEditOp::Replace { new_text } => ParsedOperationKind::Canonical(match target {
+            TransformTarget::Line {
+                end_anchor: Some(_),
+                ..
+            } if new_text.is_empty() => OpKind::BlankLines,
+            TransformTarget::Line {
+                end_anchor: Some(_),
+                ..
+            } => OpKind::ReplaceLines { new_text },
+            TransformTarget::Line { .. } => OpKind::SetLine { new_text },
+            _ => OpKind::Replace { new_text },
+        }),
+        StdinEditOp::Delete => ParsedOperationKind::Canonical(match target {
+            TransformTarget::Line { .. } => OpKind::DeleteLines,
+            _ => OpKind::Delete,
+        }),
         StdinEditOp::InsertBefore { new_text } => {
             ParsedOperationKind::Canonical(OpKind::InsertBefore { new_text })
         }
-        StdinEditOp::InsertAfter { new_text } => {
-            ParsedOperationKind::Canonical(OpKind::InsertAfter { new_text })
-        }
+        StdinEditOp::InsertAfter { new_text } => ParsedOperationKind::Canonical(match target {
+            TransformTarget::Line { .. } => OpKind::InsertAfterLine { text: new_text },
+            _ => OpKind::InsertAfter { new_text },
+        }),
         StdinEditOp::Insert { new_text } => {
             ParsedOperationKind::Canonical(OpKind::Insert { new_text })
-        }
-        StdinEditOp::SetLine { new_text } => {
-            ParsedOperationKind::Canonical(OpKind::SetLine { new_text })
-        }
-        StdinEditOp::ReplaceLines { new_text } => {
-            ParsedOperationKind::Canonical(OpKind::ReplaceLines { new_text })
-        }
-        StdinEditOp::InsertAfterLine { text } => {
-            ParsedOperationKind::Canonical(OpKind::InsertAfterLine { text })
         }
         StdinEditOp::MoveBefore { destination } => {
             ParsedOperationKind::Canonical(OpKind::MoveBefore {

@@ -47,7 +47,7 @@ fn bounded_lines_preserve_original_anchors_and_can_patch() {
         file.to_str().unwrap(),
         "--at",
         lines[0]["anchor"].as_str().unwrap(),
-        "--set-line",
+        "--replace",
         "changed",
     ]);
     assert!(
@@ -308,7 +308,7 @@ fn symbol_context_line_anchor_is_usable_and_stale_anchor_is_rejected() {
         file.to_str().unwrap(),
         "--at",
         anchor,
-        "--set-line",
+        "--replace",
         "# updated",
     ]);
     assert!(first.status.success());
@@ -317,7 +317,7 @@ fn symbol_context_line_anchor_is_usable_and_stale_anchor_is_rejected() {
         file.to_str().unwrap(),
         "--at",
         anchor,
-        "--set-line",
+        "--replace",
         "# should not apply",
     ]);
     assert!(!second.status.success());

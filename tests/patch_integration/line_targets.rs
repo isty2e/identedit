@@ -10,7 +10,7 @@ fn patch_line_rejects_previous_twelve_character_anchor_without_mutation() {
         "patch",
         "--at",
         &old_anchor,
-        "--set-line",
+        "--replace",
         "changed",
         file_path.to_str().expect("path should be utf-8"),
     ]);
@@ -33,7 +33,7 @@ fn patch_line_replace_range_accepts_stdin_text_payload() {
             "patch",
             "--at",
             start_anchor.as_str(),
-            "--replace-range",
+            "--replace",
             "--end-anchor",
             end_anchor.as_str(),
             "--stdin-text",
@@ -90,7 +90,7 @@ fn patch_flag_rejects_inline_text_and_text_file_together() {
 }
 
 #[test]
-fn patch_line_set_line_text_file_preserves_crlf() {
+fn patch_line_replace_line_text_file_preserves_crlf() {
     let file_path = create_temp_text_file("alpha\r\nbeta\r\ngamma\r\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
     let anchor = line_ref(&before, 2);
@@ -100,7 +100,7 @@ fn patch_line_set_line_text_file_preserves_crlf() {
         "patch",
         "--at",
         anchor.as_str(),
-        "--set-line",
+        "--replace",
         "--text-file",
         payload_path.to_str().expect("payload path should be utf-8"),
         file_path.to_str().expect("path should be utf-8"),
@@ -108,7 +108,7 @@ fn patch_line_set_line_text_file_preserves_crlf() {
 
     assert!(
         output.status.success(),
-        "set-line with text file failed: {}",
+        "replace with text file failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -117,7 +117,7 @@ fn patch_line_set_line_text_file_preserves_crlf() {
 }
 
 #[test]
-fn patch_line_replace_range_empty_stdin_deletes_range() {
+fn patch_line_replace_range_empty_stdin_leaves_blank_line() {
     let file_path = create_temp_text_file("alpha\nbeta\ngamma\ndelta\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
     let start_anchor = line_ref(&before, 2);
@@ -128,7 +128,7 @@ fn patch_line_replace_range_empty_stdin_deletes_range() {
             "patch",
             "--at",
             start_anchor.as_str(),
-            "--replace-range",
+            "--replace",
             "--end-anchor",
             end_anchor.as_str(),
             "--stdin-text",
@@ -144,11 +144,11 @@ fn patch_line_replace_range_empty_stdin_deletes_range() {
     );
 
     let modified = fs::read_to_string(&file_path).expect("modified file should be readable");
-    assert_eq!(modified, "alpha\ndelta\n");
+    assert_eq!(modified, "alpha\n\ndelta\n");
 }
 
 #[test]
-fn patch_line_set_line_empty_stdin_preserves_crlf_line_endings() {
+fn patch_line_replace_line_empty_stdin_preserves_crlf_line_endings() {
     let file_path = create_temp_text_file("alpha\r\nbeta\r\ngamma\r\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
     let anchor = line_ref(&before, 2);
@@ -158,7 +158,7 @@ fn patch_line_set_line_empty_stdin_preserves_crlf_line_endings() {
             "patch",
             "--at",
             anchor.as_str(),
-            "--set-line",
+            "--replace",
             "--stdin-text",
             file_path.to_str().expect("path should be utf-8"),
         ],
@@ -167,7 +167,7 @@ fn patch_line_set_line_empty_stdin_preserves_crlf_line_endings() {
 
     assert!(
         output.status.success(),
-        "set-line with empty stdin failed: {}",
+        "replace with empty stdin failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -186,7 +186,7 @@ fn patch_line_insert_after_line_text_file_multiline_preserves_crlf() {
         "patch",
         "--at",
         anchor.as_str(),
-        "--insert-after-line",
+        "--insert-after",
         "--text-file",
         payload_path.to_str().expect("payload path should be utf-8"),
         file_path.to_str().expect("path should be utf-8"),
@@ -203,7 +203,7 @@ fn patch_line_insert_after_line_text_file_multiline_preserves_crlf() {
 }
 
 #[test]
-fn patch_set_line_stdin_text_preserves_literal_dash_payload() {
+fn patch_replace_line_stdin_text_preserves_literal_dash_payload() {
     let file_path = create_temp_text_file("alpha\nbeta\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
     let anchor = line_ref(&before, 2);
@@ -213,7 +213,7 @@ fn patch_set_line_stdin_text_preserves_literal_dash_payload() {
             "patch",
             "--at",
             anchor.as_str(),
-            "--set-line",
+            "--replace",
             "--stdin-text",
             file_path.to_str().expect("path should be utf-8"),
         ],
@@ -222,7 +222,7 @@ fn patch_set_line_stdin_text_preserves_literal_dash_payload() {
 
     assert!(
         output.status.success(),
-        "set-line with literal dash payload failed: {}",
+        "replace with literal dash payload failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -268,7 +268,7 @@ fn patch_node_replace_stdin_text_with_line_only_flag_reports_node_guidance() {
 }
 
 #[test]
-fn patch_line_set_line_text_file_directory_returns_io_error_without_mutation() {
+fn patch_line_replace_line_text_file_directory_returns_io_error_without_mutation() {
     let file_path = create_temp_text_file("alpha\nbeta\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
     let anchor = line_ref(&before, 2);
@@ -281,7 +281,7 @@ fn patch_line_set_line_text_file_directory_returns_io_error_without_mutation() {
         "patch",
         "--at",
         anchor.as_str(),
-        "--set-line",
+        "--replace",
         "--text-file",
         payload_dir
             .path()
@@ -311,7 +311,7 @@ fn patch_line_insert_after_line_stdin_dry_run_does_not_modify_file() {
             "patch",
             "--at",
             anchor.as_str(),
-            "--insert-after-line",
+            "--insert-after",
             "--stdin-text",
             "--dry-run",
             file_path.to_str().expect("path should be utf-8"),
@@ -345,7 +345,7 @@ fn patch_line_rejects_direct_symlink_without_mutating_target() {
         "patch",
         "--at",
         anchor.as_str(),
-        "--set-line",
+        "--replace",
         "changed",
         link_path.to_str().expect("path should be utf-8"),
     ]);
@@ -385,7 +385,7 @@ fn patch_line_preserves_file_permissions() {
         "patch",
         "--at",
         anchor.as_str(),
-        "--set-line",
+        "--replace",
         "changed",
         file_path.to_str().expect("path should be utf-8"),
     ]);
@@ -406,7 +406,7 @@ fn patch_line_preserves_file_permissions() {
 }
 
 #[test]
-fn patch_set_line_stdin_utf8_bom_payload_preserves_bytes() {
+fn patch_replace_line_stdin_utf8_bom_payload_preserves_bytes() {
     let file_path = create_temp_text_file("alpha\nbeta\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
     let anchor = line_ref(&before, 2);
@@ -416,7 +416,7 @@ fn patch_set_line_stdin_utf8_bom_payload_preserves_bytes() {
             "patch",
             "--at",
             anchor.as_str(),
-            "--set-line",
+            "--replace",
             "--stdin-text",
             file_path.to_str().expect("path should be utf-8"),
         ],
@@ -425,7 +425,7 @@ fn patch_set_line_stdin_utf8_bom_payload_preserves_bytes() {
 
     assert!(
         output.status.success(),
-        "set-line with BOM stdin payload failed: {}",
+        "replace with BOM stdin payload failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -539,7 +539,7 @@ fn patch_insert_after_writes_at_anchor_end() {
 }
 
 #[test]
-fn patch_line_flag_set_line_applies_change() {
+fn patch_line_flag_replace_line_applies_change() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -555,13 +555,13 @@ fn patch_line_flag_set_line_applies_change() {
         "patch",
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "B",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(
         output.status.success(),
-        "patch line flag set-line failed: {}",
+        "patch line flag replace failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -574,7 +574,7 @@ fn patch_line_flag_set_line_applies_change() {
 }
 
 #[test]
-fn patch_line_flag_set_line_dry_run_previews_without_writing() {
+fn patch_line_flag_replace_line_dry_run_previews_without_writing() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -590,7 +590,7 @@ fn patch_line_flag_set_line_dry_run_previews_without_writing() {
         "patch",
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "B",
         "--dry-run",
         file_path.to_str().expect("path should be utf-8"),
@@ -611,7 +611,7 @@ fn patch_line_flag_set_line_dry_run_previews_without_writing() {
 }
 
 #[test]
-fn patch_line_flag_set_line_dry_run_diff_outputs_file_diff_without_writing() {
+fn patch_line_flag_replace_line_dry_run_diff_outputs_file_diff_without_writing() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -627,7 +627,7 @@ fn patch_line_flag_set_line_dry_run_diff_outputs_file_diff_without_writing() {
         "patch",
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "B",
         "--dry-run",
         "--diff",
@@ -672,7 +672,7 @@ fn patch_line_flag_replace_range_supports_end_anchor() {
         &anchor,
         "--end-anchor",
         &end_anchor,
-        "--replace-range",
+        "--replace",
         "x\ny",
         file_path.to_str().expect("path should be utf-8"),
     ]);
@@ -710,7 +710,7 @@ fn patch_line_range_checks_only_read_boundary_anchors() {
         start_anchor,
         "--end-anchor",
         end_anchor,
-        "--replace-range",
+        "--replace",
         "replacement",
     ]);
     assert!(
@@ -741,7 +741,7 @@ fn patch_json_line_range_checks_only_read_boundary_anchors() {
             "end_anchor": end_anchor
         },
         "op": {
-            "type": "replace_lines",
+            "type": "replace",
             "new_text": "replacement"
         }
     });
@@ -774,7 +774,7 @@ fn patch_line_range_rejects_changed_boundary_without_writing() {
         &start_anchor,
         "--end-anchor",
         &end_anchor,
-        "--replace-range",
+        "--replace",
         "replacement",
     ]);
 
@@ -805,7 +805,7 @@ fn patch_line_flag_insert_after_line_applies_change() {
         "patch",
         "--at",
         &anchor,
-        "--insert-after-line",
+        "--insert-after",
         "x",
         file_path.to_str().expect("path should be utf-8"),
     ]);
@@ -836,7 +836,7 @@ fn patch_line_flag_supports_auto_repair() {
         "patch",
         "--at",
         &stale_anchor,
-        "--set-line",
+        "--replace",
         "B",
         "--auto-repair",
         file_path.to_str().expect("path should be utf-8"),
@@ -870,7 +870,7 @@ fn patch_line_flag_auto_repair_dry_run_does_not_modify_file() {
         "patch",
         "--at",
         &stale_anchor,
-        "--set-line",
+        "--replace",
         "B",
         "--auto-repair",
         "--dry-run",
@@ -927,7 +927,7 @@ fn patch_flag_rejects_at_and_config_path_together() {
 }
 
 #[test]
-fn patch_flag_rejects_line_target_with_node_operation() {
+fn patch_flag_rejects_line_target_with_node_only_operation() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -943,13 +943,13 @@ fn patch_flag_rejects_line_target_with_node_operation() {
         "patch",
         "--at",
         &anchor,
-        "--replace",
+        "--insert-before",
         "x",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(
         !output.status.success(),
-        "line target should reject node operation flags"
+        "line target should reject node-only operation flags"
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
@@ -957,16 +957,16 @@ fn patch_flag_rejects_line_target_with_node_operation() {
         .as_str()
         .expect("error message should be present");
     assert!(
-        message.contains("--set-line")
-            && message.contains("--replace-range")
-            && message.contains("--insert-after-line")
+        message.contains("--replace")
+            && message.contains("--delete")
+            && message.contains("--insert-after")
             && message.contains("--at"),
         "line-mode error should list valid line flags and point back to node targeting"
     );
 }
 
 #[test]
-fn patch_flag_rejects_node_target_with_line_operation() {
+fn patch_flag_rejects_node_target_with_line_range_selector() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_named_function_handle(&file_path, "process_*");
     let identity = handle["identity"]
@@ -977,13 +977,15 @@ fn patch_flag_rejects_node_target_with_line_operation() {
         "patch",
         "--at",
         identity,
-        "--set-line",
+        "--end-anchor",
+        "2:01234567",
+        "--replace",
         "x",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(
         !output.status.success(),
-        "node target should reject line operation flags"
+        "node target should reject line end_anchor"
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
@@ -1000,7 +1002,7 @@ fn patch_flag_rejects_node_target_with_line_operation() {
 }
 
 #[test]
-fn patch_flag_rejects_end_anchor_without_replace_range() {
+fn patch_flag_rejects_end_anchor_with_insert_after() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -1019,13 +1021,13 @@ fn patch_flag_rejects_end_anchor_without_replace_range() {
         &anchor,
         "--end-anchor",
         &end_anchor,
-        "--set-line",
+        "--insert-after",
         "x",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(
         !output.status.success(),
-        "--end-anchor should be rejected when --replace-range is not selected"
+        "--end-anchor should be rejected for insert_after"
     );
     let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     assert_eq!(response["error"]["type"], "invalid_request");
@@ -1048,9 +1050,9 @@ fn patch_flag_rejects_multiple_line_operations() {
         "patch",
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "x",
-        "--replace-range",
+        "--insert-after",
         "y",
         file_path.to_str().expect("path should be utf-8"),
     ]);
@@ -1063,7 +1065,7 @@ fn patch_flag_rejects_multiple_line_operations() {
 }
 
 #[test]
-fn patch_json_line_target_set_line_applies_change() {
+fn patch_json_line_target_replace_line_applies_change() {
     let source = "a\nb\n";
     let mut temp_file = Builder::new()
         .suffix(".txt")
@@ -1082,7 +1084,7 @@ fn patch_json_line_target_set_line_applies_change() {
             "anchor": line_ref(source, 2)
         },
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "B"
         }
     });
@@ -1090,7 +1092,7 @@ fn patch_json_line_target_set_line_applies_change() {
     let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
     assert!(
         output.status.success(),
-        "patch --json line set_line failed: {}",
+        "patch --json line replace_line failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -1105,10 +1107,7 @@ fn patch_json_line_target_set_line_applies_change() {
 #[test]
 fn patch_json_rejects_unused_end_anchor_without_writing() {
     let source = "alpha\nbeta\ngamma\n";
-    for op in [
-        json!({ "type": "set_line", "new_text": "BETA" }),
-        json!({ "type": "insert_after", "text": "X" }),
-    ] {
+    for op in [json!({ "type": "insert_after", "new_text": "X" })] {
         for end_anchor in [line_ref(source, 3), "3:00000000".to_string()] {
             let file = create_temp_text_file(source);
             let request = json!({
@@ -1160,7 +1159,7 @@ fn patch_json_line_target_options_dry_run_does_not_modify_file() {
             "anchor": anchor
         },
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "B"
         },
         "options": {
@@ -1203,7 +1202,7 @@ fn patch_json_cli_dry_run_overrides_line_request_and_does_not_modify_file() {
             "anchor": line_ref(source, 2)
         },
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "B"
         }
     });
@@ -1245,7 +1244,7 @@ fn patch_json_line_target_replace_lines_supports_end_anchor() {
             "end_anchor": line_ref(source, 3)
         },
         "op": {
-            "type": "replace_lines",
+            "type": "replace",
             "new_text": "x\ny"
         }
     });
@@ -1282,7 +1281,7 @@ fn patch_json_line_target_can_auto_repair() {
             "anchor": stale_anchor
         },
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "B"
         },
         "options": {
@@ -1324,7 +1323,7 @@ fn patch_json_line_target_auto_repair_dry_run_ambiguous_keeps_file_unchanged() {
             "anchor": stale_anchor
         },
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "B"
         },
         "options": {
@@ -1349,7 +1348,7 @@ fn patch_json_line_target_auto_repair_dry_run_ambiguous_keeps_file_unchanged() {
 }
 
 #[test]
-fn patch_json_rejects_node_target_with_line_only_op() {
+fn patch_json_rejects_node_target_with_internal_line_op() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let handle = select_named_function_handle(&file_path, "process_*");
     let request = json!({
@@ -1364,8 +1363,7 @@ fn patch_json_rejects_node_target_with_line_only_op() {
             )
         },
         "op": {
-            "type": "set_line",
-            "new_text": "x"
+            "type": "delete_lines"
         }
     });
 
@@ -1399,7 +1397,8 @@ fn patch_json_rejects_line_target_with_node_only_op() {
             "anchor": line_ref(source, 2)
         },
         "op": {
-            "type": "delete"
+            "type": "insert_before",
+            "new_text": "x"
         }
     });
 

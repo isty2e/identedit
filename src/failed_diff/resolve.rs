@@ -92,8 +92,12 @@ fn resolve_replacement_candidates(
                     anchor: start_anchor,
                     end_anchor,
                 },
-                op: FailedDiffOperation::ReplaceLines {
-                    new_text: new_text.clone(),
+                op: if change.new_lines.is_empty() {
+                    FailedDiffOperation::Delete
+                } else {
+                    FailedDiffOperation::Replace {
+                        new_text: new_text.clone(),
+                    }
                 },
                 preview: build_candidate_preview(source_lines, start, end),
             })
@@ -144,7 +148,7 @@ fn resolve_insertion_candidates(
                         end_anchor: None,
                     },
                     FailedDiffOperation::InsertAfter {
-                        text: new_text.clone(),
+                        new_text: new_text.clone(),
                     },
                 )
             };

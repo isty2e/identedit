@@ -85,6 +85,14 @@ pub struct ReplaceLinesEdit {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct DeleteLinesEdit {
+    pub start_anchor: LineAnchor,
+    #[serde(default)]
+    pub end_anchor: Option<LineAnchor>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InsertAfterEdit {
     pub anchor: LineAnchor,
     pub text: String,
@@ -95,6 +103,7 @@ pub struct InsertAfterEdit {
 pub enum HashlineEdit {
     SetLine { set_line: SetLineEdit },
     ReplaceLines { replace_lines: ReplaceLinesEdit },
+    DeleteLines { delete_lines: DeleteLinesEdit },
     InsertAfter { insert_after: InsertAfterEdit },
 }
 
@@ -111,6 +120,19 @@ impl HashlineEdit {
                     anchor: replace_lines.start_anchor.clone(),
                 }];
                 if let Some(end_anchor) = &replace_lines.end_anchor {
+                    anchors.push(AnchorCheckRequest {
+                        edit_index,
+                        anchor: end_anchor.clone(),
+                    });
+                }
+                anchors
+            }
+            Self::DeleteLines { delete_lines } => {
+                let mut anchors = vec![AnchorCheckRequest {
+                    edit_index,
+                    anchor: delete_lines.start_anchor.clone(),
+                }];
+                if let Some(end_anchor) = &delete_lines.end_anchor {
                     anchors.push(AnchorCheckRequest {
                         edit_index,
                         anchor: end_anchor.clone(),

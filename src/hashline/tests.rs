@@ -1225,11 +1225,11 @@ fn apply_repair_does_not_strip_short_hashline_like_text() {
 }
 
 #[test]
-fn apply_replace_lines_can_delete_range() {
+fn apply_delete_lines_can_delete_range() {
     let source = "a\nb\nc\nd";
     let payload = format!(
         r#"[
-  {{ "replace_lines": {{ "start_anchor": "{}", "end_anchor": "{}", "new_text": "" }} }}
+  {{ "delete_lines": {{ "start_anchor": "{}", "end_anchor": "{}" }} }}
 ]"#,
         line_ref(source, 2),
         line_ref(source, 3)
@@ -1750,7 +1750,7 @@ fn apply_mixed_newline_delete_final_unterminated_line_preserves_no_trailing_newl
     let source = "a\r\nb\nc";
     let payload = format!(
         r#"[
-  {{ "replace_lines": {{ "start_anchor": "{}", "new_text": "" }} }}
+  {{ "delete_lines": {{ "start_anchor": "{}" }} }}
 ]"#,
         line_ref(source, 3)
     );

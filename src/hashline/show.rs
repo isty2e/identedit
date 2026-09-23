@@ -50,14 +50,6 @@ pub(super) fn split_set_line_text(text: &str) -> Vec<String> {
     split_multiline_text(text)
 }
 
-pub(super) fn split_replace_lines_text(text: &str) -> Vec<String> {
-    if text.is_empty() {
-        Vec::new()
-    } else {
-        split_multiline_text(text)
-    }
-}
-
 pub(super) fn split_multiline_text(text: &str) -> Vec<String> {
     text.replace("\r\n", "\n")
         .split('\n')

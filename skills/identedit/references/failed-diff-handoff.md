@@ -59,7 +59,7 @@ The prototype rejects:
             "anchor": "12:01234567"
           },
           "op": {
-            "type": "replace_lines",
+            "type": "replace",
             "new_text": "new value"
           },
           "preview": {

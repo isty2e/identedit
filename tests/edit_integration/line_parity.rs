@@ -22,7 +22,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta\ngamma\n",
             2,
             "beta",
-            "--set-line",
+            "--replace",
             "BETA",
             None,
             "alpha\nBETA\ngamma\n",
@@ -32,7 +32,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\r\nbeta\r\ngamma\r\n",
             2,
             "beta",
-            "--set-line",
+            "--replace",
             "BETA",
             None,
             "alpha\r\nBETA\r\ngamma\r\n",
@@ -42,7 +42,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\rbeta\rgamma\r",
             2,
             "beta",
-            "--set-line",
+            "--replace",
             "BETA",
             None,
             "alpha\rBETA\rgamma\r",
@@ -52,7 +52,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta\ngamma\n",
             2,
             "beta",
-            "--set-line",
+            "--replace",
             "",
             None,
             "alpha\n\ngamma\n",
@@ -62,7 +62,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta",
             2,
             "beta",
-            "--set-line",
+            "--replace",
             "BETA",
             None,
             "alpha\nBETA",
@@ -72,7 +72,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta\ngamma\n",
             2,
             "beta",
-            "--replace-range",
+            "--delete",
             "",
             None,
             "alpha\ngamma\n",
@@ -82,7 +82,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta",
             2,
             "beta",
-            "--replace-range",
+            "--delete",
             "",
             None,
             "alpha",
@@ -92,7 +92,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\r\nbeta\r\ngamma\r\ndelta\r\n",
             2,
             "beta",
-            "--replace-range",
+            "--replace",
             "BETA\nGAMMA",
             Some((3, "gamma")),
             "alpha\r\nBETA\r\nGAMMA\r\ndelta\r\n",
@@ -102,7 +102,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta\ngamma\n",
             2,
             "beta",
-            "--insert-after-line",
+            "--insert-after",
             "X",
             None,
             "alpha\nbeta\nX\ngamma\n",
@@ -112,7 +112,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\r\nbeta\r\ngamma\r\n",
             2,
             "beta",
-            "--insert-after-line",
+            "--insert-after",
             "X",
             None,
             "alpha\r\nbeta\r\nX\r\ngamma\r\n",
@@ -122,7 +122,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\rbeta\rgamma\r",
             2,
             "beta",
-            "--insert-after-line",
+            "--insert-after",
             "X",
             None,
             "alpha\rbeta\rX\rgamma\r",
@@ -132,7 +132,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta",
             2,
             "beta",
-            "--insert-after-line",
+            "--insert-after",
             "X",
             None,
             "alpha\nbeta\nX",
@@ -142,7 +142,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\nbeta\n",
             2,
             "beta",
-            "--insert-after-line",
+            "--insert-after",
             "X",
             None,
             "alpha\nbeta\nX\n",
@@ -152,7 +152,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\r\nbeta\ngamma\rdelta",
             2,
             "beta",
-            "--insert-after-line",
+            "--insert-after",
             "X\nY",
             None,
             "alpha\r\nbeta\nX\nY\ngamma\rdelta",
@@ -162,7 +162,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "alpha\r\nbeta\r\ngamma\r\n",
             2,
             "beta",
-            "--set-line",
+            "--replace",
             "BETA\nMORE",
             None,
             "alpha\r\nBETA\r\nMORE\r\ngamma\r\n",
@@ -172,7 +172,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "α\nβ\nγ\n",
             2,
             "β",
-            "--set-line",
+            "--replace",
             "βeta",
             None,
             "α\nβeta\nγ\n",
@@ -182,7 +182,7 @@ fn flag_line_edits_match_patch_line_layout() {
             "beta",
             1,
             "beta",
-            "--replace-range",
+            "--delete",
             "",
             None,
             "",
@@ -194,8 +194,12 @@ fn flag_line_edits_match_patch_line_layout() {
         let patch_file = text_file(source);
         let edit_file = text_file(source);
 
-        let mut patch_args = vec!["patch", "--at", anchor.as_str(), operation, payload];
-        let mut edit_args = vec!["edit", "--at", anchor.as_str(), operation, payload];
+        let mut patch_args = vec!["patch", "--at", anchor.as_str(), operation];
+        let mut edit_args = vec!["edit", "--at", anchor.as_str(), operation];
+        if operation != "--delete" {
+            patch_args.push(payload);
+            edit_args.push(payload);
+        }
         let end_anchor = end.map(|(line, content)| line_anchor(line, content));
         if let Some(end_anchor) = end_anchor.as_deref() {
             patch_args.extend(["--end-anchor", end_anchor]);
@@ -250,7 +254,7 @@ fn stale_line_plan_and_tampered_preview_do_not_write() {
         "edit",
         "--at",
         &line_anchor(2, "beta"),
-        "--set-line",
+        "--replace",
         "BETA",
         file.to_str().unwrap(),
     ]);
@@ -278,7 +282,7 @@ fn repair_does_not_hide_tampered_preview_when_line_is_unchanged() {
         "edit",
         "--at",
         &line_anchor(2, "beta"),
-        "--set-line",
+        "--replace",
         "BETA",
         file.to_str().unwrap(),
     ]);
@@ -299,7 +303,7 @@ fn repair_refreshes_line_layout_when_terminators_change() {
         "edit",
         "--at",
         &line_anchor(2, "beta"),
-        "--insert-after-line",
+        "--insert-after",
         "X",
         file.to_str().unwrap(),
     ]);
@@ -338,11 +342,11 @@ fn stale_second_file_prevents_first_line_edit_in_batch() {
         "files": [
             { "file": first, "operations": [{
                 "target": { "type": "line", "anchor": line_anchor(2, "two") },
-                "op": { "type": "set_line", "new_text": "TWO" }
+                "op": { "type": "replace", "new_text": "TWO" }
             }] },
             { "file": second, "operations": [{
                 "target": { "type": "line", "anchor": line_anchor(2, "four") },
-                "op": { "type": "insert_after_line", "text": "FIVE" }
+                "op": { "type": "insert_after", "new_text": "FIVE" }
             }] }
         ]
     });
@@ -372,11 +376,11 @@ fn commit_failure_rolls_back_line_edits_in_both_files() {
         "files": [
             { "file": first, "operations": [{
                 "target": { "type": "line", "anchor": line_anchor(2, "two") },
-                "op": { "type": "set_line", "new_text": "TWO" }
+                "op": { "type": "replace", "new_text": "TWO" }
             }] },
             { "file": second, "operations": [{
                 "target": { "type": "line", "anchor": line_anchor(2, "four") },
-                "op": { "type": "insert_after_line", "text": "FIVE" }
+                "op": { "type": "insert_after", "new_text": "FIVE" }
             }] }
         ]
     });
@@ -404,34 +408,29 @@ fn commit_failure_rolls_back_line_edits_in_both_files() {
 #[test]
 fn edit_json_rejects_end_anchor_for_non_range_line_operations() {
     let source = "alpha\nbeta\ngamma\n";
-    for op in [
-        json!({ "type": "set_line", "new_text": "BETA" }),
-        json!({ "type": "insert_after_line", "text": "X" }),
-    ] {
-        let file = text_file(source);
-        let request = json!({
-            "command": "edit",
-            "file": file,
-            "operations": [{
-                "target": {
-                    "type": "line",
-                    "anchor": line_anchor(2, "beta"),
-                    "end_anchor": line_anchor(3, "gamma"),
-                },
-                "op": op,
-            }],
-        });
-        let edit = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
-        assert!(!edit.status.success());
-        let response: Value = serde_json::from_slice(&edit.stdout).unwrap();
-        assert!(
-            response["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("end_anchor")
-        );
-        assert_eq!(fs::read_to_string(&file).unwrap(), source);
-    }
+    let file = text_file(source);
+    let request = json!({
+        "command": "edit",
+        "file": file,
+        "operations": [{
+            "target": {
+                "type": "line",
+                "anchor": line_anchor(2, "beta"),
+                "end_anchor": line_anchor(3, "gamma"),
+            },
+            "op": { "type": "insert_after", "new_text": "X" },
+        }],
+    });
+    let edit = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
+    assert!(!edit.status.success());
+    let response: Value = serde_json::from_slice(&edit.stdout).unwrap();
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("end_anchor")
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), source);
 }
 
 #[test]
@@ -442,7 +441,7 @@ fn empty_line_insertion_is_rejected_before_apply() {
         "edit",
         "--at",
         &line_anchor(1, "alpha"),
-        "--insert-after-line",
+        "--insert-after",
         "",
         file.to_str().unwrap(),
     ]);
@@ -454,32 +453,27 @@ fn empty_line_insertion_is_rejected_before_apply() {
 fn json_line_edits_preserve_operation_semantics_and_layout() {
     let cases = [
         (
+            json!({ "type": "replace", "new_text": "" }),
             "set_line",
-            "new_text",
-            "",
             "alpha\r\nbeta\r\ngamma\r\n",
             "alpha\r\n\r\ngamma\r\n",
         ),
         (
-            "replace_lines",
-            "new_text",
-            "",
+            json!({ "type": "delete" }),
+            "delete_lines",
             "alpha\r\nbeta\r\ngamma\r\n",
             "alpha\r\ngamma\r\n",
         ),
         (
+            json!({ "type": "insert_after", "new_text": "X" }),
             "insert_after_line",
-            "text",
-            "X",
             "alpha\r\nbeta\r\ngamma\r\n",
             "alpha\r\nbeta\r\nX\r\ngamma\r\n",
         ),
     ];
 
-    for (operation, field, payload, source, expected) in cases {
+    for (op, plan_op, source, expected) in cases {
         let file = text_file(source);
-        let mut op = json!({ "type": operation });
-        op[field] = json!(payload);
         let request = json!({
             "command": "edit",
             "file": file,
@@ -491,17 +485,17 @@ fn json_line_edits_preserve_operation_semantics_and_layout() {
         let edit = run_identedit_with_stdin(&["edit", "--json"], &request.to_string());
         assert!(
             edit.status.success(),
-            "{operation}: {}",
+            "{op}: {}",
             String::from_utf8_lossy(&edit.stdout)
         );
         let plan: Value = serde_json::from_slice(&edit.stdout).unwrap();
-        assert_eq!(plan["files"][0]["operations"][0]["op"]["type"], operation);
+        assert_eq!(plan["files"][0]["operations"][0]["op"]["type"], plan_op);
         let apply = apply_plan(&plan);
         assert!(
             apply.status.success(),
-            "{operation}: {}",
+            "{op}: {}",
             String::from_utf8_lossy(&apply.stdout)
         );
-        assert_eq!(fs::read_to_string(&file).unwrap(), expected, "{operation}");
+        assert_eq!(fs::read_to_string(&file).unwrap(), expected, "{op}");
     }
 }

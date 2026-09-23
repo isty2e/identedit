@@ -86,6 +86,19 @@ fn remap_anchors_from_check(
                         *end_anchor = remapped.clone();
                     }
                 }
+                HashlineEdit::DeleteLines { delete_lines } => {
+                    if let Some(remapped) =
+                        remap_by_anchor.get(&(edit_index, delete_lines.start_anchor.clone()))
+                    {
+                        delete_lines.start_anchor = remapped.clone();
+                    }
+                    if let Some(end_anchor) = &mut delete_lines.end_anchor
+                        && let Some(remapped) =
+                            remap_by_anchor.get(&(edit_index, end_anchor.clone()))
+                    {
+                        *end_anchor = remapped.clone();
+                    }
+                }
                 HashlineEdit::InsertAfter { insert_after } => {
                     if let Some(remapped) =
                         remap_by_anchor.get(&(edit_index, insert_after.anchor.clone()))
@@ -111,6 +124,7 @@ fn normalize_repair_edit_texts(edits: &[HashlineEdit]) -> Vec<HashlineEdit> {
                 HashlineEdit::ReplaceLines { replace_lines } => {
                     replace_lines.new_text = apply_repair_text_heuristics(&replace_lines.new_text);
                 }
+                HashlineEdit::DeleteLines { .. } => {}
                 HashlineEdit::InsertAfter { insert_after } => {
                     insert_after.text = apply_repair_text_heuristics(&insert_after.text);
                 }

@@ -240,7 +240,11 @@ pub(crate) fn resolve_changeset_targets_in_handles(
 fn op_new_text(op: &OpKind) -> &str {
     match op {
         OpKind::Replace { new_text } => new_text,
-        OpKind::SetLine { .. } | OpKind::ReplaceLines { .. } | OpKind::InsertAfterLine { .. } => {
+        OpKind::SetLine { .. }
+        | OpKind::ReplaceLines { .. }
+        | OpKind::BlankLines
+        | OpKind::DeleteLines
+        | OpKind::InsertAfterLine { .. } => {
             unreachable!("logical line operations must be resolved before preview generation")
         }
         OpKind::Delete => "",

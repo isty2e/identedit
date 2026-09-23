@@ -63,14 +63,14 @@ Use this when structural targeting is too coarse. Read content and anchors toget
 
 ```bash
 identedit read --mode line example.py
-identedit patch example.py --at "4:9e0f1a2b" --set-line '    return x + y'
+identedit patch example.py --at "4:9e0f1a2b" --replace '    return x + y'
 ```
 
 For a large file, use `read --mode line --offset 40 --limit 30 example.py`. Offset is a positive, 1-based original line number; anchors are not renumbered. Omitted-line counts show that the view is partial. These bounds apply per file.
 
-For several lines, use `--replace-range --text-file /tmp/new_lines.txt` with optional `--end-anchor "LINE:HASH"`. For insertion, use `--insert-after-line`. These are line operations; `--replace` and `--insert-after` address nodes.
+For several lines, use `--replace --text-file /tmp/new_lines.txt --end-anchor "LINE:HASH"`. Use `--delete` to remove one line or a range, and `--insert-after` to add logical lines. These verbs work for both node and line targets; line targets preserve the file's newline layout.
 
-`--replace-range` checks the supplied start and end anchors, not the lines between them. If an interior line changed since `read` while both anchors still match, strict patch replaces that changed line too. Default `apply` protects the range captured by `edit`, but `apply --repair` refreshes line previews from the current file. If the old interior text must still match, use a node target with its content hash where available, or a conventional patch matching the old hunk.
+Line-range `--replace` and `--delete` check the supplied start and end anchors, not the lines between them. If an interior line changed since `read` while both anchors still match, strict patch can replace or delete that changed line too. Default `apply` protects the range captured by `edit`, but `apply --repair` refreshes line previews from the current file. If the old interior text must still match, use a node target with its content hash where available, or a conventional patch matching the old hunk.
 
 Re-read stale anchors before retrying. `--auto-repair` is opt-in for one bounded retry when deterministic remapping is acceptable; never guess among ambiguous candidates.
 

@@ -67,7 +67,7 @@ fn stale_patch_exposes_structured_line_check_without_writing() {
             file.to_str().unwrap(),
             "--at",
             anchor,
-            "--set-line",
+            "--replace",
             "x = 3",
         ];
         if repair {
@@ -101,13 +101,13 @@ fn repair_apply_and_json_patch_report_ambiguous_anchors_without_writes() {
         file.to_str().unwrap(),
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "x = 3",
     ]);
     assert!(plan.status.success());
     let changed = "y = 0\nx = 1\nx = 1\n";
     fs::write(&file, changed).unwrap();
-    let request = json!({"command":"patch", "file":file, "target":{"type":"line", "anchor":anchor}, "op":{"type":"set_line", "new_text":"x = 3"}});
+    let request = json!({"command":"patch", "file":file, "target":{"type":"line", "anchor":anchor}, "op":{"type":"replace", "new_text":"x = 3"}});
     for output in [
         common::run_identedit_with_stdin(
             &["apply", "--repair"],

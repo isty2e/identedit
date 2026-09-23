@@ -31,6 +31,8 @@ pub(super) fn matched_changes_to_replacements(
             }),
             OpKind::SetLine { .. }
             | OpKind::ReplaceLines { .. }
+            | OpKind::BlankLines
+            | OpKind::DeleteLines
             | OpKind::InsertAfterLine { .. } => {
                 unreachable!("logical line operations must be resolved before apply")
             }
@@ -167,6 +169,8 @@ pub(super) fn validate_preview_consistency(
             OpKind::Replace { new_text } => new_text,
             OpKind::SetLine { .. }
             | OpKind::ReplaceLines { .. }
+            | OpKind::BlankLines
+            | OpKind::DeleteLines
             | OpKind::InsertAfterLine { .. } => {
                 unreachable!("logical line operations must be resolved before preview validation")
             }
@@ -227,6 +231,8 @@ fn validate_target_preview_span_consistency(
         | OpKind::Move { .. }
         | OpKind::SetLine { .. }
         | OpKind::ReplaceLines { .. }
+        | OpKind::BlankLines
+        | OpKind::DeleteLines
         | OpKind::InsertAfterLine { .. } => preview.matched_span,
     };
 

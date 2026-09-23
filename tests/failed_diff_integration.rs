@@ -103,7 +103,7 @@ fn edit_and_patch_return_the_same_unique_preview_without_writing() {
     assert_eq!(edit_response["changes"][0]["status"], "unique");
     assert_eq!(
         edit_response["changes"][0]["candidates"][0]["op"],
-        serde_json::json!({"type": "replace_lines", "new_text": "new value"})
+        serde_json::json!({"type": "replace", "new_text": "new value"})
     );
     assert_eq!(
         edit_response["changes"][0]["candidates"][0]["target"]["type"],
@@ -216,7 +216,7 @@ fn absent_old_block_is_a_successful_missing_preview() {
 }
 
 #[test]
-fn deletion_emits_an_empty_replacement() {
+fn deletion_emits_a_delete_operation() {
     let original = "before\ndrop me\nafter\n";
     let source = create_temp_source(original);
     let diff = create_temp_diff("@@\n before\n-drop me\n after\n");
@@ -225,7 +225,7 @@ fn deletion_emits_an_empty_replacement() {
 
     assert_eq!(
         value["changes"][0]["candidates"][0]["op"],
-        serde_json::json!({"type": "replace_lines", "new_text": ""})
+        serde_json::json!({"type": "delete"})
     );
     assert_eq!(value["changes"][0]["status"], "unique");
 }
@@ -240,7 +240,7 @@ fn contextual_insertion_emits_a_reusable_insert_after_target() {
 
     assert_eq!(
         value["changes"][0]["candidates"][0]["op"],
-        serde_json::json!({"type": "insert_after", "text": "inserted"})
+        serde_json::json!({"type": "insert_after", "new_text": "inserted"})
     );
     assert_eq!(value["changes"][0]["status"], "unique");
     assert_eq!(

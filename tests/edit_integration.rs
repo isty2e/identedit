@@ -78,3 +78,5 @@ mod request_validation;
 mod resolution_and_filesystem;
 #[path = "edit_integration/structural_moves.rs"]
 mod structural_moves;
+#[path = "edit_integration/unified_line_verbs.rs"]
+mod unified_line_verbs;

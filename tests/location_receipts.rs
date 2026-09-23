@@ -74,7 +74,7 @@ fn repaired_line_receipt_uses_actual_line_not_requested_line() {
         file.to_str().unwrap(),
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "updated",
         "--auto-repair",
     ]));
@@ -187,7 +187,7 @@ fn line_insert_and_delete_receipts_describe_targets_not_eol_adjustments() {
             file.to_str().unwrap(),
             "--at",
             &anchor,
-            "--insert-after-line",
+            "--insert-after",
             "c",
         ]));
         assert_locations(
@@ -202,8 +202,7 @@ fn line_insert_and_delete_receipts_describe_targets_not_eol_adjustments() {
             file.to_str().unwrap(),
             "--at",
             &anchor,
-            "--replace-range",
-            "",
+            "--delete",
         ]));
         assert_locations(
             &deleted,
@@ -233,7 +232,7 @@ fn repaired_merge_receipt_includes_the_absorbed_line() {
         file.to_str().unwrap(),
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "left &&right",
         "--auto-repair",
     ];
@@ -271,8 +270,8 @@ fn apply_receipt_preserves_operation_indices_and_pre_edit_positions() {
     let plan = edit_plan(
         &file,
         vec![
-            line_operation(3, "gamma", "G\n"),
-            line_operation(1, "alpha", "A\nextra\n"),
+            line_operation(3, "gamma", "G"),
+            line_operation(1, "alpha", "A\nextra"),
         ],
     );
     let preview = success(run_identedit_with_stdin(
@@ -297,7 +296,7 @@ fn apply_repair_reports_remapped_plan_coordinates() {
     let dir = tempdir().unwrap();
     let file = dir.path().join("notes.txt");
     fs::write(&file, "alpha\nbeta\n").unwrap();
-    let plan = edit_plan(&file, vec![line_operation(2, "beta", "B\n")]);
+    let plan = edit_plan(&file, vec![line_operation(2, "beta", "B")]);
     fs::write(&file, "intro\nalpha\nbeta\n").unwrap();
     let applied = success(run_identedit_with_stdin(
         &["apply", "--repair"],
@@ -312,7 +311,7 @@ fn stale_input_has_no_success_receipt_and_does_not_write() {
     let dir = tempdir().unwrap();
     let file = dir.path().join("notes.txt");
     fs::write(&file, "alpha\n").unwrap();
-    let plan = edit_plan(&file, vec![line_operation(1, "alpha", "A\n")]);
+    let plan = edit_plan(&file, vec![line_operation(1, "alpha", "A")]);
     fs::write(&file, "changed\n").unwrap();
     let output = run_identedit_with_stdin(&["apply"], &plan.to_string());
     assert!(!output.status.success());
@@ -334,7 +333,7 @@ fn no_op_line_patch_reports_a_checked_target_without_claiming_a_change() {
         file.to_str().unwrap(),
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "same",
     ]));
     assert_eq!(response["changed"], false);
@@ -526,7 +525,7 @@ fn per_file_cap_counts_omitted_locations_and_preserves_operation_indices() {
     fs::write(&file, &source).unwrap();
     let ops = (0..20)
         .rev()
-        .map(|i| line_operation(i + 1, &format!("{i:02}"), "changed\n"))
+        .map(|i| line_operation(i + 1, &format!("{i:02}"), "changed"))
         .collect();
     let plan = edit_plan(&file, ops);
     let applied = success(run_identedit_with_stdin(&["apply"], &plan.to_string()));
@@ -552,7 +551,7 @@ fn bom_and_unicode_offsets_are_bytes_and_line_numbers_count_all_eol_forms() {
         file.to_str().unwrap(),
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "x",
     ]));
     assert_locations(&response, vec![text_location(&file, 0, 7, 12, 2, 2)], 1);
@@ -590,7 +589,7 @@ fn rollback_error_does_not_publish_success_locations() {
     let mut changesets = Vec::new();
     for file in &files {
         fs::write(file, "original\n").unwrap();
-        let plan = edit_plan(file, vec![line_operation(1, "original", "changed\n")]);
+        let plan = edit_plan(file, vec![line_operation(1, "original", "changed")]);
         changesets.push(plan["files"][0].clone());
     }
     let plan = json!({"files":changesets,"transaction":{"mode":"all_or_nothing"}});

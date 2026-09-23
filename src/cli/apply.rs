@@ -263,6 +263,8 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
             operation.op(),
             crate::changeset::OpKind::SetLine { .. }
                 | crate::changeset::OpKind::ReplaceLines { .. }
+                | crate::changeset::OpKind::BlankLines
+                | crate::changeset::OpKind::DeleteLines
                 | crate::changeset::OpKind::InsertAfterLine { .. }
         );
         let Some(preview) = operation.text_preview_mut() else {

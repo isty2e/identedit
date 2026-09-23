@@ -98,6 +98,8 @@ pub enum OpKind {
     Replace { new_text: String },
     SetLine { new_text: String },
     ReplaceLines { new_text: String },
+    BlankLines,
+    DeleteLines,
     Delete,
     InsertBefore { new_text: String },
     InsertAfter { new_text: String },
@@ -114,6 +116,8 @@ impl OpKind {
             Self::Replace { .. } => "replace",
             Self::SetLine { .. } => "set_line",
             Self::ReplaceLines { .. } => "replace_lines",
+            Self::BlankLines => "blank_lines",
+            Self::DeleteLines => "delete_lines",
             Self::Delete => "delete",
             Self::InsertBefore { .. } => "insert_before",
             Self::InsertAfter { .. } => "insert_after",
@@ -363,10 +367,10 @@ fn valid_target_operation_pair(target: &TransformTarget, op: &OpKind) -> bool {
         TransformTarget::Line { .. } => {
             matches!(
                 op,
-                OpKind::Replace { .. }
-                    | OpKind::InsertAfter { .. }
-                    | OpKind::SetLine { .. }
+                OpKind::SetLine { .. }
                     | OpKind::ReplaceLines { .. }
+                    | OpKind::BlankLines
+                    | OpKind::DeleteLines
                     | OpKind::InsertAfterLine { .. }
             )
         }
@@ -405,6 +409,16 @@ fn validate_target_operation_details(
     target: &TransformTarget,
     op: &OpKind,
 ) -> Result<(), OperationModelError> {
+    if let (TransformTarget::Line { .. }, OpKind::ReplaceLines { new_text }) = (target, op)
+        && new_text.is_empty()
+    {
+        return Err(OperationModelError::InvalidTargetOperationDetails {
+            target: "line",
+            operation: "replace_lines",
+            message: "empty legacy range replacement is ambiguous; regenerate the edit plan to blank the range, or use delete to remove it",
+        });
+    }
+
     if matches!(
         (target, op),
         (
@@ -418,7 +432,7 @@ fn validate_target_operation_details(
         return Err(OperationModelError::InvalidTargetOperationDetails {
             target: "line",
             operation: op.kind_name(),
-            message: "end_anchor is only valid for replace or replace_lines operations",
+            message: "end_anchor is only valid for replace_lines, blank_lines, or delete_lines operations",
         });
     }
 
@@ -745,6 +759,8 @@ mod tests {
             "replace" => json!({ "type": "replace", "new_text": "replacement" }),
             "set_line" => json!({ "type": "set_line", "new_text": "replacement" }),
             "replace_lines" => json!({ "type": "replace_lines", "new_text": "replacement" }),
+            "blank_lines" => json!({ "type": "blank_lines" }),
+            "delete_lines" => json!({ "type": "delete_lines" }),
             "delete" => json!({ "type": "delete" }),
             "insert_before" => json!({ "type": "insert_before", "new_text": "before" }),
             "insert_after" => json!({ "type": "insert_after", "new_text": "after" }),
@@ -763,11 +779,12 @@ mod tests {
         let new_text = match op_type {
             "replace" => "replacement",
             "set_line" | "replace_lines" => "replacement",
+            "blank_lines" => "",
             "insert_before" => "before",
             "insert_after" => "after",
             "insert_after_line" => "after",
             "insert" => "inserted",
-            "delete" | "move_before" | "move_after" => "",
+            "delete" | "delete_lines" | "move_before" | "move_after" => "",
             other => panic!("operation does not use text preview: {other}"),
         };
         json!({
@@ -813,7 +830,7 @@ mod tests {
             "file" => op_type == "move",
             "line" => matches!(
                 op_type,
-                "replace" | "insert_after" | "set_line" | "replace_lines" | "insert_after_line"
+                "set_line" | "replace_lines" | "blank_lines" | "delete_lines" | "insert_after_line"
             ),
             _ => false,
         }
@@ -831,10 +848,10 @@ mod tests {
             ("file_start", "insert"),
             ("file_end", "insert"),
             ("file", "move"),
-            ("line", "replace"),
-            ("line", "insert_after"),
             ("line", "set_line"),
             ("line", "replace_lines"),
+            ("line", "blank_lines"),
+            ("line", "delete_lines"),
             ("line", "insert_after_line"),
         ];
 
@@ -865,6 +882,8 @@ mod tests {
             "replace",
             "set_line",
             "replace_lines",
+            "blank_lines",
+            "delete_lines",
             "delete",
             "insert_before",
             "insert_after",
@@ -896,7 +915,7 @@ mod tests {
 
     #[test]
     fn line_operations_reject_unused_end_anchor_at_ingress() {
-        for op_type in ["set_line", "insert_after_line", "insert_after"] {
+        for op_type in ["set_line", "insert_after_line"] {
             let mut wire = wire_change_op("line", op_type);
             wire["target"]["end_anchor"] = json!("2:01234567");
 
@@ -1113,7 +1132,7 @@ mod tests {
         );
         assert_eq!(serialized_node["preview"]["old_hash"], "abcdef0123456789");
 
-        let mut line_wire = wire_change_op("line", "replace");
+        let mut line_wire = wire_change_op("line", "set_line");
         line_wire["target"]["anchor"] = json!(" 7:ABCDEF01|display text ");
         let line: ChangeOp =
             serde_json::from_value(line_wire).expect("display-form line anchor should parse");
@@ -1196,8 +1215,8 @@ mod tests {
                 "anchor": "1:01234567",
                 "end_anchor": "2:abcdef01"
             },
-            "op": wire_op("insert_after"),
-            "preview": text_preview("insert_after")
+            "op": wire_op("insert_after_line"),
+            "preview": text_preview("insert_after_line")
         });
 
         let error = serde_json::from_value::<ChangeOp>(wire).unwrap_err();

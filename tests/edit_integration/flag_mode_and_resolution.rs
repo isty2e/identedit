@@ -13,7 +13,7 @@ fn edit_line_rejects_previous_twelve_character_anchor() {
         "edit",
         "--at",
         "1:aaaaaaaaaaaa",
-        "--set-line",
+        "--replace",
         "changed",
         file_path.to_str().expect("path should be utf-8"),
     ]);

@@ -105,9 +105,20 @@ impl LineEditIntent {
                     anchor: replace_lines.start_anchor,
                     end_anchor: replace_lines.end_anchor,
                 },
-                OpKind::ReplaceLines {
-                    new_text: replace_lines.new_text,
+                if replace_lines.new_text.is_empty() {
+                    OpKind::BlankLines
+                } else {
+                    OpKind::ReplaceLines {
+                        new_text: replace_lines.new_text,
+                    }
                 },
+            ),
+            HashlineEdit::DeleteLines { delete_lines } => (
+                TransformTarget::Line {
+                    anchor: delete_lines.start_anchor,
+                    end_anchor: delete_lines.end_anchor,
+                },
+                OpKind::DeleteLines,
             ),
             HashlineEdit::InsertAfter { insert_after } => (
                 TransformTarget::Line {

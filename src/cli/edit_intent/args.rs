@@ -19,7 +19,7 @@ pub(crate) struct EditIntentArgs {
     #[arg(
         long,
         value_name = "LINE:HASH",
-        help = "Optional end line anchor for --replace-range (line flag mode)"
+        help = "Optional end line anchor for line --replace or --delete"
     )]
     pub(crate) end_anchor: Option<String>,
     #[arg(
@@ -56,7 +56,7 @@ pub(crate) struct EditIntentArgs {
         long,
         value_name = "TEXT",
         num_args = 0..=1,
-        help = "Replace target node with text (node mode)"
+        help = "Replace target node or logical line(s) with text"
     )]
     pub(crate) replace: Option<Option<String>>,
     #[arg(
@@ -109,7 +109,7 @@ pub(crate) struct EditIntentArgs {
         help = "Replacement text used with --scoped-regex"
     )]
     pub(crate) scoped_replacement: Option<Option<String>>,
-    #[arg(long, help = "Delete target node or config path")]
+    #[arg(long, help = "Delete target node, logical line(s), or config path")]
     pub(crate) delete: bool,
     #[arg(
         long,
@@ -122,30 +122,9 @@ pub(crate) struct EditIntentArgs {
         long,
         value_name = "TEXT",
         num_args = 0..=1,
-        help = "Insert text immediately after target node"
+        help = "Insert text after target node or logical line"
     )]
     pub(crate) insert_after: Option<Option<String>>,
-    #[arg(
-        long = "set-line",
-        value_name = "TEXT",
-        num_args = 0..=1,
-        help = "Replace the anchored line with text"
-    )]
-    pub(crate) set_line: Option<Option<String>>,
-    #[arg(
-        long = "replace-range",
-        value_name = "TEXT",
-        num_args = 0..=1,
-        help = "Replace anchored line range with text"
-    )]
-    pub(crate) replace_range: Option<Option<String>>,
-    #[arg(
-        long = "insert-after-line",
-        value_name = "TEXT",
-        num_args = 0..=1,
-        help = "Insert text after anchored line"
-    )]
-    pub(crate) insert_after_line: Option<Option<String>>,
     #[arg(value_name = "FILE", help = "Target file path in flag mode")]
     pub(crate) file: Option<PathBuf>,
 }
@@ -175,8 +154,5 @@ impl EditIntentArgs {
             || self.delete
             || self.insert_before.is_some()
             || self.insert_after.is_some()
-            || self.set_line.is_some()
-            || self.replace_range.is_some()
-            || self.insert_after_line.is_some()
     }
 }
