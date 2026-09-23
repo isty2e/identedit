@@ -71,7 +71,7 @@ fn parse_flag_edit_intent_builds_node_intent_for_symbol_selector() {
 fn parse_flag_edit_intent_builds_line_intent() {
     let mut args = base_args(PathBuf::from("fixture.py"));
     args.at = Some("12:01234567".to_string());
-    args.set_line = Some(Some("replacement".to_string()));
+    args.replace = Some(Some("replacement".to_string()));
 
     let intent = parse_flag_edit_intent(&args).expect("line intent should parse");
     let PreparedEditIntent::Line(intent) = intent else {

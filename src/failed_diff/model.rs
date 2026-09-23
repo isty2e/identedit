@@ -70,8 +70,9 @@ pub(crate) struct FailedDiffCandidate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum FailedDiffOperation {
-    ReplaceLines { new_text: String },
-    InsertAfter { text: String },
+    Replace { new_text: String },
+    Delete,
+    InsertAfter { new_text: String },
     Insert { new_text: String },
 }
 

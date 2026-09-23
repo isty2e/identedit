@@ -41,7 +41,7 @@ Use line anchors when structural targeting is too coarse:
 ```bash
 identedit read --mode line src/example.py
 identedit patch src/example.py --at "4:9e0f1a2b" \
-  --set-line "    return x + y"
+  --replace "    return x + y"
 ```
 
 Use failed-diff handoff to discover exact candidates after a conventional patch loses its context. This mode never writes:

@@ -104,8 +104,8 @@ fn zero_width_operations_resolve_empty_old_text() {
                     anchor: line_anchor,
                     end_anchor: None,
                 },
-                OpKind::InsertAfter {
-                    new_text: "# after line\n".to_string(),
+                OpKind::InsertAfterLine {
+                    text: "# after line".to_string(),
                 },
                 ChangePreview::text(
                     Some(String::new()),

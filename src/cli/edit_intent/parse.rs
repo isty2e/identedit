@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::hash::hash_bytes;
-use crate::hashline::{HashlineEdit, InsertAfterEdit, LineAnchor, ReplaceLinesEdit, SetLineEdit};
+use crate::hashline::{
+    DeleteLinesEdit, HashlineEdit, InsertAfterEdit, LineAnchor, ReplaceLinesEdit, SetLineEdit,
+};
 use crate::patch::config_path::{
     ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
 };
@@ -19,7 +21,7 @@ use super::text::{
 };
 
 const NODE_MODE_OPERATIONS: &str = "--replace, --delete, --insert-before, --insert-after, or --scoped-regex with --scoped-replacement";
-const LINE_MODE_OPERATIONS: &str = "--set-line, --replace-range, or --insert-after-line";
+const LINE_MODE_OPERATIONS: &str = "--replace, --delete, or --insert-after";
 const CONFIG_MODE_OPERATIONS: &str = "--set-value, --append-value, or --delete";
 
 fn node_mode_guidance() -> String {
@@ -98,9 +100,6 @@ fn prepare_node_edit_operation(
         || args.append_value.is_some()
         || args.create_missing
         || args.document_index.is_some()
-        || args.set_line.is_some()
-        || args.replace_range.is_some()
-        || args.insert_after_line.is_some()
     {
         return Err(IdenteditError::InvalidRequest {
             message: node_mode_guidance(),
@@ -192,9 +191,6 @@ fn parse_file_flag_edit_intent(
         || args.insert_after.is_some()
         || args.create_missing
         || args.document_index.is_some()
-        || args.set_line.is_some()
-        || args.replace_range.is_some()
-        || args.insert_after_line.is_some()
     {
         return Err(IdenteditError::InvalidRequest {
             message: file_mode_guidance(),
@@ -232,15 +228,12 @@ fn parse_line_flag_edit_intent(
 ) -> Result<PreparedEditIntent, IdenteditError> {
     let text_source = resolve_text_source(args)?;
 
-    if args.replace.is_some()
-        || args.insert.is_some()
+    if args.insert.is_some()
         || args.set_value.is_some()
         || args.append_value.is_some()
         || args.scoped_regex.is_some()
         || args.scoped_replacement.is_some()
-        || args.delete
         || args.insert_before.is_some()
-        || args.insert_after.is_some()
         || args.create_missing
         || args.document_index.is_some()
     {
@@ -248,9 +241,9 @@ fn parse_line_flag_edit_intent(
             message: line_mode_guidance(),
         });
     }
-    let line_operation_count = usize::from(text_arg_present(&args.set_line))
-        + usize::from(text_arg_present(&args.replace_range))
-        + usize::from(text_arg_present(&args.insert_after_line));
+    let line_operation_count = usize::from(text_arg_present(&args.replace))
+        + usize::from(args.delete)
+        + usize::from(text_arg_present(&args.insert_after));
     if line_operation_count != 1 {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
@@ -259,52 +252,50 @@ fn parse_line_flag_edit_intent(
         });
     }
 
+    let end_anchor = args
+        .end_anchor
+        .as_deref()
+        .map(LineAnchor::parse)
+        .transpose()
+        .map_err(|error| IdenteditError::InvalidRequest {
+            message: error.to_string(),
+        })?;
+
     let edit = if let Some(new_text) =
-        resolve_text_payload("--set-line", args.set_line.clone(), text_source.clone())?
+        resolve_text_payload("--replace", args.replace.clone(), text_source.clone())?
     {
-        if args.end_anchor.is_some() {
-            return Err(IdenteditError::InvalidRequest {
-                message: "Use --end-anchor only with --replace-range in line target mode."
-                    .to_string(),
-            });
+        if end_anchor.is_some() {
+            HashlineEdit::ReplaceLines {
+                replace_lines: ReplaceLinesEdit {
+                    start_anchor: anchor,
+                    end_anchor,
+                    new_text,
+                },
+            }
+        } else {
+            HashlineEdit::SetLine {
+                set_line: SetLineEdit { anchor, new_text },
+            }
         }
-        HashlineEdit::SetLine {
-            set_line: SetLineEdit { anchor, new_text },
-        }
-    } else if let Some(new_text) = resolve_text_payload(
-        "--replace-range",
-        args.replace_range.clone(),
-        text_source.clone(),
-    )? {
-        HashlineEdit::ReplaceLines {
-            replace_lines: ReplaceLinesEdit {
+    } else if args.delete {
+        reject_unused_text_source(text_source, LINE_MODE_OPERATIONS)?;
+        HashlineEdit::DeleteLines {
+            delete_lines: DeleteLinesEdit {
                 start_anchor: anchor,
-                end_anchor: args
-                    .end_anchor
-                    .as_deref()
-                    .map(LineAnchor::parse)
-                    .transpose()
-                    .map_err(|error| IdenteditError::InvalidRequest {
-                        message: error.to_string(),
-                    })?,
-                new_text,
+                end_anchor,
             },
         }
     } else {
-        if args.end_anchor.is_some() {
+        if end_anchor.is_some() {
             return Err(IdenteditError::InvalidRequest {
-                message: "Use --end-anchor only with --replace-range in line target mode."
+                message: "Use --end-anchor only with --replace or --delete in line target mode."
                     .to_string(),
             });
         }
-        let text = resolve_text_payload(
-            "--insert-after-line",
-            args.insert_after_line.clone(),
-            text_source,
-        )?
-        .ok_or_else(|| IdenteditError::InvalidRequest {
-            message: "missing operation payload for --insert-after-line".to_string(),
-        })?;
+        let text = resolve_text_payload("--insert-after", args.insert_after.clone(), text_source)?
+            .ok_or_else(|| IdenteditError::InvalidRequest {
+                message: "missing operation payload for --insert-after".to_string(),
+            })?;
         HashlineEdit::InsertAfter {
             insert_after: InsertAfterEdit { anchor, text },
         }
@@ -328,9 +319,6 @@ fn parse_config_flag_edit_intent(
         || args.scoped_replacement.is_some()
         || args.insert_before.is_some()
         || args.insert_after.is_some()
-        || args.set_line.is_some()
-        || args.replace_range.is_some()
-        || args.insert_after_line.is_some()
     {
         return Err(IdenteditError::InvalidRequest {
             message: config_mode_guidance(),

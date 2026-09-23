@@ -40,6 +40,8 @@ pub(crate) fn validate_change_conflicts(
                 OpKind::Replace { .. }
                     | OpKind::SetLine { .. }
                     | OpKind::ReplaceLines { .. }
+                    | OpKind::BlankLines
+                    | OpKind::DeleteLines
                     | OpKind::Delete
                     | OpKind::MoveBefore { .. }
                     | OpKind::MoveAfter { .. }

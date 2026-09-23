@@ -166,9 +166,9 @@ fn edit_and_patch_expose_the_same_single_target_intent_options() {
         "--delete",
         "--insert-before",
         "--insert-after",
-        "--set-line",
-        "--replace-range",
-        "--insert-after-line",
+        "--replace",
+        "--replace",
+        "--insert-after",
     ];
 
     for option in shared_options {
@@ -215,7 +215,7 @@ fn edit_and_patch_accept_representative_shared_intents() {
         .as_str()
         .expect("line anchor should be present");
     assert_shared_intent_is_plannable_and_dry_runnable(
-        &["--at", anchor, "--set-line", "    result = value + 21"],
+        &["--at", anchor, "--replace", "    result = value + 21"],
         &file,
     );
 
@@ -358,7 +358,7 @@ fn patch_supports_at_line_anchor() {
         "patch",
         "--at",
         &anchor,
-        "--set-line",
+        "--replace",
         "    result = value + 99",
         file.to_str().expect("path should be utf-8"),
     ]);

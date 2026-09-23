@@ -7,7 +7,7 @@ fn patch_json_line_target_rejects_previous_twelve_character_anchor() {
         "command": "patch",
         "file": file_path,
         "target": { "type": "line", "anchor": "1:aaaaaaaaaaaa" },
-        "op": { "type": "set_line", "new_text": "changed" }
+        "op": { "type": "replace", "new_text": "changed" }
     });
 
     let output = run_identedit_with_stdin(&["patch", "--json"], &request.to_string());
@@ -27,7 +27,7 @@ fn patch_json_mode_rejects_flag_text_source_options() {
             "anchor": "1:aaaaaaaa"
         },
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "value"
         }
     });

@@ -8,7 +8,9 @@ use crate::changeset::{OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::Span;
 use crate::hash::ContentHash;
-use crate::hashline::{HashlineEdit, InsertAfterEdit, LineAnchor, ReplaceLinesEdit, SetLineEdit};
+use crate::hashline::{
+    DeleteLinesEdit, HashlineEdit, InsertAfterEdit, LineAnchor, ReplaceLinesEdit, SetLineEdit,
+};
 use crate::patch::config_path::{
     ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
 };
@@ -93,16 +95,9 @@ enum NodePatchOp {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum LinePatchOp {
-    SetLine {
-        new_text: String,
-    },
-    ReplaceLines {
-        new_text: String,
-    },
-    #[serde(rename = "insert_after", alias = "line_insert_after")]
-    InsertAfter {
-        text: String,
-    },
+    Replace { new_text: String },
+    Delete,
+    InsertAfter { new_text: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -289,24 +284,33 @@ fn run_patch_json_line(
             message: format!("Invalid line patch operation payload: {error}"),
         }
     })?;
-    if end_anchor.is_some() && !matches!(line_op, LinePatchOp::ReplaceLines { .. }) {
+    if end_anchor.is_some() && matches!(line_op, LinePatchOp::InsertAfter { .. }) {
         return Err(IdenteditError::InvalidRequest {
-            message: "line target end_anchor is only valid with replace_lines; remove end_anchor for set_line or insert_after".to_string(),
+            message: "line target end_anchor is only valid with replace or delete; remove end_anchor for insert_after".to_string(),
         });
     }
     let edit = match line_op {
-        LinePatchOp::SetLine { new_text } => HashlineEdit::SetLine {
-            set_line: SetLineEdit { anchor, new_text },
-        },
-        LinePatchOp::ReplaceLines { new_text } => HashlineEdit::ReplaceLines {
+        LinePatchOp::Replace { new_text } if end_anchor.is_some() => HashlineEdit::ReplaceLines {
             replace_lines: ReplaceLinesEdit {
                 start_anchor: anchor,
                 end_anchor,
                 new_text,
             },
         },
-        LinePatchOp::InsertAfter { text } => HashlineEdit::InsertAfter {
-            insert_after: InsertAfterEdit { anchor, text },
+        LinePatchOp::Replace { new_text } => HashlineEdit::SetLine {
+            set_line: SetLineEdit { anchor, new_text },
+        },
+        LinePatchOp::Delete => HashlineEdit::DeleteLines {
+            delete_lines: DeleteLinesEdit {
+                start_anchor: anchor,
+                end_anchor,
+            },
+        },
+        LinePatchOp::InsertAfter { new_text } => HashlineEdit::InsertAfter {
+            insert_after: InsertAfterEdit {
+                anchor,
+                text: new_text,
+            },
         },
     };
     let patch_response = execute_hashline_patch(file, vec![edit], auto_repair, dry_run)?;

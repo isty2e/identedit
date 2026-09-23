@@ -39,7 +39,7 @@ pub(super) fn resolve_edits(
                 if end.line() < start.line() {
                     return Err(HashlineCheckError::InvalidRequest {
                         message: format!(
-                            "Invalid replace_lines edit #{}: end line {} must be >= start line {}",
+                            "Invalid line replace #{}: end line {} must be >= start line {}",
                             edit_index,
                             end.line(),
                             start.line()
@@ -48,8 +48,41 @@ pub(super) fn resolve_edits(
                     .into());
                 }
 
-                let replacement_lines =
-                    super::show::split_replace_lines_text(&replace_lines.new_text);
+                let replacement_lines = super::show::split_multiline_text(&replace_lines.new_text);
+                resolved.push(ResolvedEdit {
+                    edit_index,
+                    span: LineSpan {
+                        kind: LineSpanKind::Replace,
+                        start_line: start.line(),
+                        end_line: end.line(),
+                    },
+                    operation: ResolvedOperation::ReplaceRange {
+                        start_line: start.line(),
+                        end_line: end.line(),
+                        replacement_lines,
+                    },
+                });
+            }
+            HashlineEdit::DeleteLines { delete_lines } => {
+                let start = &delete_lines.start_anchor;
+                let end = delete_lines.end_anchor.as_ref().unwrap_or(start);
+
+                ensure_line_exists(start.line(), line_count, start)?;
+                ensure_line_exists(end.line(), line_count, end)?;
+
+                if end.line() < start.line() {
+                    return Err(HashlineCheckError::InvalidRequest {
+                        message: format!(
+                            "Invalid line delete #{}: end line {} must be >= start line {}",
+                            edit_index,
+                            end.line(),
+                            start.line()
+                        ),
+                    }
+                    .into());
+                }
+
+                let replacement_lines = Vec::new();
                 resolved.push(ResolvedEdit {
                     edit_index,
                     span: LineSpan {

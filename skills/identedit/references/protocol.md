@@ -83,6 +83,10 @@ Line numbers start at `1`. Ingress also accepts display-form anchors such as:
 The canonical serialized form is `7:abcdef01`; the display suffix is not part of the address.
 For a range, only the supplied boundary anchors are checked against the current file. See [line editing](line-editing.md) for the interior-line and changeset rules.
 
+## Edit verbs
+
+`patch` and `edit` flag/JSON requests use target-aware verbs. `replace`, `delete`, and `insert_after` accept node or line targets; line targets operate on logical lines rather than raw byte spans. `end_anchor` is accepted only with line `replace` or `delete`. Node `insert_before`, file-boundary `insert`, whole-file moves, and config-path operations keep their own contracts. A line `replace` with empty text leaves one blank line; `delete` removes the line or inclusive range. The compiled changeset may use internal line-operation tags; callers should pass `edit` output to `apply`, not construct changesets directly.
+
 ## Error envelope
 
 Errors use this shape:

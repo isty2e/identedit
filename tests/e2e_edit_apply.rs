@@ -441,7 +441,7 @@ fn transform_apply_pipeline_supports_mixed_node_and_line_targets() {
                     "anchor": line_ref(&source, helper_line)
                 },
                 "op": {
-                    "type": "set_line",
+                    "type": "replace",
                     "new_text": "    return \"helper-updated\""
                 }
             }
@@ -496,8 +496,8 @@ fn line_insert_after_changeset_rechecks_anchor_before_apply() {
                 "anchor": line_ref(source, 1)
             },
             "op": {
-                "type": "insert_after_line",
-                "text": "x"
+                "type": "insert_after",
+                "new_text": "x"
             }
         }]
     });

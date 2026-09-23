@@ -6,8 +6,8 @@ use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
 use crate::hash::{ContentHash, hash_text};
 use crate::hashline::{
-    HashlineApplyMode, HashlineEdit, InsertAfterEdit, LineAnchor, LineHash, ReplaceLinesEdit,
-    SetLineEdit, apply_hashline_edits_with_mode, compute_line_hash,
+    DeleteLinesEdit, HashlineApplyMode, HashlineEdit, InsertAfterEdit, LineAnchor, LineHash,
+    ReplaceLinesEdit, SetLineEdit, apply_hashline_edits_with_mode, compute_line_hash,
 };
 
 pub(super) struct ResolvedOperationView {
@@ -193,7 +193,11 @@ fn resolve_line_operation_view(
 
     if matches!(
         op,
-        OpKind::SetLine { .. } | OpKind::ReplaceLines { .. } | OpKind::InsertAfterLine { .. }
+        OpKind::SetLine { .. }
+            | OpKind::ReplaceLines { .. }
+            | OpKind::BlankLines
+            | OpKind::DeleteLines
+            | OpKind::InsertAfterLine { .. }
     ) {
         return resolve_logical_line_edit(
             source_text,
@@ -274,6 +278,31 @@ fn resolve_logical_line_edit(
                     start_anchor: anchor.clone(),
                     end_anchor: end_anchor.cloned(),
                     new_text: new_text.clone(),
+                },
+            },
+            Span {
+                start: start_line.full_start,
+                end: end_line.full_end,
+            },
+        ),
+        OpKind::BlankLines => (
+            HashlineEdit::ReplaceLines {
+                replace_lines: ReplaceLinesEdit {
+                    start_anchor: anchor.clone(),
+                    end_anchor: end_anchor.cloned(),
+                    new_text: String::new(),
+                },
+            },
+            Span {
+                start: start_line.full_start,
+                end: end_line.full_end,
+            },
+        ),
+        OpKind::DeleteLines => (
+            HashlineEdit::DeleteLines {
+                delete_lines: DeleteLinesEdit {
+                    start_anchor: anchor.clone(),
+                    end_anchor: end_anchor.cloned(),
                 },
             },
             Span {
@@ -436,7 +465,11 @@ fn resolve_destination_offset(
 fn edit_view_for_node_operation(op: &OpKind, anchor: &SelectionHandle) -> (String, Span) {
     match op {
         OpKind::Replace { .. } => (anchor.text.clone(), anchor.span),
-        OpKind::SetLine { .. } | OpKind::ReplaceLines { .. } | OpKind::InsertAfterLine { .. } => {
+        OpKind::SetLine { .. }
+        | OpKind::ReplaceLines { .. }
+        | OpKind::BlankLines
+        | OpKind::DeleteLines
+        | OpKind::InsertAfterLine { .. } => {
             unreachable!("EditOperation rejects logical line operations on node targets")
         }
         OpKind::Delete => (anchor.text.clone(), anchor.span),
@@ -881,9 +914,7 @@ mod line_resolution_tests {
                                     },
                                 ),
                                 (
-                                    OpKind::ReplaceLines {
-                                        new_text: String::new(),
-                                    },
+                                    OpKind::BlankLines,
                                     HashlineEdit::ReplaceLines {
                                         replace_lines: ReplaceLinesEdit {
                                             start_anchor: start_anchor.clone(),
@@ -916,9 +947,10 @@ mod line_resolution_tests {
                                     },
                                 ),
                             ] {
-                                let op_end_anchor = matches!(op, OpKind::ReplaceLines { .. })
-                                    .then_some(end_anchor.as_ref())
-                                    .flatten();
+                                let op_end_anchor =
+                                    matches!(op, OpKind::ReplaceLines { .. } | OpKind::BlankLines)
+                                        .then_some(end_anchor.as_ref())
+                                        .flatten();
                                 let resolved = resolve_line_operation_view(
                                     &source,
                                     &start_anchor,

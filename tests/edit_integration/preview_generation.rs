@@ -1209,7 +1209,7 @@ fn transform_json_mode_supports_line_target_replace_lines_operation() {
                     "end_anchor": line_ref(source, 3)
                 },
                 "op": {
-                    "type": "replace_lines",
+                    "type": "replace",
                     "new_text": "x\ny"
                 }
             }
@@ -1260,7 +1260,7 @@ fn line_range_edit_captures_current_interior_and_repair_refreshes_preview() {
                 "end_anchor": end_anchor
             },
             "op": {
-                "type": "replace_lines",
+                "type": "replace",
                 "new_text": "replacement"
             }
         }]
@@ -1324,8 +1324,8 @@ fn transform_json_mode_supports_line_target_insert_after_line_operation() {
                     "anchor": line_ref(source, 1)
                 },
                 "op": {
-                    "type": "insert_after_line",
-                    "text": "x"
+                    "type": "insert_after",
+                    "new_text": "x"
                 }
             }
         ]
@@ -1388,7 +1388,7 @@ fn transform_json_mode_mixed_node_line_overlap_error_is_order_independent() {
     let line_operation = json!({
         "target": line_target,
         "op": {
-            "type": "set_line",
+            "type": "replace",
             "new_text": "    return value - 5"
         }
     });
