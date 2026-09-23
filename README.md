@@ -40,7 +40,7 @@ Use line anchors when structural targeting is too coarse:
 
 ```bash
 identedit read --mode line src/example.py
-identedit patch src/example.py --at "4:9e0f1a2b3c4d" \
+identedit patch src/example.py --at "4:9e0f1a2b" \
   --set-line "    return x + y"
 ```
 

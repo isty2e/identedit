@@ -10,7 +10,7 @@ mod show;
 pub use anchor::{LineAnchor, LineHash};
 pub(crate) use show::source_line_spans;
 
-pub const HASHLINE_PUBLIC_HEX_LEN: usize = 12;
+pub const HASHLINE_PUBLIC_HEX_LEN: usize = 8;
 const HASHLINE_DISPLAY_MIN_HEX_LEN: usize = 8;
 const HASHLINE_DISPLAY_MAX_HEX_LEN: usize = 64;
 

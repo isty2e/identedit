@@ -721,7 +721,7 @@ mod tests {
             }),
             "line" => json!({
                 "type": "line",
-                "anchor": "1:0123456789ab"
+                "anchor": "1:01234567"
             }),
             other => panic!("unsupported test target type: {other}"),
         }
@@ -1039,12 +1039,13 @@ mod tests {
     #[test]
     fn change_op_rejects_malformed_line_anchors_at_ingress() {
         let malformed_anchors = [
-            "0:0123456789ab",
-            "1:0123456789a",
-            "1:0123456789abc",
-            "1:0123456789ag",
+            "0:01234567",
+            "1:0123456",
+            "1:012345678",
+            "1:0123456789ab",
+            "1:0123456g",
             "1:éééééé",
-            "1:0123456789ab:tail",
+            "1:01234567:tail",
         ];
 
         for anchor in malformed_anchors {
@@ -1074,11 +1075,11 @@ mod tests {
         assert_eq!(serialized_node["preview"]["old_hash"], "abcdef0123456789");
 
         let mut line_wire = wire_change_op("line", "replace");
-        line_wire["target"]["anchor"] = json!(" 7:ABCDEF012345|display text ");
+        line_wire["target"]["anchor"] = json!(" 7:ABCDEF01|display text ");
         let line: ChangeOp =
             serde_json::from_value(line_wire).expect("display-form line anchor should parse");
         let serialized_line = serde_json::to_value(line).expect("line operation should serialize");
-        assert_eq!(serialized_line["target"]["anchor"], "7:abcdef012345");
+        assert_eq!(serialized_line["target"]["anchor"], "7:abcdef01");
     }
 
     #[test]
@@ -1099,8 +1100,8 @@ mod tests {
             wire_target("file"),
             json!({
                 "type": "line",
-                "anchor": "1:0123456789ab",
-                "end_anchor": "2:abcdef012345"
+                "anchor": "1:01234567",
+                "end_anchor": "2:abcdef01"
             }),
         ];
 
@@ -1153,8 +1154,8 @@ mod tests {
         let wire = json!({
             "target": {
                 "type": "line",
-                "anchor": "1:0123456789ab",
-                "end_anchor": "2:abcdef012345"
+                "anchor": "1:01234567",
+                "end_anchor": "2:abcdef01"
             },
             "op": wire_op("insert_after"),
             "preview": text_preview("insert_after")

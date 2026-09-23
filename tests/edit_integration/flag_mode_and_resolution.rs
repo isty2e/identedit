@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn edit_line_rejects_previous_twelve_character_anchor() {
+    let mut temp_file = Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp text file should be created");
+    temp_file.write_all(b"alpha\n").unwrap();
+    let file_path = temp_file.keep().expect("temp file should persist").1;
+
+    let output = run_identedit(&[
+        "edit",
+        "--at",
+        "1:aaaaaaaaaaaa",
+        "--set-line",
+        "changed",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+    assert!(!output.status.success());
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "alpha\n");
+}
+
+#[test]
 fn transform_flags_mode_builds_changeset_preview() {
     let file_path = copy_fixture_to_temp_python("example.py");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");

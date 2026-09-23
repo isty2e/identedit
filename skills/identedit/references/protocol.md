@@ -62,7 +62,7 @@ Post-edit coordinates, fresh edit anchors, source snippets, and semantic validat
 
 ## Hashes and identities
 
-Content hashes and node identities contain exactly 16 ASCII hexadecimal characters. Line hashes contain exactly 12 ASCII hexadecimal characters.
+Content hashes and node identities contain exactly 16 ASCII hexadecimal characters. Line hashes contain exactly 8 ASCII hexadecimal characters.
 
 Canonical serialization is lowercase. Ingress accepts surrounding whitespace and uppercase hexadecimal characters, then normalizes them. Matching is exact; prefix matching is not supported.
 
@@ -71,16 +71,16 @@ Canonical serialization is lowercase. Ingress accepts surrounding whitespace and
 Canonical line anchors use:
 
 ```text
-LINE:12-hex-hash
+LINE:8-hex-hash
 ```
 
 Line numbers start at `1`. Ingress also accepts display-form anchors such as:
 
 ```text
-7:ABCDEF012345|original content
+7:ABCDEF01|original content
 ```
 
-The canonical serialized form is `7:abcdef012345`; the display suffix is not part of the address.
+The canonical serialized form is `7:abcdef01`; the display suffix is not part of the address.
 
 ## Error envelope
 

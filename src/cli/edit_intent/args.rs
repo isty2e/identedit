@@ -13,7 +13,7 @@ pub(crate) struct EditIntentArgs {
     #[arg(
         long,
         value_name = "TARGET",
-        help = "Unified target selector: node identity (hex16), line anchor (line:hex12), or file-start/file-end"
+        help = "Unified target selector: node identity (hex16), line anchor (line:hex8), or file-start/file-end"
     )]
     pub(crate) at: Option<String>,
     #[arg(

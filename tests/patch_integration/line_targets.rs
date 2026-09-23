@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn patch_line_rejects_previous_twelve_character_anchor_without_mutation() {
+    let file_path = create_temp_text_file("alpha\nbeta\n");
+    let original = fs::read_to_string(&file_path).expect("fixture should be readable");
+    let old_anchor = format!("1:{}0000", common::compute_line_hash("alpha"));
+
+    let output = run_identedit(&[
+        "patch",
+        "--at",
+        &old_anchor,
+        "--set-line",
+        "changed",
+        file_path.to_str().expect("path should be utf-8"),
+    ]);
+
+    assert!(!output.status.success(), "old line anchor must be rejected");
+    let response: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), original);
+}
+
+#[test]
 fn patch_line_replace_range_accepts_stdin_text_payload() {
     let file_path = create_temp_text_file("alpha\nbeta\ngamma\ndelta\n");
     let before = fs::read_to_string(&file_path).expect("fixture should be readable");
@@ -225,7 +246,7 @@ fn patch_node_replace_stdin_text_with_line_only_flag_reports_node_guidance() {
             "--replace",
             "--stdin-text",
             "--end-anchor",
-            "1:aaaaaaaaaaaa",
+            "1:aaaaaaaa",
             file_path.to_str().expect("path should be utf-8"),
         ],
         "def process_data(value):\n    return value * 44",
