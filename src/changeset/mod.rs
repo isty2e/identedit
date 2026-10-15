@@ -95,19 +95,47 @@ pub enum TransactionMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OpKind {
-    Replace { new_text: String },
-    SetLine { new_text: String },
-    ReplaceLines { new_text: String },
+    Replace {
+        new_text: String,
+    },
+    SetLine {
+        new_text: String,
+    },
+    ReplaceLines {
+        new_text: String,
+    },
     BlankLines,
     DeleteLines,
     Delete,
-    InsertBefore { new_text: String },
-    InsertAfter { new_text: String },
-    InsertAfterLine { text: String },
-    Insert { new_text: String },
-    MoveBefore { destination: Box<TransformTarget> },
-    MoveAfter { destination: Box<TransformTarget> },
-    Move { to: PathBuf },
+    InsertBefore {
+        new_text: String,
+    },
+    InsertAfter {
+        new_text: String,
+    },
+    InsertAfterLine {
+        text: String,
+    },
+    Insert {
+        new_text: String,
+    },
+    MoveBefore {
+        destination: Box<TransformTarget>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        prefix: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        suffix: String,
+    },
+    MoveAfter {
+        destination: Box<TransformTarget>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        prefix: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        suffix: String,
+    },
+    Move {
+        to: PathBuf,
+    },
 }
 
 impl OpKind {
@@ -128,6 +156,14 @@ impl OpKind {
             Self::Move { .. } => "move",
         }
     }
+}
+
+pub(crate) fn compose_move_text(selected_text: String, prefix: &str, suffix: &str) -> String {
+    if prefix.is_empty() && suffix.is_empty() {
+        return selected_text;
+    }
+
+    format!("{prefix}{selected_text}{suffix}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -379,8 +415,8 @@ fn valid_target_operation_pair(target: &TransformTarget, op: &OpKind) -> bool {
 
 fn validate_same_file_move_destination(op: &OpKind) -> Result<(), OperationModelError> {
     let (operation, destination) = match op {
-        OpKind::MoveBefore { destination } => ("move_before", destination.as_ref()),
-        OpKind::MoveAfter { destination } => ("move_after", destination.as_ref()),
+        OpKind::MoveBefore { destination, .. } => ("move_before", destination.as_ref()),
+        OpKind::MoveAfter { destination, .. } => ("move_after", destination.as_ref()),
         _ => return Ok(()),
     };
 

@@ -572,9 +572,28 @@ fn apply_inject_failure_after_one_write_rolls_back_prior_commits() {
 }
 #[test]
 fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() {
+    verify_cross_file_structural_move_rollback("a_source.js", "b_destination.js", None, None);
+}
+
+#[test]
+fn apply_rolls_back_a_destination_with_explicit_move_affixes() {
+    verify_cross_file_structural_move_rollback(
+        "b_source.js",
+        "a_destination.js",
+        Some("\n// explicit prefix\n"),
+        Some("\n// explicit suffix\n"),
+    );
+}
+
+fn verify_cross_file_structural_move_rollback(
+    source_name: &str,
+    destination_name: &str,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+) {
     let workspace = tempdir().expect("tempdir should be created");
-    let source_file = workspace.path().join("a_source.js");
-    let destination_file = workspace.path().join("b_destination.js");
+    let source_file = workspace.path().join(source_name);
+    let destination_file = workspace.path().join(destination_name);
     fs::write(
         &source_file,
         "function source_fn(value) { return value + 1; }\nfunction keep_source(value) { return value + 2; }\n",
@@ -598,7 +617,7 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
         Some("destination_anchor"),
     );
 
-    let transform_request = json!({
+    let mut transform_request = json!({
         "command": "edit",
         "file": source_file.to_string_lossy().to_string(),
         "operations": [
@@ -626,6 +645,13 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
             }
         ]
     });
+
+    if let Some(prefix) = prefix {
+        transform_request["operations"][0]["op"]["prefix"] = json!(prefix);
+    }
+    if let Some(suffix) = suffix {
+        transform_request["operations"][0]["op"]["suffix"] = json!(suffix);
+    }
 
     let transform_output =
         run_identedit_with_stdin(&["edit", "--json"], &transform_request.to_string());

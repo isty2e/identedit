@@ -21,10 +21,10 @@ Use for repeated targets, context-mismatch recovery, config paths, precondition-
 | Supply multiline text without shell escaping | `--text-file body.txt` or `--stdin-text` | [Text input](#text-preview-and-verification) |
 | Add code at the start/end of a file | `patch file --at file-end --insert --text-file code.txt` (or `file-start`) | [Text input](#text-preview-and-verification) |
 | Set/create a config key, append an array value, or delete a key | `patch file --config-path path`: `--set-value` (add `--create-missing` to create), `--append-value`, `--delete` | [Config](#config-value) |
-| Plan multiple edits/files together, or move a structural unit | `edit --json` -> `apply`; raw moves use `move_before`/`move_after`. For Python reordering, prefer line edits with explicit newlines/indentation | [Plans](#batch-or-multi-step-pipeline) |
+| Plan multiple edits/files together, or move a structural unit | `edit --json` -> `apply`; raw moves accept explicit `prefix`/`suffix` text | [Plans](#batch-or-multi-step-pipeline) |
 | Recover target candidates from a failed patch | `patch --from-diff failed.diff file` (never writes) | [Handoff](#failed-diff-handoff) |
 
-Moves do not add separators: adjacent Python functions/methods/statements can concatenate and be rejected. This is not a Python ban; a move to `file_end` can work when an existing newline separates the destination. Keep separators and indentation explicit in line-based plans.
+Moves do not infer separators: adjacent Python functions/methods/statements can concatenate and be rejected. This is not a Python ban; a move to `file_end` can work when an existing newline separates the destination. Supply separators and destination indentation explicitly with `prefix`/`suffix` or line-based plans.
 
 ## Single-edit recipes
 
@@ -111,7 +111,7 @@ For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (incl
 
 Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. A `parse_failure` with `error.stage: "proposed_result"` means no transaction files were changed: correct the payload and retry with `--dry-run`. `edit` only builds a plan and does not run this result check.
 
-Provider acceptance is not semantic correctness: Python indentation errors and unintended nesting can still pass. No indentation or missing separators are repaired. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
+Provider acceptance is not semantic correctness: Python indentation errors and unintended nesting can still pass. No indentation or missing separators are inferred. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
 
 ## Planned edits and recovery
 
@@ -147,6 +147,8 @@ Single-file request shape (copy identities and hashes from `read`; these values 
 ```
 
 For batches, replace `file` and `operations` with `files: [{"file": "...", "operations": [...]}]`. Use exactly one request shape. Never synthesize identities or precondition hashes. Use `jq --rawfile` to populate `op.new_text` from a file.
+
+Structural moves can insert caller-specified `prefix` and `suffix` around the exact selected bytes. These strings do not reindent the body, repair the source block or infer trivia ownership; a Python suffix may include the following line's indentation. See [raw move text](references/protocol.md#raw-move-text) and the [move example](references/structural-pipeline.md#operations).
 
 ### Failed-diff handoff
 

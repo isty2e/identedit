@@ -185,11 +185,33 @@ Plan compilation does not check the resulting file's syntax. `patch` and `apply`
 | `insert_after` | `node` | Insert text immediately after a structure |
 | `move_before` | `node` source + dest | Move source node to just before destination node |
 | `move_after` | `node` source + dest | Move source node to just after destination node |
+| `move_to_before` | `node` source + dest | Move to another file before its destination node; include `destination_file` |
+| `move_to_after` | `node` source + dest | Move to another file after its destination node; include `destination_file` |
 | `scoped_regex` | `node` | Raw regex replace within the node's text, including strings and comments; not a symbol-aware rename |
 | `insert` | `file_start` | Insert text at beginning of file |
 | `insert` | `file_end` | Insert text at end of file |
 
-Moves copy exact node text without adding separators or adjusting indentation. For Python function/method/statement reordering, prefer line-based plans with explicit newlines and indentation: moving between node boundaries can concatenate code and fail result parsing. A Python node move can still succeed when the destination already supplies separation, such as a newline before `file_end`. See [node-result parsing](protocol.md#node-result-parsing); do not treat raw node moves as formatting-aware relocation.
+Moves copy exact selected node text. Optional `prefix` and `suffix` strings add caller-specified text only at the destination; they never adjust the moved body or expand the deleted source span. With neither field, current raw behavior is unchanged. See [raw move text](protocol.md#raw-move-text) for the owning byte, preview and compatibility contract.
+
+For two four-space-indented Python methods, a `move_before` may need the following operation fragment. `source` and `destination` refer to discovered node entries in the same file's `handle_table`:
+
+```json
+{
+  "target": { "type": "handle_ref", "ref": "source" },
+  "op": {
+    "type": "move_before",
+    "destination": { "type": "handle_ref", "ref": "destination" },
+    "suffix": "\n\n    "
+  }
+}
+```
+
+The suffix starts the following destination method at its required indentation. For `move_after`, the caller may instead need `"prefix": "\n\n    "`. Choose text from the actual destination context; these are not automatic separator rules.
+
+- Indentation and line breaks outside the source span remain at the original location, so moving a method can leave blank or whitespace-only lines that need explicit cleanup.
+- Selecting only `function_definition` leaves its decorators behind, where they may attach to the next method even though Python still parses. Select the containing `decorated_definition` handle if those decorators should move with it.
+
+Use line-based or explicit replacement plans when the body needs reindentation or the source block needs repair. A raw move can already succeed when the destination supplies separation, such as a newline before `file_end`. Neither provider acceptance nor affixes establish correct placement or comment/decorator ownership; run project-specific verification.
 
 ## File-Level Targets
 

@@ -107,7 +107,9 @@ pub(super) fn resolve_operation_view(
     let op = operation.op();
     match target {
         TransformTarget::Node { .. } => {
-            if let OpKind::MoveBefore { destination } | OpKind::MoveAfter { destination } = op {
+            if let OpKind::MoveBefore { destination, .. } | OpKind::MoveAfter { destination, .. } =
+                op
+            {
                 return resolve_same_file_move_view(
                     file,
                     source_text,
