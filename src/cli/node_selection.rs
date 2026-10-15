@@ -4,6 +4,7 @@ use crate::error::{IdenteditError, TargetCandidateContext};
 use crate::handle::SelectionHandle;
 
 const CANDIDATE_PREVIEW_MAX_CHARS: usize = 120;
+const QUALIFIED_NAME_SEPARATOR: &str = ".";
 
 pub(super) fn resolve_symbol(
     file: &Path,
@@ -65,8 +66,13 @@ fn symbol_matches(handle: &SelectionHandle, handles: &[SelectionHandle], query: 
         return false;
     };
 
+    // A qualified match must end with the separator and the entire opaque name.
+    // This is only a candidate filter; full qualification still decides equality.
     name == query
-        || qualified_symbol_name(handle, handles).is_some_and(|qualified| qualified == query)
+        || (query
+            .strip_suffix(name)
+            .is_some_and(|prefix| prefix.ends_with(QUALIFIED_NAME_SEPARATOR))
+            && qualified_symbol_name(handle, handles).is_some_and(|qualified| qualified == query))
 }
 
 fn qualified_symbol_name(handle: &SelectionHandle, handles: &[SelectionHandle]) -> Option<String> {
@@ -83,7 +89,7 @@ fn qualified_symbol_name(handle: &SelectionHandle, handles: &[SelectionHandle]) 
         .map(str::to_string)
         .collect::<Vec<_>>();
     qualified.push(name.clone());
-    Some(qualified.join("."))
+    Some(qualified.join(QUALIFIED_NAME_SEPARATOR))
 }
 
 fn line_number_for_offset(source_text: &str, offset: usize) -> usize {
@@ -174,9 +180,104 @@ fn is_named_ancestor(candidate: &SelectionHandle, handle: &SelectionHandle) -> b
 mod tests {
     use std::path::PathBuf;
 
+    use proptest::prelude::*;
+
     use crate::handle::{SelectionHandle, Span};
 
-    use super::{line_number_for_offset, preview_for_candidate};
+    use super::{
+        line_number_for_offset, preview_for_candidate, qualified_symbol_name, symbol_matches,
+    };
+
+    fn named_handle(name: Option<&str>, kind: &str, start: usize, end: usize) -> SelectionHandle {
+        SelectionHandle::from_parts(
+            PathBuf::from("fixture"),
+            Span { start, end },
+            kind.to_string(),
+            name.map(str::to_string),
+            format!("{kind} {name:?} {start}:{end}"),
+        )
+    }
+
+    #[test]
+    fn symbol_matches_preserves_opaque_names_and_full_container_paths() {
+        for name in ["a.b", "a::b", "a:b", "한글.이름", "", ".", ".a", "a."] {
+            let handles = [
+                named_handle(Some("Outer.part"), "outer", 0, 100),
+                named_handle(Some("Inner::scope"), "inner", 10, 90),
+                named_handle(Some(name), "target", 20, 30),
+                named_handle(None, "unnamed", 21, 22),
+            ];
+            let target = &handles[2];
+
+            assert!(symbol_matches(target, &handles, name));
+            assert!(symbol_matches(
+                target,
+                &handles,
+                &format!("Outer.part.Inner::scope.{name}")
+            ));
+            for query in [
+                format!("Wrong.part.Inner::scope.{name}"),
+                format!("Inner::scope.{name}"),
+                format!("Outer.part.Inner::scope.not{name}"),
+                format!("Outer.part.Inner::scope.{name}.extra"),
+            ] {
+                assert!(
+                    !symbol_matches(target, &handles, &query),
+                    "{name:?}: {query:?}"
+                );
+            }
+            assert!(!symbol_matches(&handles[3], &handles, name));
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn symbol_matches_is_equivalent_to_unfiltered_qualification(
+            observations in prop::collection::vec(
+                (0usize..64, 0usize..64, 0u8..3, prop::option::of("[a-zA-Z0-9_.: 한글]{0,8}")),
+                0..16,
+            ),
+            query in "[a-zA-Z0-9_.: 한글]{0,24}",
+        ) {
+            let handles = observations
+                .iter()
+                .map(|(start, end, kind, name)| {
+                    named_handle(
+                        name.as_deref(),
+                        &format!("kind{kind}"),
+                        (*start).min(*end),
+                        (*start).max(*end),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut queries = vec![query];
+            for handle in &handles {
+                if let Some(name) = &handle.name {
+                    queries.push(name.clone());
+                    queries.push(format!("wrong.{name}"));
+                    queries.push(qualified_symbol_name(handle, &handles).unwrap());
+                }
+            }
+
+            for query in queries {
+                let legacy = handles
+                    .iter()
+                    .filter(|handle| {
+                        handle.name.as_deref().is_some_and(|name| {
+                            name == query
+                                || qualified_symbol_name(handle, &handles).as_deref() == Some(&query)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let actual = handles
+                    .iter()
+                    .filter(|handle| symbol_matches(handle, &handles, &query))
+                    .collect::<Vec<_>>();
+
+                prop_assert_eq!(actual, legacy, "query: {:?}", query);
+            }
+        }
+    }
 
     #[test]
     fn line_number_for_offset_handles_lf_crlf_and_cr_boundaries() {
