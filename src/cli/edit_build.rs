@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget};
+use crate::changeset::{
+    EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget, compose_move_text,
+};
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
@@ -62,17 +64,33 @@ enum StdinEditOp {
     },
     MoveBefore {
         destination: Value,
+        #[serde(default)]
+        prefix: String,
+        #[serde(default)]
+        suffix: String,
     },
     MoveAfter {
         destination: Value,
+        #[serde(default)]
+        prefix: String,
+        #[serde(default)]
+        suffix: String,
     },
     MoveToBefore {
         destination_file: PathBuf,
         destination: Value,
+        #[serde(default)]
+        prefix: String,
+        #[serde(default)]
+        suffix: String,
     },
     MoveToAfter {
         destination_file: PathBuf,
         destination: Value,
+        #[serde(default)]
+        prefix: String,
+        #[serde(default)]
+        suffix: String,
     },
 }
 
@@ -115,14 +133,16 @@ struct HandleRefTargetWire {
 #[derive(Debug)]
 enum ParsedOperationKind {
     Canonical(OpKind),
-    MoveToBefore {
-        destination_file: PathBuf,
-        destination: TransformTarget,
-    },
-    MoveToAfter {
-        destination_file: PathBuf,
-        destination: TransformTarget,
-    },
+    CrossFileMove(CrossFileMove),
+}
+
+#[derive(Debug)]
+struct CrossFileMove {
+    destination_file: PathBuf,
+    destination: TransformTarget,
+    insert_before: bool,
+    prefix: String,
+    suffix: String,
 }
 
 #[derive(Debug)]
@@ -192,10 +212,16 @@ impl NormalizeState {
         &mut self,
         source_file: &Path,
         source_target: TransformTarget,
-        destination_file: PathBuf,
-        destination_target: TransformTarget,
-        insert_before: bool,
+        movement: CrossFileMove,
     ) -> Result<(), IdenteditError> {
+        let CrossFileMove {
+            destination_file,
+            destination: destination_target,
+            insert_before,
+            prefix,
+            suffix,
+        } = movement;
+
         if !matches!(source_target, TransformTarget::Node { .. }) {
             return Err(IdenteditError::InvalidRequest {
                 message: "cross-file move source must be a node target".to_string(),
@@ -213,7 +239,7 @@ impl NormalizeState {
         }
 
         let source_handle = self.resolve_move_endpoint(source_file, &source_target)?;
-        let moved_text = source_handle.text;
+        let moved_text = compose_move_text(source_handle.text, &prefix, &suffix);
 
         let _ = self.resolve_move_endpoint(destination_file.as_path(), &destination_target)?;
 
@@ -310,26 +336,12 @@ fn normalize_edit_file_requests(
                     source_file.clone(),
                     EditOperation::try_new(parsed.target, op)?,
                 ),
-                ParsedOperationKind::MoveToBefore {
-                    destination_file,
-                    destination,
-                } => state.normalize_cross_file_move_operation(
-                    source_file.as_path(),
-                    parsed.target,
-                    destination_file,
-                    destination,
-                    true,
-                )?,
-                ParsedOperationKind::MoveToAfter {
-                    destination_file,
-                    destination,
-                } => state.normalize_cross_file_move_operation(
-                    source_file.as_path(),
-                    parsed.target,
-                    destination_file,
-                    destination,
-                    false,
-                )?,
+                ParsedOperationKind::CrossFileMove(movement) => state
+                    .normalize_cross_file_move_operation(
+                        source_file.as_path(),
+                        parsed.target,
+                        movement,
+                    )?,
             }
         }
     }
@@ -541,30 +553,48 @@ fn parse_stdin_operation_kind(
         StdinEditOp::Insert { new_text } => {
             ParsedOperationKind::Canonical(OpKind::Insert { new_text })
         }
-        StdinEditOp::MoveBefore { destination } => {
-            ParsedOperationKind::Canonical(OpKind::MoveBefore {
-                destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
-            })
-        }
-        StdinEditOp::MoveAfter { destination } => {
-            ParsedOperationKind::Canonical(OpKind::MoveAfter {
-                destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
-            })
-        }
+        StdinEditOp::MoveBefore {
+            destination,
+            prefix,
+            suffix,
+        } => ParsedOperationKind::Canonical(OpKind::MoveBefore {
+            destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
+            prefix,
+            suffix,
+        }),
+        StdinEditOp::MoveAfter {
+            destination,
+            prefix,
+            suffix,
+        } => ParsedOperationKind::Canonical(OpKind::MoveAfter {
+            destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
+            prefix,
+            suffix,
+        }),
         StdinEditOp::MoveToBefore {
             destination_file,
             destination,
-        } => ParsedOperationKind::MoveToBefore {
+            prefix,
+            suffix,
+        } => ParsedOperationKind::CrossFileMove(CrossFileMove {
             destination_file,
             destination: parse_edit_target_from_wire(destination, handle_table)?,
-        },
+            insert_before: true,
+            prefix,
+            suffix,
+        }),
         StdinEditOp::MoveToAfter {
             destination_file,
             destination,
-        } => ParsedOperationKind::MoveToAfter {
+            prefix,
+            suffix,
+        } => ParsedOperationKind::CrossFileMove(CrossFileMove {
             destination_file,
             destination: parse_edit_target_from_wire(destination, handle_table)?,
-        },
+            insert_before: false,
+            prefix,
+            suffix,
+        }),
     };
     Ok(parsed)
 }

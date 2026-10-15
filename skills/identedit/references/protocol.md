@@ -35,9 +35,19 @@ Source syntax failures use the same error type with `error.stage: "source"`. Pro
 
 The same check applies to `patch --dry-run`, `patch --dry-run --diff`, and `apply --dry-run`, including `--repair`. `edit` only compiles a plan: successful compilation does not mean its result passes this check. Fallback-provider edits, line/file-boundary-only files, and whole-file moves do not receive this result-parse check. An empty operation list does not enable it. Provider failure never triggers a retry through the fallback provider. For `.h` files, either the C or C++ grammar may accept the result; preserving the original dialect is not required.
 
-This is provider acceptance, not compiler, indentation, scope, or behavioral validation. Python's provider can accept invalid indentation or a method unintentionally nested inside another method. Raw payload bytes are unchanged; no dedent, reindent, or separator insertion is performed. Moving Python functions, methods, or statements between node boundaries can concatenate code and be rejected; use line-based plans with explicit newlines and indentation for those cases. Existing destination separators can make a raw move valid, for example moving a top-level Python function to `file_end` after an existing newline. Inspect the diff and run project-specific verification.
+This is provider acceptance, not compiler, indentation, scope, or behavioral validation. Python's provider can accept invalid indentation or a method unintentionally nested inside another method. Raw payload and selected node bytes are not dedented or reindented; missing separators are not inferred. Moving Python functions, methods, or statements between node boundaries can concatenate code and be rejected; use [explicit move text](#raw-move-text) or line-based plans with caller-owned newlines and indentation. Existing destination separators can make a raw move valid, for example moving a top-level Python function to `file_end` after an existing newline. Inspect the proposed edits and run project-specific verification.
 
 Generic structural-confinement and symbol/container-preservation rejection rules are unsupported: raw replacement requests do not specify the intended output structure, and legitimate restructuring can resemble an error. These rules remain deferred until requests can express expected structure or maintainers accept a separately scoped contract. Node-result parsing does not resolve the Python placement failures in [issue #16](https://github.com/isty2e/identedit/issues/16).
+
+## Raw move text
+
+The `edit --json` operations `move_before`, `move_after`, `move_to_before`, and `move_to_after` accept optional string fields `prefix` and `suffix`. At the resolved destination, Identedit inserts `prefix + selected node bytes + suffix` exactly once. The source selection, content hash checks and deletion remain unchanged: affixes do not expand the source span or remove surrounding whitespace or comments.
+
+Both fields default to the empty string. Empty fields are omitted from compiled serialization, preserving existing raw behavior and output when no affixes are supplied. Strings are copied literally, including Unicode, CRLF, tabs and spaces; Identedit does not trim them, choose line endings, infer separators, or adjust indentation. For Python `move_before`, a suffix such as `"\n\n    "` may be needed to indent the following destination line, not just separate the moved text.
+
+The same composition applies to same-file and cross-file moves. Same-file changesets retain nonempty affixes on the move operation; their preview still describes the source deletion. Cross-file moves lower to source deletion and destination insertion, whose `new_text` and preview contain the composed text. Use an `apply` binary that understands the new fields for same-file changesets with nonempty affixes.
+
+These are raw moves with explicit surrounding text, not formatting-aware or semantically safe relocation. Reindenting the moved body, repairing an emptied source block and deciding whether comments or decorators belong to the selection remain the caller's responsibility. Affixes do not relax target compatibility, overlap checks, destination preconditions, [result parsing](#node-result-parsing), or transaction behavior. Existing target support is unchanged; cross-file moves still require node destinations. Whole-file renames do not accept these fields. Structural moves remain an `edit` -> `apply` workflow, without a `patch` JSON or unified `--diff` entry point.
 
 ## Text diff previews
 
@@ -80,7 +90,7 @@ Successful edit execution and dry-run validation through `patch` or `apply` incl
 
 Locations describe checked targets, not a minimal byte diff: config edits can replace a containing object, and line edits can adjust adjacent line terminators. A no-op may still report a checked location. Use the existing `changed`, `dry_run`, or `transaction.status` fields to interpret the outcome; locations alone do not mean a file was changed. Error responses, including rollback failures, do not include success locations.
 
-Post-edit coordinates, fresh edit anchors, source snippets, and semantic validation are outside this receipt contract. The bounded receipt supports a quick location check, not a second read view; richer output is deferred until usage shows a concrete need. For full text preview, use `patch --dry-run --diff`; read again for current edit addresses.
+Post-edit coordinates, fresh edit anchors, source snippets, and semantic validation are outside this receipt contract. The bounded receipt supports a quick location check, not a second read view; richer output is deferred until usage shows a concrete need. For edits supported by `patch`, use `patch --dry-run --diff` for full text preview; read again for current edit addresses.
 
 ## Hashes and identities
 

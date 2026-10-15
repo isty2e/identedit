@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use crate::changeset::{ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget};
+use crate::changeset::{
+    ChangeOp, FileChange, OpKind, TextChangePreview, TransformTarget, compose_move_text,
+};
 use crate::error::IdenteditError;
 use crate::handle::Span;
 use crate::hash::hash_text;
@@ -52,14 +54,15 @@ pub(super) fn matched_changes_to_replacements(
                 end: matched.matched_span.end,
                 new_text,
             }),
-            OpKind::MoveBefore { .. } | OpKind::MoveAfter { .. } => {
+            OpKind::MoveBefore { prefix, suffix, .. }
+            | OpKind::MoveAfter { prefix, suffix, .. } => {
                 let insert_at = matched.move_insert_at.ok_or_else(|| IdenteditError::InvalidRequest {
                     message: format!(
                         "Operation {} uses same-file move, but destination offset was not resolved",
                         matched.index
                     ),
                 })?;
-                let moved_text = matched.old_text.clone();
+                let moved_text = compose_move_text(matched.old_text.clone(), &prefix, &suffix);
 
                 replacements.push(ResolvedReplacement {
                     index: matched.index,
