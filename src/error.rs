@@ -83,6 +83,15 @@ pub enum IdenteditError {
         message: String,
     },
 
+    #[error(
+        "Provider '{provider}' rejected the proposed result for '{path}' before writing: {message}"
+    )]
+    ResultParseFailure {
+        path: String,
+        provider: &'static str,
+        message: String,
+    },
+
     #[error("Invalid selector glob pattern '{pattern}': {message}")]
     InvalidNamePattern { pattern: String, message: String },
 

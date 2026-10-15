@@ -10,9 +10,18 @@ struct ErrorResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ParseStage {
+    Source,
+    ProposedResult,
+}
+
+#[derive(Debug, Serialize)]
 struct ErrorBody {
     r#type: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stage: Option<ParseStage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     suggestion: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -30,6 +39,7 @@ impl ErrorBody {
         Self {
             r#type: error_type.into(),
             message: message.into(),
+            stage: None,
             suggestion,
             candidates: vec![],
             line_check: None,
@@ -43,12 +53,14 @@ impl ErrorBody {
         candidates: Vec<TargetCandidateContext>,
     ) -> Self {
         Self {
-            r#type: error_type.into(),
-            message: message.into(),
-            suggestion,
             candidates,
-            line_check: None,
+            ..Self::new(error_type, message, suggestion)
         }
+    }
+
+    fn with_parse_stage(mut self, stage: ParseStage) -> Self {
+        self.stage = Some(stage);
+        self
     }
 }
 
@@ -116,11 +128,24 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
                 Some("Use a valid glob pattern such as 'process_*'".to_string()),
             ),
         },
-        IdenteditError::ParseFailure { .. } | IdenteditError::LanguageSetup { .. } => {
-            ErrorResponse {
-                error: ErrorBody::new("parse_failure", error.to_string(), None),
-            }
-        }
+        IdenteditError::ResultParseFailure { .. } => ErrorResponse {
+            error: ErrorBody::new(
+                "parse_failure",
+                error.to_string(),
+                Some(
+                    "Review the replacement text and other edits in this file, then retry with --dry-run. Node payloads are inserted verbatim, without indentation repair."
+                        .to_string(),
+                ),
+            )
+            .with_parse_stage(ParseStage::ProposedResult),
+        },
+        IdenteditError::ParseFailure { .. } => ErrorResponse {
+            error: ErrorBody::new("parse_failure", error.to_string(), None)
+                .with_parse_stage(ParseStage::Source),
+        },
+        IdenteditError::LanguageSetup { .. } => ErrorResponse {
+            error: ErrorBody::new("parse_failure", error.to_string(), None),
+        },
         IdenteditError::GrammarInstall { .. } => ErrorResponse {
             error: ErrorBody::new("grammar_install_failed", error.to_string(), None),
         },
@@ -317,6 +342,41 @@ mod tests {
             "path_changed",
             Some("identedit read"),
         );
+    }
+
+    #[test]
+    fn parse_stage_is_structured_and_does_not_depend_on_diagnostic_wording() {
+        let source = super::render_error_response(&IdenteditError::ParseFailure {
+            provider: "example",
+            message: "same diagnostic".to_string(),
+        });
+        let result = super::render_error_response(&IdenteditError::ResultParseFailure {
+            path: "example.js".to_string(),
+            provider: "example",
+            message: "same diagnostic".to_string(),
+        });
+        let source: serde_json::Value = serde_json::from_str(&source).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(source["error"]["type"], "parse_failure");
+        assert_eq!(result["error"]["type"], "parse_failure");
+        assert_eq!(source["error"]["stage"], "source");
+        assert_eq!(result["error"]["stage"], "proposed_result");
+    }
+
+    #[test]
+    fn setup_and_non_parse_errors_do_not_invent_a_source_or_result_stage() {
+        for error in [
+            IdenteditError::LanguageSetup {
+                message: "setup failed".to_string(),
+            },
+            IdenteditError::InvalidRequest {
+                message: "invalid request".to_string(),
+            },
+        ] {
+            let rendered = super::render_error_response(&error);
+            let response: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+            assert!(response["error"].get("stage").is_none());
+        }
     }
 
     #[test]

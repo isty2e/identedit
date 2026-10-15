@@ -46,5 +46,9 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 | `path_changed` | File modified during apply | Re-run full pipeline (`read`, `edit`, `apply`) |
 | `resource_busy` | Another apply in progress | Wait briefly, retry |
 | `rollback_failed` | Apply failed and rollback incomplete | Inspect files manually, then re-run pipeline |
-| `parse_failure` | Source file has syntax errors | Fix syntax first, then retry |
+| `parse_failure`, `error.stage: "source"` | Provider rejected the original source | Repair the source with direct editing, then retry |
+| `parse_failure`, `error.stage: "proposed_result"` | Provider rejected the proposed file; no transaction writes started | Correct replacement text or other edits, then retry once with `--dry-run` |
+| Other `parse_failure` | Provider setup failed or stage is unspecified | Inspect diagnostics; do not infer that the original file is invalid |
 | `no_provider` | Unsupported file type | Use direct editing instead |
+
+Use `error.stage` for this distinction, not message wording or the presence of `suggestion`. See [node-result parsing](protocol.md#node-result-parsing) for the validation boundary.

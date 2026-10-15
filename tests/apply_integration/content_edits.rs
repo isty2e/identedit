@@ -806,8 +806,9 @@ fn apply_supports_unicode_replacement_text() {
     assert!(modified.contains("\"e\u{301} + 😸\""));
 }
 #[test]
-fn apply_preserves_nul_byte_in_replacement_text() {
+fn apply_rejects_provider_invalid_nul_in_node_replacement() {
     let file_path = copy_fixture_to_temp_python("example.py");
+    let before = fs::read(&file_path).expect("file should be readable");
     let handle = select_named_handle(&file_path, "process_*");
     let span = &handle["span"];
     let replacement_with_nul = "def process_data(value):\n    return \"A\u{0000}B\"";
@@ -836,18 +837,12 @@ fn apply_preserves_nul_byte_in_replacement_text() {
 
     let output = run_identedit_with_stdin(&["apply"], &changeset.to_string());
     assert!(
-        output.status.success(),
-        "apply should accept NUL-containing replacement text: {}",
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "node replacement must be accepted by the syntax provider"
     );
-
-    let modified_bytes = fs::read(&file_path).expect("file should be readable as bytes");
-    assert!(
-        modified_bytes
-            .windows(3)
-            .any(|window| window == [b'A', 0u8, b'B']),
-        "file bytes should preserve embedded NUL without truncation"
-    );
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["type"], "parse_failure");
+    assert_eq!(fs::read(&file_path).unwrap(), before);
 }
 #[test]
 fn apply_rejects_tampered_preview_old_text() {

@@ -159,7 +159,7 @@ fn transform_apply_preserves_cr_only_segments_for_tsx() {
         .as_str()
         .expect("identity should be present");
 
-    let replacement = "export function View(): JSX.Element {\r  return <main>Updated</main>;\r}";
+    let replacement = "function View(): JSX.Element {\r  return <main>Updated</main>;\r}";
     let transform_output =
         run_identedit(&["edit", "--at", identity, "--replace", replacement, path]);
     assert!(

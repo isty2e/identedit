@@ -3,7 +3,6 @@ use std::path::Path;
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
-use crate::provider::ProviderRegistry;
 
 pub(crate) fn parse_handles_for_file(file: &Path) -> Result<Vec<SelectionHandle>, IdenteditError> {
     let context = ExecutionContext::new();
@@ -31,13 +30,4 @@ pub(crate) fn parse_handles_for_source_with_context(
     context: &ExecutionContext,
 ) -> Result<Vec<SelectionHandle>, IdenteditError> {
     context.parse_handles_for_source(file, source)
-}
-
-pub(crate) fn parse_handles_for_source_with_registry(
-    file: &Path,
-    source: &[u8],
-    registry: &ProviderRegistry,
-) -> Result<Vec<SelectionHandle>, IdenteditError> {
-    let provider = registry.provider_for(file)?;
-    provider.parse(file, source)
 }

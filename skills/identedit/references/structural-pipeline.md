@@ -173,6 +173,8 @@ Request payload must include exactly one shape:
 
 `edit` output is a changeset JSON. It never modifies files. Compact previews use `old_hash` + `old_len`; add `--verbose` for `old_text` debugging.
 
+Plan compilation does not check the resulting file's syntax. `patch` and `apply` reparse node-edited files before writing, including in dry-run; see [node-result parsing](protocol.md#node-result-parsing). Payloads and moved node text remain raw, without automatic indentation or separators.
+
 ## Operations
 
 | Op | Target | Description |
@@ -186,6 +188,8 @@ Request payload must include exactly one shape:
 | `scoped_regex` | `node` | Raw regex replace within the node's text, including strings and comments; not a symbol-aware rename |
 | `insert` | `file_start` | Insert text at beginning of file |
 | `insert` | `file_end` | Insert text at end of file |
+
+Moves copy exact node text without adding separators or adjusting indentation. For Python function/method/statement reordering, prefer line-based plans with explicit newlines and indentation: moving between node boundaries can concatenate code and fail result parsing. A Python node move can still succeed when the destination already supplies separation, such as a newline before `file_end`. See [node-result parsing](protocol.md#node-result-parsing); do not treat raw node moves as formatting-aware relocation.
 
 ## File-Level Targets
 

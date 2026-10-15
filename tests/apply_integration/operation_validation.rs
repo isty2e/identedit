@@ -339,8 +339,8 @@ fn apply_json_rejects_overlapping_root_replace_and_nested_insert() {
 }
 #[test]
 fn apply_json_same_anchor_insert_before_after_is_order_independent() {
-    let before_insert = "__json-before__";
-    let after_insert = "__json-after__";
+    let before_insert = "[ ";
+    let after_insert = " ]";
 
     let file_path_a = copy_fixture_to_temp_json("example.json");
     let handle_a = select_first_handle(&file_path_a, "object", Some("config"));
@@ -444,6 +444,8 @@ fn apply_json_same_anchor_insert_before_after_is_order_independent() {
     );
     assert!(result_a.contains(before_insert));
     assert!(result_a.contains(after_insert));
+    let document: Value = serde_json::from_str(&result_a).expect("final JSON should be valid");
+    assert!(document["config"].is_array());
 }
 #[test]
 fn apply_json_delete_changeset_second_apply_returns_target_missing() {
