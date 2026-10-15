@@ -73,10 +73,22 @@ pub fn run_identedit_with_stdin(args: &[&str], input: &str) -> Output {
     command.stderr(Stdio::piped());
 
     let mut child = command.spawn().expect("failed to spawn identedit binary");
-    let stdin = child.stdin.as_mut().expect("stdin should be available");
-    stdin
-        .write_all(input.as_bytes())
-        .expect("stdin write should succeed");
+    let write_result = child
+        .stdin
+        .take()
+        .expect("stdin should be available")
+        .write_all(input.as_bytes());
+
+    // Argument validation and help can exit before consuming stdin. Their exit
+    // status and output, not successful input delivery, determine the outcome.
+    if let Err(error) = write_result {
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "stdin write failed: {error}"
+        );
+    }
+
     child
         .wait_with_output()
         .expect("failed to read process output")

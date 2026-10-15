@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 
 use serde_json::{Value, json};
 use tempfile::{Builder, tempdir};
@@ -50,26 +50,9 @@ fn run_read_json_mode(request_json: &str) -> Output {
 }
 
 fn run_read_json_mode_with_args(request_json: &str, arguments: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.arg("read").arg("--mode").arg("ast").arg("--json");
-
-    for argument in arguments {
-        command.arg(argument);
-    }
-
-    command.stdin(Stdio::piped());
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-
-    let mut child = command.spawn().expect("failed to spawn identedit binary");
-    let stdin = child.stdin.as_mut().expect("stdin should be available");
-    stdin
-        .write_all(request_json.as_bytes())
-        .expect("failed to write request JSON");
-
-    child
-        .wait_with_output()
-        .expect("failed to read process output")
+    let mut args = vec!["read", "--mode", "ast", "--json"];
+    args.extend_from_slice(arguments);
+    common::run_identedit_with_stdin(&args, request_json)
 }
 
 #[cfg(unix)]
