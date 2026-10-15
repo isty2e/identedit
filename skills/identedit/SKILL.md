@@ -103,11 +103,13 @@ identedit patch example.py --symbol target_fn --replace --stdin-text < /tmp/new_
 
 For a non-trivial patch, run the same request with `--dry-run --diff`, inspect the unified diff, then rerun without those flags to apply it. The preview does not write; plain `patch` does.
 
-Diffs show actual validated file bytes, including surrounding indentation, with three context lines. No-ops emit no diff; very large changes may use one non-minimal hunk. For portable replay, use `--color never` and paths relative to the replay directory, without `..` components. Hunk numbers count LF lines, not read anchors (which also count standalone CR); never copy hunk coordinates as anchors. Preview does not reserve a later write or validate syntax.
+Diffs show actual validated file bytes, including surrounding indentation, with three context lines. No-ops emit no diff; very large changes may use one non-minimal hunk. For portable replay, use `--color never` and paths relative to the replay directory, without `..` components. Hunk numbers count LF lines, not read anchors (which also count standalone CR); never copy hunk coordinates as anchors. Preview does not reserve a later write.
 
 For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
 
-Identedit checks preconditions, not semantic correctness. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
+Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. A proposed-result `parse_failure` means no transaction files were changed: correct the payload and retry with `--dry-run`. `edit` only builds a plan and does not run this result check.
+
+Provider acceptance is not semantic correctness: Python indentation errors and unintended nesting can still pass. No indentation or missing separators are repaired. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
 
 ## Planned edits and recovery
 
@@ -168,7 +170,8 @@ Allow at most one retry per target; a second failure means stop using identedit 
 |---|---|
 | `precondition_failed`, `target_missing` | Re-read, rebuild, retry once; use `read --mode line` for line targets |
 | `ambiguous_target` | Inspect candidates; retry with a qualified symbol, identity, or span hint |
-| `parse_failure`, `no_provider`, another hard error | Fall back to direct editing |
+| `parse_failure` rejecting the proposed result | Correct raw payload/other edits; retry once with `--dry-run` |
+| Input `parse_failure`, `no_provider`, another hard error | Fall back to direct editing |
 | Apply/rollback/resource error | Inspect recovery details; load `references/transactions.md` if bundled |
 
 Line repair shares the same retry budget. References are optional; use reported recovery details rather than blindly retrying a transaction error.

@@ -198,7 +198,7 @@ fn transform_replace_and_apply_support_sql_statement() {
         .as_str()
         .expect("identity should be present");
 
-    let replacement = "INSERT INTO users (id, name) VALUES (1, 'pilot');";
+    let replacement = "INSERT INTO users (id, name) VALUES (1, 'pilot')";
     let transform_output = run_identedit(&[
         "edit",
         "--at",
@@ -465,7 +465,7 @@ fn apply_reports_precondition_failed_after_sql_source_mutation() {
         "--at",
         identity,
         "--replace",
-        "INSERT INTO users (id, name) VALUES (2, 'pilot');",
+        "INSERT INTO users (id, name) VALUES (2, 'pilot')",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(
@@ -624,7 +624,7 @@ fn transform_replace_and_apply_preserve_crlf_sql_source_segments() {
         "--at",
         identity,
         "--replace",
-        "INSERT INTO users (id, name) VALUES (2, 'pilot');",
+        "INSERT INTO users (id, name) VALUES (2, 'pilot')",
         file_path.to_str().expect("path should be utf-8"),
     ]);
     assert!(

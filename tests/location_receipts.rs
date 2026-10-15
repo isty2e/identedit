@@ -484,11 +484,11 @@ fn file_move_receipt_canonicalizes_existing_chain_destinations() {
 #[test]
 fn same_file_move_reports_source_and_destination_under_one_operation() {
     let dir = tempdir().unwrap();
-    let file = dir.path().join("module.py");
-    let source = "def first():\n    pass\n\ndef last():\n    pass\n";
+    let file = dir.path().join("module.js");
+    let source = "function first() {\n    return 1;\n}\n\nfunction last() {\n    return 2;\n}\n";
     fs::write(&file, source).unwrap();
-    let first = common::select_first_handle(&file, "function_definition", Some("first"));
-    let last = common::select_first_handle(&file, "function_definition", Some("last"));
+    let first = common::select_first_handle(&file, "function_declaration", Some("first"));
+    let last = common::select_first_handle(&file, "function_declaration", Some("last"));
     let node = |handle: &Value| {
         json!({"type":"node","identity":handle["identity"],
         "kind":handle["kind"],"expected_old_hash":common::hash_text(handle["text"].as_str().unwrap())})
@@ -501,11 +501,11 @@ fn same_file_move_reports_source_and_destination_under_one_operation() {
         })],
     );
     let applied = success(run_identedit_with_stdin(&["apply"], &plan.to_string()));
-    let start = source.find("def last").unwrap();
+    let start = source.find("function last").unwrap();
     assert_locations(
         &applied,
         vec![
-            text_location(&file, 0, start, source.len() - 1, 4, 5),
+            text_location(&file, 0, start, source.len() - 1, 5, 7),
             text_location(&file, 0, 0, 0, 1, 1),
         ],
         2,

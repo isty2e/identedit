@@ -61,6 +61,10 @@ impl StructureProvider for FallbackProvider {
         Ok(handles)
     }
 
+    fn supports_syntax_validation(&self) -> bool {
+        false
+    }
+
     fn can_handle(&self, _path: &Path) -> bool {
         true
     }

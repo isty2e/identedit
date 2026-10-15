@@ -26,6 +26,8 @@ pub(crate) fn normalize_extension(value: &str) -> Option<String> {
 
 pub trait StructureProvider {
     fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError>;
+    /// Whether `parse` rejects provider-detected syntax errors, not compiler errors.
+    fn supports_syntax_validation(&self) -> bool;
     fn can_handle(&self, path: &Path) -> bool;
     fn name(&self) -> &'static str;
     fn supported_extensions(&self) -> &'static [&'static str];
@@ -55,6 +57,11 @@ impl Default for ProviderRegistry {
 }
 
 impl ProviderRegistry {
+    #[cfg(test)]
+    pub(crate) fn from_providers(providers: Vec<Box<dyn StructureProvider>>) -> Self {
+        Self { providers }
+    }
+
     pub fn provider_for(&self, path: &Path) -> Result<&dyn StructureProvider, IdenteditError> {
         for provider in &self.providers {
             if provider.can_handle(path) {
@@ -114,6 +121,10 @@ mod tests {
             _source: &[u8],
         ) -> Result<Vec<SelectionHandle>, IdenteditError> {
             Ok(Vec::new())
+        }
+
+        fn supports_syntax_validation(&self) -> bool {
+            false
         }
 
         fn can_handle(&self, path: &Path) -> bool {

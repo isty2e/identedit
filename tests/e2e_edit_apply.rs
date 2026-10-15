@@ -100,32 +100,6 @@ fn line_ref(source: &str, line: usize) -> String {
     format!("{line}:{}", common::compute_line_hash(line_text))
 }
 
-fn select_function_handle_by_name(file_path: &Path, name: &str) -> Value {
-    let output = run_identedit(&[
-        "read",
-        "--json",
-        "--verbose",
-        "--kind",
-        "function_definition",
-        file_path.to_str().expect("path should be utf-8"),
-    ]);
-    assert!(
-        output.status.success(),
-        "select failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    response["handles"]
-        .as_array()
-        .expect("handles should be array")
-        .iter()
-        .find(|handle| handle["name"].as_str() == Some(name))
-        .cloned()
-        .expect("named handle should exist")
-}
-
 #[test]
 fn select_transform_apply_pipeline_edits_file_end_to_end() {
     let file_path = copy_fixture_to_temp_python("example.py");
@@ -750,10 +724,18 @@ fn select_transform_apply_pipeline_supports_insert_before_and_after() {
 
 #[test]
 fn select_transform_apply_pipeline_supports_same_file_move_before() {
-    let file_path = copy_fixture_to_temp_python("example.py");
+    let root = tempdir().unwrap();
+    let file_path = root.path().join("example.js");
+    fs::write(
+        &file_path,
+        "function process_data() { return 1; }\nfunction helper() { return 2; }\n",
+    )
+    .unwrap();
     let source_before = fs::read_to_string(&file_path).expect("fixture should be readable");
-    let source_handle = select_function_handle_by_name(&file_path, "helper");
-    let destination_handle = select_function_handle_by_name(&file_path, "process_data");
+    let source_handle =
+        common::select_first_handle(&file_path, "function_declaration", Some("helper"));
+    let destination_handle =
+        common::select_first_handle(&file_path, "function_declaration", Some("process_data"));
 
     let request = json!({
         "command": "edit",
@@ -808,17 +790,17 @@ fn select_transform_apply_pipeline_supports_same_file_move_before() {
 
     let modified_file = fs::read_to_string(&file_path).expect("file should be readable");
     let helper_pos = modified_file
-        .find("def helper(")
+        .find("function helper(")
         .expect("helper definition should exist");
     let process_pos = modified_file
-        .find("def process_data(")
+        .find("function process_data(")
         .expect("process_data definition should exist");
     assert!(
         helper_pos < process_pos,
         "move_before should place helper before process_data"
     );
-    assert_eq!(modified_file.matches("def helper(").count(), 1);
-    assert_eq!(modified_file.matches("def process_data(").count(), 1);
+    assert_eq!(modified_file.matches("function helper(").count(), 1);
+    assert_eq!(modified_file.matches("function process_data(").count(), 1);
     assert_ne!(
         modified_file, source_before,
         "same-file move should mutate source ordering"
@@ -827,9 +809,17 @@ fn select_transform_apply_pipeline_supports_same_file_move_before() {
 
 #[test]
 fn select_transform_apply_pipeline_supports_same_file_move_after() {
-    let file_path = copy_fixture_to_temp_python("example.py");
-    let source_handle = select_function_handle_by_name(&file_path, "process_data");
-    let destination_handle = select_function_handle_by_name(&file_path, "helper");
+    let root = tempdir().unwrap();
+    let file_path = root.path().join("example.js");
+    fs::write(
+        &file_path,
+        "function process_data() { return 1; }\nfunction helper() { return 2; }\n",
+    )
+    .unwrap();
+    let source_handle =
+        common::select_first_handle(&file_path, "function_declaration", Some("process_data"));
+    let destination_handle =
+        common::select_first_handle(&file_path, "function_declaration", Some("helper"));
 
     let request = json!({
         "command": "edit",
@@ -878,38 +868,42 @@ fn select_transform_apply_pipeline_supports_same_file_move_after() {
 
     let modified_file = fs::read_to_string(&file_path).expect("file should be readable");
     let helper_pos = modified_file
-        .find("def helper(")
+        .find("function helper(")
         .expect("helper definition should exist");
     let process_pos = modified_file
-        .find("def process_data(")
+        .find("function process_data(")
         .expect("process_data definition should exist");
     assert!(
         helper_pos < process_pos,
         "move_after(process_data -> helper) should place process_data after helper"
     );
-    assert_eq!(modified_file.matches("def helper(").count(), 1);
-    assert_eq!(modified_file.matches("def process_data(").count(), 1);
+    assert_eq!(modified_file.matches("function helper(").count(), 1);
+    assert_eq!(modified_file.matches("function process_data(").count(), 1);
 }
 
 #[test]
 fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
     let workspace = tempdir().expect("tempdir should be created");
-    let source_file = workspace.path().join("source.py");
-    let destination_file = workspace.path().join("destination.py");
+    let source_file = workspace.path().join("source.js");
+    let destination_file = workspace.path().join("destination.js");
     fs::write(
         &source_file,
-        "def source_fn(value):\n    return value + 1\n\n\ndef keep_source(value):\n    return value + 2\n",
+        "function source_fn(value) { return value + 1; }\nfunction keep_source(value) { return value + 2; }\n",
     )
     .expect("source fixture write should succeed");
     fs::write(
         &destination_file,
-        "def destination_anchor(value):\n    return value * 2\n",
+        "function destination_anchor(value) { return value * 2; }\n",
     )
     .expect("destination fixture write should succeed");
 
-    let source_handle = select_function_handle_by_name(&source_file, "source_fn");
-    let destination_handle =
-        select_function_handle_by_name(&destination_file, "destination_anchor");
+    let source_handle =
+        common::select_first_handle(&source_file, "function_declaration", Some("source_fn"));
+    let destination_handle = common::select_first_handle(
+        &destination_file,
+        "function_declaration",
+        Some("destination_anchor"),
+    );
 
     let request = json!({
         "command": "edit",
@@ -973,18 +967,18 @@ fn select_transform_apply_pipeline_supports_cross_file_move_to_before() {
     let destination_after =
         fs::read_to_string(&destination_file).expect("destination should be readable");
     assert!(
-        !source_after.contains("def source_fn("),
+        !source_after.contains("function source_fn("),
         "source file should delete moved node"
     );
     assert!(
-        source_after.contains("def keep_source("),
+        source_after.contains("function keep_source("),
         "source file should preserve unrelated definitions"
     );
     let moved_pos = destination_after
-        .find("def source_fn(")
+        .find("function source_fn(")
         .expect("destination should contain moved source function");
     let anchor_pos = destination_after
-        .find("def destination_anchor(")
+        .find("function destination_anchor(")
         .expect("destination anchor should remain");
     assert!(
         moved_pos < anchor_pos,

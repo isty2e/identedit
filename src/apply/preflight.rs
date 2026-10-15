@@ -11,7 +11,6 @@ use crate::hash::hash_bytes;
 use crate::provider::ProviderRegistry;
 use crate::transform::build::resolve_changeset_targets_in_handles;
 use crate::transform::conflict::validate_change_conflicts;
-use crate::transform::parse::parse_handles_for_source_with_registry;
 
 use super::io::{
     ApplyFileLock, ApplyGuardState, AtomicWriteFailure, acquire_apply_lock,
@@ -184,16 +183,19 @@ fn preflight_changeset(
     let original_permissions = fs::metadata(&changeset.file)
         .map_err(|error| IdenteditError::io(&changeset.file, error))?
         .permissions();
-    let requires_structure_parse = changeset.operations.is_empty()
-        || changeset
-            .operations
-            .iter()
-            .any(|operation| operation.target().requires_node_resolution());
-    let handles = if requires_structure_parse {
-        parse_handles_for_source_with_registry(&changeset.file, source_text.as_bytes(), registry)?
+    let has_node_operations = changeset
+        .operations
+        .iter()
+        .any(|operation| operation.target().requires_node_resolution());
+    let provider = if changeset.operations.is_empty() || has_node_operations {
+        Some(registry.provider_for(&changeset.file)?)
     } else {
-        Vec::new()
+        None
     };
+    let handles = provider
+        .map(|provider| provider.parse(&changeset.file, source_text.as_bytes()))
+        .transpose()?
+        .unwrap_or_default();
     let matched_changes = resolve_changeset_targets_in_handles(changeset, &source_text, &handles)?;
     validate_change_conflicts(&matched_changes)?;
     validate_preview_consistency(changeset, &matched_changes)?;
@@ -213,6 +215,23 @@ fn preflight_changeset(
     );
     let original_text = source_text.clone();
     let updated_text = apply_replacements_to_text(&changeset.file, source_text, replacements)?;
+
+    if has_node_operations
+        && let Some(provider) = provider.filter(|provider| provider.supports_syntax_validation())
+    {
+        provider
+            .parse(&changeset.file, updated_text.as_bytes())
+            .map_err(|error| match error {
+                IdenteditError::ParseFailure { provider, message } => {
+                    IdenteditError::ResultParseFailure {
+                        path: changeset.file.display().to_string(),
+                        provider,
+                        message,
+                    }
+                }
+                other => other,
+            })?;
+    }
 
     Ok(PreflightFilePlan {
         file: changeset.file.clone(),

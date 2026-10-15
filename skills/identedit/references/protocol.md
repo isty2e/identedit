@@ -27,9 +27,19 @@ Run `identedit <command> --help` for the complete flag surface. Identedit does n
 
 Consumers should parse documented JSON output rather than grep its rendered text. Capture stderr separately when command construction itself may be invalid.
 
+## Node-result parsing
+
+Before admitting a file with any node-target operation, `patch` and `apply` reparse its complete proposed text with the syntax-capable provider selected for the original file. This covers replacements, deletions, insertions, in-file moves, and lowered cross-file moves or scoped-regex edits. All operations in that file, including line and file-boundary edits, contribute to the final text being checked. Individual payloads need not parse in isolation. A rejected result returns `parse_failure` identifying the file and provider, with recovery guidance; no file edits or moves in the transaction have started.
+
+The same check applies to `patch --dry-run`, `patch --dry-run --diff`, and `apply --dry-run`, including `--repair`. `edit` only compiles a plan: successful compilation does not mean its result passes this check. Fallback-provider edits, line/file-boundary-only files, and whole-file moves do not receive this result-parse check. An empty operation list does not enable it. Provider failure never triggers a retry through the fallback provider. For `.h` files, either the C or C++ grammar may accept the result; preserving the original dialect is not required.
+
+This is provider acceptance, not compiler, indentation, scope, or behavioral validation. Python's provider can accept invalid indentation or a method unintentionally nested inside another method. Raw payload bytes are unchanged; no dedent, reindent, or separator insertion is performed. Moves that concatenate declarations without a required separator can therefore be rejected. Inspect the diff and run project-specific verification.
+
+Generic structural-confinement and symbol/container-preservation rejection rules are unsupported: raw replacement requests do not specify the intended output structure, and legitimate restructuring can resemble an error. These rules remain deferred until requests can express expected structure or maintainers accept a separately scoped contract. Node-result parsing does not resolve the Python placement failures in [issue #16](https://github.com/isty2e/identedit/issues/16).
+
 ## Text diff previews
 
-`patch --dry-run --diff` compares the validated original and proposed full-file text, not isolated node spans. It shows actual surrounding indentation, combines edits into one diff per file, includes three context lines, and merges nearby hunks. No-op edits emit no diff. JSON output and edit semantics are unchanged.
+`patch --dry-run --diff` compares the validated original and proposed full-file text, not isolated node spans. It shows actual surrounding indentation, combines edits into one diff per file, includes three context lines, and merges nearby hunks. No-op edits emit no diff. The renderer does not alter the proposed bytes or JSON response format.
 
 For portable replay, generate the diff using `--color never` and paths relative to the replay working directory, with no `..` components; run `patch -p0` from that same directory against the unchanged original. Identedit accepts absolute paths, but GNU patch can reject absolute or parent-traversing names in diff headers. CR bytes are preserved, including CRLF and mixed endings; missing final LF is marked with `\ No newline at end of file`. GNU patch also accepts `--binary`. Replay equivalence is to the proposed bytes, not a guarantee of valid syntax or behavior. Whole-file move previews are unsupported.
 

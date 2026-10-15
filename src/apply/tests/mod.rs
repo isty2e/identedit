@@ -8,6 +8,7 @@ mod atomic_write;
 mod locking;
 mod preflight;
 mod properties;
+mod result_validation;
 mod summary;
 mod symlink;
 

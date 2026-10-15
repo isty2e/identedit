@@ -38,6 +38,10 @@ impl StructureProvider for JsonProvider {
         Ok(handles)
     }
 
+    fn supports_syntax_validation(&self) -> bool {
+        true
+    }
+
     fn can_handle(&self, path: &Path) -> bool {
         path.extension()
             .and_then(|value| value.to_str())

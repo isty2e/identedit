@@ -112,6 +112,10 @@ impl StructureProvider for HeaderTreeSitterProvider {
         Ok(handles)
     }
 
+    fn supports_syntax_validation(&self) -> bool {
+        true
+    }
+
     fn can_handle(&self, path: &Path) -> bool {
         let requested = path
             .extension()
@@ -140,6 +144,10 @@ impl StructureProvider for HeaderTreeSitterProvider {
 impl StructureProvider for TreeSitterProvider {
     fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
         parse_with_spec(self.spec, path, source)
+    }
+
+    fn supports_syntax_validation(&self) -> bool {
+        true
     }
 
     fn can_handle(&self, path: &Path) -> bool {

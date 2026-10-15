@@ -173,6 +173,8 @@ Request payload must include exactly one shape:
 
 `edit` output is a changeset JSON. It never modifies files. Compact previews use `old_hash` + `old_len`; add `--verbose` for `old_text` debugging.
 
+Plan compilation does not check the resulting file's syntax. `patch` and `apply` reparse node-edited files before writing, including in dry-run; see [node-result parsing](protocol.md#node-result-parsing). Payloads and moved node text remain raw, without automatic indentation or separators.
+
 ## Operations
 
 | Op | Target | Description |

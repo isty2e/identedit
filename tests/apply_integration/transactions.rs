@@ -573,16 +573,16 @@ fn apply_inject_failure_after_one_write_rolls_back_prior_commits() {
 #[test]
 fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() {
     let workspace = tempdir().expect("tempdir should be created");
-    let source_file = workspace.path().join("a_source.py");
-    let destination_file = workspace.path().join("b_destination.py");
+    let source_file = workspace.path().join("a_source.js");
+    let destination_file = workspace.path().join("b_destination.js");
     fs::write(
         &source_file,
-        "def source_fn(value):\n    return value + 1\n\n\ndef keep_source(value):\n    return value + 2\n",
+        "function source_fn(value) { return value + 1; }\nfunction keep_source(value) { return value + 2; }\n",
     )
     .expect("source fixture write should succeed");
     fs::write(
         &destination_file,
-        "def destination_anchor(value):\n    return value * 2\n",
+        "function destination_anchor(value) { return value * 2; }\n",
     )
     .expect("destination fixture write should succeed");
 
@@ -590,10 +590,11 @@ fn apply_inject_failure_after_one_write_rolls_back_cross_file_structural_move() 
     let before_destination =
         fs::read_to_string(&destination_file).expect("destination should be readable");
 
-    let source_handle = select_first_handle(&source_file, "function_definition", Some("source_fn"));
+    let source_handle =
+        select_first_handle(&source_file, "function_declaration", Some("source_fn"));
     let destination_handle = select_first_handle(
         &destination_file,
-        "function_definition",
+        "function_declaration",
         Some("destination_anchor"),
     );
 

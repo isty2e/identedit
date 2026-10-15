@@ -188,8 +188,7 @@ fn select_transform_apply_pipeline_supports_tsx_function_rewrite() {
         .as_str()
         .expect("identity should be present");
 
-    let replacement =
-        "export function View(): JSX.Element {\n  return <section>Updated</section>;\n}";
+    let replacement = "function View(): JSX.Element {\n  return <section>Updated</section>;\n}";
     let transform_output = run_identedit(&[
         "edit",
         "--at",

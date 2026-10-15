@@ -116,6 +116,16 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
                 Some("Use a valid glob pattern such as 'process_*'".to_string()),
             ),
         },
+        IdenteditError::ResultParseFailure { .. } => ErrorResponse {
+            error: ErrorBody::new(
+                "parse_failure",
+                error.to_string(),
+                Some(
+                    "Review the replacement text and other edits in this file, then retry with --dry-run. Node payloads are inserted verbatim, without indentation repair."
+                        .to_string(),
+                ),
+            ),
+        },
         IdenteditError::ParseFailure { .. } | IdenteditError::LanguageSetup { .. } => {
             ErrorResponse {
                 error: ErrorBody::new("parse_failure", error.to_string(), None),

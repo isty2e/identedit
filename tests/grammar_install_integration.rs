@@ -195,7 +195,7 @@ fn grammar_install_invalid_repo_returns_grammar_install_failed_with_guidance() {
 
 #[cfg(unix)]
 #[test]
-fn grammar_install_with_local_repo_enables_runtime_selection() {
+fn grammar_install_with_local_repo_enables_runtime_selection_and_result_validation() {
     if !command_available("git") || !command_available("cc") {
         return;
     }
@@ -268,6 +268,33 @@ fn grammar_install_with_local_repo_enables_runtime_selection() {
             .is_some_and(|count| count > 0),
         "dynamic grammar provider should emit at least one object match"
     );
+
+    let before = fs::read(&target_file).unwrap();
+    let identity = select_response["handles"][0]["identity"].as_str().unwrap();
+    for dry_run in [true, false] {
+        let mut arguments = vec![
+            "patch",
+            target_file.to_str().unwrap(),
+            "--at",
+            identity,
+            "--replace",
+            "{",
+        ];
+        if dry_run {
+            arguments.push("--dry-run");
+        }
+        let output = run_identedit(&arguments, kanna_home.path());
+        assert!(
+            !output.status.success(),
+            "installed grammars must validate results"
+        );
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["type"], "parse_failure");
+        let message = response["error"]["message"].as_str().unwrap();
+        assert!(message.contains("tree-sitter-jsonlocal"), "{message}");
+        assert!(message.contains("proposed result"), "{message}");
+        assert_eq!(fs::read(&target_file).unwrap(), before);
+    }
 }
 
 #[cfg(unix)]

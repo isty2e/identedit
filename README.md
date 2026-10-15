@@ -135,6 +135,7 @@ identedit apply changeset.json
 - `patch --dry-run --diff` prints a unified diff of the validated before/after file text with three context lines, without writing. See [diff preview details](skills/identedit/references/protocol.md#text-diff-previews) for replay and newline behavior.
 - Failed-diff handoff discovers candidates but never applies them.
 - Line repair is opt-in and fails rather than choosing an ambiguous remap.
+- Node-operation files must pass a final parse by their selected syntax provider before any transaction writes, including in dry-run. Line/file-boundary-only files and fallback edits are excluded; see the [scope and limitations](skills/identedit/references/protocol.md#node-result-parsing).
 - Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests and linters after non-trivial edits.
 - Use direct editing when placement depends on project-specific comment semantics or unsupported config-format behavior.
 

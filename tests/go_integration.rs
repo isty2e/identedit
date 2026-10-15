@@ -184,7 +184,7 @@ fn select_transform_apply_pipeline_supports_go_type_spec_rewrite() {
         .as_str()
         .expect("identity should be present");
 
-    let replacement = "type Processor struct {\n\tvalue int\n\tfactor int\n}";
+    let replacement = "Processor struct {\n\tvalue int\n\tfactor int\n}";
     let transform_output = run_identedit(&[
         "edit",
         "--at",
