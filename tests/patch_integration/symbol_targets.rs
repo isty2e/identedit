@@ -431,7 +431,7 @@ fn patch_kind_name_replace_dry_run_diff_outputs_unified_diff_without_writing() {
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(diff.contains("--- "));
     assert!(diff.contains("+++ "));
-    assert!(diff.contains("@@ -2,2 +2,1 @@"));
+    assert!(diff.contains("@@ -1,6 +1,5 @@"), "{diff}");
     assert!(!diff.contains("-def process_data(value):"));
     assert!(!diff.contains("+def process_data(value):"));
     assert!(diff.contains("-    result = value + 1"));
@@ -448,7 +448,7 @@ fn patch_kind_name_replace_dry_run_diff_outputs_unified_diff_without_writing() {
 }
 
 #[test]
-fn patch_kind_name_replace_dry_run_diff_omits_unchanged_suffix_context() {
+fn patch_kind_name_replace_dry_run_diff_includes_unchanged_context() {
     let source = "def sample():\n    before()\n    old()\n    after()\n";
     let mut temp_file = Builder::new()
         .suffix(".py")
@@ -479,15 +479,15 @@ fn patch_kind_name_replace_dry_run_diff_omits_unchanged_suffix_context() {
     );
 
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(diff.contains("@@ -3,1 +3,1 @@"));
+    assert!(diff.contains("@@ -1,4 +1,4 @@"));
     assert!(diff.contains("-    old()"));
     assert!(diff.contains("+    new()"));
-    assert!(!diff.contains("before()"));
-    assert!(!diff.contains("after()"));
+    assert!(diff.contains("     before()\n"));
+    assert!(diff.contains("     after()\n"));
 }
 
 #[test]
-fn patch_kind_name_replace_dry_run_diff_splits_separated_changes_into_hunks() {
+fn patch_kind_name_replace_dry_run_diff_merges_nearby_changes_into_one_hunk() {
     let source = "\
 def sample(value):
     keep_a()
@@ -525,19 +525,19 @@ def sample(value):
     );
 
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(diff.contains("@@ -3,1 +3,1 @@"));
-    assert!(diff.contains("@@ -5,1 +5,1 @@"));
+    assert!(diff.contains("@@ -1,6 +1,6 @@"));
+    assert_eq!(diff.matches("@@ -").count(), 1);
     assert!(diff.contains("-    old_a(value)"));
     assert!(diff.contains("+    new_a(value)"));
     assert!(diff.contains("-    old_b(value)"));
     assert!(diff.contains("+    new_b(value)"));
-    assert!(!diff.contains("keep_a"));
-    assert!(!diff.contains("keep_b"));
-    assert!(!diff.contains("keep_c"));
+    assert!(diff.contains("     keep_a()\n"));
+    assert!(diff.contains("     keep_b()\n"));
+    assert!(diff.contains("     keep_c()\n"));
 }
 
 #[test]
-fn patch_kind_name_replace_dry_run_diff_splits_separated_deletions_into_hunks() {
+fn patch_kind_name_replace_dry_run_diff_merges_nearby_deletions_into_one_hunk() {
     let source = "\
 def sample():
     keep_a()
@@ -568,17 +568,17 @@ def sample():
     );
 
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(diff.contains("@@ -3,1 +3,0 @@"));
-    assert!(diff.contains("@@ -5,1 +4,0 @@"));
+    assert!(diff.contains("@@ -1,6 +1,4 @@"));
+    assert_eq!(diff.matches("@@ -").count(), 1);
     assert!(diff.contains("-    drop_a()"));
     assert!(diff.contains("-    drop_b()"));
-    assert!(!diff.contains("keep_a"));
-    assert!(!diff.contains("keep_b"));
-    assert!(!diff.contains("keep_c"));
+    assert!(diff.contains("     keep_a()\n"));
+    assert!(diff.contains("     keep_b()\n"));
+    assert!(diff.contains("     keep_c()\n"));
 }
 
 #[test]
-fn patch_kind_name_replace_dry_run_diff_splits_separated_insertions_into_hunks() {
+fn patch_kind_name_replace_dry_run_diff_merges_nearby_insertions_into_one_hunk() {
     let source = "\
 def sample():
     keep_a()
@@ -607,13 +607,13 @@ def sample():
     );
 
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(diff.contains("@@ -3,0 +3,1 @@"));
-    assert!(diff.contains("@@ -4,0 +5,1 @@"));
+    assert!(diff.contains("@@ -1,4 +1,6 @@"));
+    assert_eq!(diff.matches("@@ -").count(), 1);
     assert!(diff.contains("+    add_a()"));
     assert!(diff.contains("+    add_b()"));
-    assert!(!diff.contains("keep_a"));
-    assert!(!diff.contains("keep_b"));
-    assert!(!diff.contains("keep_c"));
+    assert!(diff.contains("     keep_a()\n"));
+    assert!(diff.contains("     keep_b()\n"));
+    assert!(diff.contains("     keep_c()\n"));
 }
 
 #[test]

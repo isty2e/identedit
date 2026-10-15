@@ -76,6 +76,8 @@ The target determines semantics: a node replacement uses exact byte text; a line
 - Multiline replacement and insertion text uses the target boundary's local terminator style.
 - Replacing or deleting the final line preserves whether the original file ended with a line terminator.
 
+Diff previews preserve these bytes, with explicit missing-final-LF markers. Their hunk numbers count LF-delimited physical lines; read anchors also count standalone CR. After a standalone CR, these numbers can differ. Copy edit anchors from `read`, not diff headers. See [text diff previews](protocol.md#text-diff-previews) for replay and fallback behavior.
+
 ## Target Auto-Detection
 
 `patch --at` detects target type by format:

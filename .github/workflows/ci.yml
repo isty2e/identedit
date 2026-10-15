@@ -65,6 +65,9 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Replay patch previews with the platform patch tool
+        run: cargo test --locked --test patch_diff -- --ignored
+
       - name: Build release binary
         if: github.event_name != 'pull_request'
         run: cargo build --locked --release

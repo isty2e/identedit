@@ -33,6 +33,89 @@ fn process_identity_for(file_path: &std::path::Path) -> String {
         .clone()
 }
 
+#[test]
+fn dry_run_projects_owned_exact_snapshots_without_retaining_file_locks() {
+    use crate::apply::{dry_run_multi_file_changeset, preview_multi_file_changeset};
+    use crate::changeset::MultiFileChangeset;
+    let root = tempdir().unwrap();
+    let file = create_python_target(root.path());
+    let before = std::fs::read_to_string(&file).unwrap();
+    let replacement = "def process_data(value):\n    return value * 9";
+    let change =
+        build_replace_changeset(&file, &process_identity_for(&file), replacement.to_string())
+            .unwrap();
+    let changeset = MultiFileChangeset {
+        files: vec![change],
+        transaction: Default::default(),
+    };
+    let preview = preview_multi_file_changeset(&changeset).unwrap();
+    let response = dry_run_multi_file_changeset(&changeset).unwrap();
+    assert_eq!(
+        serde_json::to_value(&preview.response).unwrap(),
+        serde_json::to_value(response).unwrap()
+    );
+    let lock = acquire_apply_lock(&file).expect("snapshots must release preflight locks");
+    drop(lock);
+    std::fs::write(&file, "external update\n").unwrap();
+    assert_eq!(preview.files.len(), 1);
+    assert_eq!(preview.files[0].before, before);
+    assert_eq!(
+        preview.files[0].after,
+        before.replace(
+            "def process_data(value):\n    result = value + 1\n    return result",
+            replacement
+        )
+    );
+    assert!(
+        dry_run_multi_file_changeset(&changeset).is_err(),
+        "later use must revalidate"
+    );
+}
+
+#[test]
+fn dry_run_snapshot_composes_all_operations_for_one_file() {
+    use crate::apply::preview_multi_file_changeset;
+    use crate::changeset::{EditOperation, MultiFileChangeset};
+    use crate::transform::build::build_changeset;
+
+    let root = tempdir().unwrap();
+    let file = root.path().join("sample.txt");
+    let before = "a\r\nb\n";
+    std::fs::write(&file, before).unwrap();
+    let hash = hash_bytes(before.as_bytes());
+    let operations = vec![
+        EditOperation::try_new(
+            TransformTarget::FileStart {
+                expected_file_hash: hash.clone(),
+            },
+            OpKind::Insert {
+                new_text: "prefix\n".to_string(),
+            },
+        )
+        .unwrap(),
+        EditOperation::try_new(
+            TransformTarget::FileEnd {
+                expected_file_hash: hash,
+            },
+            OpKind::Insert {
+                new_text: "suffix".to_string(),
+            },
+        )
+        .unwrap(),
+    ];
+    let change = build_changeset(&file, operations).unwrap();
+    let changeset = MultiFileChangeset {
+        files: vec![change],
+        transaction: Default::default(),
+    };
+    let preview = preview_multi_file_changeset(&changeset).unwrap();
+    assert_eq!(preview.files.len(), 1);
+    assert_eq!(preview.files[0].before, before);
+    assert_eq!(preview.files[0].after, "prefix\na\r\nb\nsuffix");
+    assert_eq!(preview.response.summary.operations_applied, 2);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+}
+
 fn build_move_changeset(source: &std::path::Path, destination: &std::path::Path) -> FileChange {
     let source_bytes = std::fs::read(source).expect("move source should be readable");
     build_move_changeset_with_hash(source, destination, hash_bytes(&source_bytes))
