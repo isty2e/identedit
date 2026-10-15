@@ -52,8 +52,8 @@ fn assert_rejected(output: &Output, file: &Path, before: &str) {
     assert!(output.stderr.is_empty(), "runtime errors use stdout JSON");
     let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["error"]["type"], "parse_failure");
+    assert_eq!(response["error"]["stage"], "proposed_result");
     let message = response["error"]["message"].as_str().unwrap();
-    assert!(message.contains("proposed result"), "{message}");
     assert!(message.contains(file.to_str().unwrap()), "{message}");
     assert!(message.contains("before writing"), "{message}");
     assert!(response["error"]["suggestion"].is_string());
@@ -517,13 +517,81 @@ fn original_parse_failure_is_not_mislabeled_as_a_rejected_result() {
     assert!(!output.status.success());
     let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["error"]["type"], "parse_failure");
-    assert!(
-        !response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("proposed result")
-    );
+    assert_eq!(response["error"]["stage"], "source");
     assert_eq!(fs::read_to_string(file).unwrap(), before);
+}
+
+#[test]
+fn source_stage_is_preserved_across_read_edit_apply_and_config_resolution() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("example.js");
+    fs::write(&file, JAVASCRIPT).unwrap();
+    let target = node_target(&file, "function_declaration", Some("target"));
+    let changeset = compile(json!([{
+        "file": file, "operations": [replacement(target.clone(), VALID_REPLACEMENT)]
+    }]));
+    fs::write(&file, "function target( {").unwrap();
+
+    let outputs = [
+        common::run_identedit(&["read", "--json", file.to_str().unwrap()]),
+        common::run_identedit(&[
+            "edit",
+            file.to_str().unwrap(),
+            "--at",
+            target["identity"].as_str().unwrap(),
+            "--replace",
+            VALID_REPLACEMENT,
+        ]),
+        apply(&changeset, true),
+        apply(&changeset, false),
+    ];
+    for output in outputs {
+        assert!(!output.status.success());
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["type"], "parse_failure");
+        assert_eq!(response["error"]["stage"], "source");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "function target( {");
+    }
+
+    let config = root.path().join("example.json");
+    fs::write(&config, "{\"x\":").unwrap();
+    let output = common::run_identedit(&[
+        "patch",
+        config.to_str().unwrap(),
+        "--config-path",
+        "x",
+        "--set-value",
+        "1",
+    ]);
+    assert!(!output.status.success());
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["type"], "parse_failure");
+    assert_eq!(response["error"]["stage"], "source");
+    assert_eq!(fs::read_to_string(config).unwrap(), "{\"x\":");
+}
+
+#[test]
+fn python_move_to_an_existing_file_end_separator_can_succeed() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("example.py");
+    let before = "def first():\n    return 1\n\ndef second():\n    return 2\n";
+    fs::write(&file, before).unwrap();
+    let target = node_target(&file, "function_definition", Some("first"));
+    let changeset = compile(json!([{
+        "file": file, "operations": [{
+            "target": target,
+            "op": {"type": "move_after", "destination": {
+                "type": "file_end", "expected_file_hash": common::hash_text(before)
+            }}
+        }]
+    }]));
+    assert!(apply(&changeset, true).status.success());
+    assert_eq!(fs::read_to_string(&file).unwrap(), before);
+    assert!(apply(&changeset, false).status.success());
+    assert_eq!(
+        fs::read_to_string(file).unwrap(),
+        "\n\ndef second():\n    return 2\ndef first():\n    return 1"
+    );
 }
 
 #[test]

@@ -189,6 +189,8 @@ Plan compilation does not check the resulting file's syntax. `patch` and `apply`
 | `insert` | `file_start` | Insert text at beginning of file |
 | `insert` | `file_end` | Insert text at end of file |
 
+Moves copy exact node text without adding separators or adjusting indentation. For Python function/method/statement reordering, prefer line-based plans with explicit newlines and indentation: moving between node boundaries can concatenate code and fail result parsing. A Python node move can still succeed when the destination already supplies separation, such as a newline before `file_end`. See [node-result parsing](protocol.md#node-result-parsing); do not treat raw node moves as formatting-aware relocation.
+
 ## File-Level Targets
 
 For `file_start` and `file_end`, use `expected_file_hash` instead of node identity.

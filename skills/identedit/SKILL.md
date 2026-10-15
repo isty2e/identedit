@@ -21,8 +21,10 @@ Use for repeated targets, context-mismatch recovery, config paths, precondition-
 | Supply multiline text without shell escaping | `--text-file body.txt` or `--stdin-text` | [Text input](#text-preview-and-verification) |
 | Add code at the start/end of a file | `patch file --at file-end --insert --text-file code.txt` (or `file-start`) | [Text input](#text-preview-and-verification) |
 | Set/create a config key, append an array value, or delete a key | `patch file --config-path path`: `--set-value` (add `--create-missing` to create), `--append-value`, `--delete` | [Config](#config-value) |
-| Plan multiple edits/files together, or move a structural unit | `edit --json` -> `apply`; moves use `move_before`/`move_after` | [Plans](#batch-or-multi-step-pipeline) |
+| Plan multiple edits/files together, or move a structural unit | `edit --json` -> `apply`; raw moves use `move_before`/`move_after`. For Python reordering, prefer line edits with explicit newlines/indentation | [Plans](#batch-or-multi-step-pipeline) |
 | Recover target candidates from a failed patch | `patch --from-diff failed.diff file` (never writes) | [Handoff](#failed-diff-handoff) |
+
+Moves do not add separators: adjacent Python functions/methods/statements can concatenate and be rejected. This is not a Python ban; a move to `file_end` can work when an existing newline separates the destination. Keep separators and indentation explicit in line-based plans.
 
 ## Single-edit recipes
 
@@ -107,7 +109,7 @@ Diffs show actual validated file bytes, including surrounding indentation, with 
 
 For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
 
-Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. A proposed-result `parse_failure` means no transaction files were changed: correct the payload and retry with `--dry-run`. `edit` only builds a plan and does not run this result check.
+Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. A `parse_failure` with `error.stage: "proposed_result"` means no transaction files were changed: correct the payload and retry with `--dry-run`. `edit` only builds a plan and does not run this result check.
 
 Provider acceptance is not semantic correctness: Python indentation errors and unintended nesting can still pass. No indentation or missing separators are repaired. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
 
@@ -170,11 +172,14 @@ Allow at most one retry per target; a second failure means stop using identedit 
 |---|---|
 | `precondition_failed`, `target_missing` | Re-read, rebuild, retry once; use `read --mode line` for line targets |
 | `ambiguous_target` | Inspect candidates; retry with a qualified symbol, identity, or span hint |
-| `parse_failure` rejecting the proposed result | Correct raw payload/other edits; retry once with `--dry-run` |
-| Input `parse_failure`, `no_provider`, another hard error | Fall back to direct editing |
+| `parse_failure`, `error.stage: "proposed_result"` | Correct raw payload/other edits; retry once with `--dry-run` |
+| `parse_failure`, `error.stage: "source"` | Original source was rejected; use direct editing to repair it |
+| Other `parse_failure`, `no_provider`, another hard error | Inspect diagnostics; fall back to direct editing if appropriate |
 | Apply/rollback/resource error | Inspect recovery details; load `references/transactions.md` if bundled |
 
 Line repair shares the same retry budget. References are optional; use reported recovery details rather than blindly retrying a transaction error.
+
+Branch on `error.type` and `error.stage`, not message text or the presence of `suggestion`. A missing/unknown stage does not identify a source failure; provider initialization failures omit it.
 
 For `invalid_request` with `error.line_check`, inspect its mismatches and remap candidates, then refresh line anchors before the bounded retry. Do not parse diagnostics out of `message`. If apply received an edit request, compile it with `edit --json` first; apply accepts the resulting changeset.
 

@@ -292,7 +292,7 @@ fn grammar_install_with_local_repo_enables_runtime_selection_and_result_validati
         assert_eq!(response["error"]["type"], "parse_failure");
         let message = response["error"]["message"].as_str().unwrap();
         assert!(message.contains("tree-sitter-jsonlocal"), "{message}");
-        assert!(message.contains("proposed result"), "{message}");
+        assert_eq!(response["error"]["stage"], "proposed_result");
         assert_eq!(fs::read(&target_file).unwrap(), before);
     }
 }
