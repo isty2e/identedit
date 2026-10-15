@@ -404,3 +404,109 @@ fn numeric_values_are_not_limited_by_f64_or_u64_materialization() {
         );
     }
 }
+
+fn nested_json_value(depth: usize, layers: &[(&str, &str)]) -> String {
+    let mut value = String::new();
+    let mut closing = Vec::with_capacity(depth);
+    for index in 0..depth {
+        let (open, close) = layers[index % layers.len()];
+        value.push_str(open);
+        closing.push(close);
+    }
+    value.push('0');
+    for close in closing.into_iter().rev() {
+        value.push_str(close);
+    }
+    value
+}
+
+#[test]
+fn deeply_nested_values_are_preserved_for_existing_and_missing_paths() {
+    let shapes: &[&[(&str, &str)]] = &[
+        &[("[", "]")],
+        &[("{\"k\":", "}")],
+        &[("[", "]"), ("{\"k\":", "}")],
+    ];
+    for depth in [127, 128, 129, 256, 512] {
+        for shape in shapes {
+            let value = nested_json_value(depth, shape);
+            let source = "{\"value\":0,\"keep\":1}\n";
+            for (path, create, expected) in [
+                (
+                    "value",
+                    false,
+                    format!("{{\"value\":{value},\"keep\":1}}\n"),
+                ),
+                ("value", true, format!("{{\"value\":{value},\"keep\":1}}\n")),
+                (
+                    "new",
+                    true,
+                    format!("{{\"value\":0,\"keep\":1,\"new\":{value}}}\n"),
+                ),
+            ] {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join("config.json");
+                fs::write(&file, source).unwrap();
+                let output = set(&file, path, &value, create);
+                assert!(
+                    output.status.success(),
+                    "depth={depth}, path={path}, create={create}: {}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                assert_eq!(fs::read_to_string(&file).unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn deep_source_documents_and_missing_key_chains_preserve_original_bytes() {
+    for depth in [129, 256, 512] {
+        let value = nested_json_value(depth, &[("[", "]"), ("{\"k\":", "}")]);
+        let source = format!("{{\"deep\":{value},\"obj\":{{}}}}\n");
+        assert_creates(
+            &source,
+            "obj.new",
+            &value,
+            &format!("{{\"deep\":{value},\"obj\":{{\"new\":{value}}}}}\n"),
+        );
+        assert_creates("", "new", &value, &format!("{{\"new\":{value}}}"));
+
+        let path = vec!["k"; depth].join(".");
+        let expected = format!("{}1{}", "{\"k\":".repeat(depth), "}".repeat(depth));
+        assert_creates("{}", &path, "1", &expected);
+    }
+}
+
+#[test]
+fn deeply_nested_invalid_and_multiple_values_are_rejected_without_writing() {
+    for depth in [129, 512] {
+        let valid = nested_json_value(depth, &[("[", "]"), ("{\"k\":", "}")]);
+        for value in [
+            valid[..valid.len() - 1].to_string(),
+            format!("{valid} false"),
+            format!("{valid},\"injected\":true"),
+            format!("{valid}/*comment*/"),
+            format!("{}[0,]{}", "[".repeat(depth), "]".repeat(depth)),
+        ] {
+            for (source, path, create) in [
+                ("{\"value\":0}", "value", false),
+                ("{\"value\":0}", "value", true),
+                ("{}", "new", true),
+                ("", "new", true),
+            ] {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join("config.json");
+                fs::write(&file, source).unwrap();
+                let output = set(&file, path, &value, create);
+                assert!(
+                    !output.status.success(),
+                    "depth={depth}, path={path}, create={create}"
+                );
+                let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(response["error"]["type"], "invalid_request");
+                assert_eq!(fs::read_to_string(&file).unwrap(), source);
+            }
+        }
+    }
+}
