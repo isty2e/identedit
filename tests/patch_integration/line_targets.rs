@@ -463,8 +463,9 @@ fn patch_kind_name_replace_dry_run_diff_does_not_hide_trailing_newline_only_chan
         "raw text changes must not render as an empty diff"
     );
     assert!(diff.contains("@@ -1,2 +1,2 @@"));
-    assert!(diff.contains("-def sample():"));
-    assert!(diff.contains("+def sample():"));
+    assert!(diff.contains(" def sample():\n"));
+    assert!(diff.contains("-    return 1\n\\ No newline at end of file\n"));
+    assert!(diff.contains("+    return 1\n"));
     assert_eq!(
         fs::read_to_string(&file_path).expect("file should be readable"),
         source,

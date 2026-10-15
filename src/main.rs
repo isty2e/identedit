@@ -24,7 +24,12 @@ fn main() -> ExitCode {
 
     match cli::run_cli(cli) {
         Ok(output) => {
-            println!("{output}");
+            if !output.is_empty() {
+                print!("{output}");
+                if !output.ends_with('\n') {
+                    println!();
+                }
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {

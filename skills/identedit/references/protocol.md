@@ -27,6 +27,16 @@ Run `identedit <command> --help` for the complete flag surface. Identedit does n
 
 Consumers should parse documented JSON output rather than grep its rendered text. Capture stderr separately when command construction itself may be invalid.
 
+## Text diff previews
+
+`patch --dry-run --diff` compares the validated original and proposed full-file text, not isolated node spans. It shows actual surrounding indentation, combines edits into one diff per file, includes three context lines, and merges nearby hunks. No-op edits emit no diff. JSON output and edit semantics are unchanged.
+
+For portable replay, generate the diff using `--color never` and paths relative to the replay working directory, with no `..` components; run `patch -p0` from that same directory against the unchanged original. Identedit accepts absolute paths, but GNU patch can reject absolute or parent-traversing names in diff headers. CR bytes are preserved, including CRLF and mixed endings; missing final LF is marked with `\ No newline at end of file`. GNU patch also accepts `--binary`. Replay equivalence is to the proposed bytes, not a guarantee of valid syntax or behavior. Whole-file move previews are unsupported.
+
+Hunk coordinates count LF-delimited physical lines. Read anchors and resolved locations also recognize standalone CR as a terminator, so their line numbers can differ from hunk numbers. **Do not use hunk coordinates as edit anchors.**
+
+The renderer uses Myers alignment after trimming equal outer lines. If the unmatched inputs exceed fixed line-count or byte limits, it emits one exact trimmed replacement hunk with context. Output is never truncated and does not depend on elapsed-time deadlines; global minimality is not guaranteed. A dry-run snapshot does not reserve a later write: applying still rechecks normal preconditions.
+
 ## Resolved edit locations
 
 Successful edit execution and dry-run validation through `patch` or `apply` include a bounded `locations` object in JSON, in both default and verbose output. Discovery-only `patch --from-diff` keeps its candidate response instead:

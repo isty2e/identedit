@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::apply::{ApplyResponse, apply_multi_file_changeset, dry_run_multi_file_changeset};
+use crate::apply::{
+    ApplyResponse, apply_multi_file_changeset, dry_run_multi_file_changeset,
+    preview_multi_file_changeset,
+};
 use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget};
 use crate::cli::apply::shape_apply_response;
 use crate::cli::edit_intent::{NodeEditIntent, PreparedEditIntent};
@@ -15,7 +18,7 @@ use super::super::line_patch::{
     HashlinePatchExecution, HashlinePatchResponse, execute_hashline_patch,
     execute_hashline_patch_with_preview,
 };
-use super::diff::{render_changeset_diff, render_file_diff};
+use super::diff::render_file_diff;
 use super::{ColorMode, PatchArgs, PatchCommandOutput};
 
 #[derive(Debug, Clone, Copy)]
@@ -159,35 +162,34 @@ fn run_patch_edit_operation(
     execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
 ) -> Result<PatchCommandOutput, IdenteditError> {
-    let outcome = run_resolve_verify_apply(
+    run_resolve_verify_apply(
         || {
             let file_change = build_changeset(&file, vec![operation])?;
             Ok(wrap_single_file(file_change))
         },
         verify_prepared_changeset,
-        |changeset| {
-            let response = if execution.dry_run {
-                dry_run_multi_file_changeset(&changeset)
-            } else {
-                apply_multi_file_changeset(&changeset)
-            }?;
-            Ok::<_, IdenteditError>(PatchApplyOutcome {
-                changeset,
-                response,
-            })
+        |changeset| match execution.output {
+            PatchOutputMode::Diff { color } => {
+                let preview = preview_multi_file_changeset(&changeset)?;
+                Ok(PatchCommandOutput::Text(
+                    preview
+                        .files
+                        .iter()
+                        .map(|file| render_file_diff(&file.file, &file.before, &file.after, color))
+                        .collect(),
+                ))
+            }
+            PatchOutputMode::Json => {
+                let response = if execution.dry_run {
+                    dry_run_multi_file_changeset(&changeset)
+                } else {
+                    apply_multi_file_changeset(&changeset)
+                }?;
+                serialize_node_patch_response(response, execution.verbose, regex_replacements)
+                    .map(PatchCommandOutput::Json)
+            }
         },
-    )?;
-
-    match execution.output {
-        PatchOutputMode::Json => {
-            serialize_node_patch_response(outcome.response, execution.verbose, regex_replacements)
-                .map(PatchCommandOutput::Json)
-        }
-        PatchOutputMode::Diff { color } => Ok(PatchCommandOutput::Text(render_changeset_diff(
-            &outcome.changeset,
-            color,
-        )?)),
-    }
+    )
 }
 
 pub(super) fn run_patch_edit_operation_json(
@@ -279,11 +281,6 @@ pub(super) fn serialize_line_patch_response(
 ) -> Result<Value, IdenteditError> {
     serde_json::to_value(response)
         .map_err(|source| IdenteditError::ResponseSerialization { source })
-}
-
-struct PatchApplyOutcome {
-    changeset: MultiFileChangeset,
-    response: ApplyResponse,
 }
 
 fn render_line_patch_diff(execution: HashlinePatchExecution, color: ColorMode) -> String {

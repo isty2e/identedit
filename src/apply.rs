@@ -51,6 +51,17 @@ pub struct ApplyResponse {
     pub dry_run: Option<ApplyDryRunSummary>,
 }
 
+pub(crate) struct TextPreview {
+    pub file: std::path::PathBuf,
+    pub before: String,
+    pub after: String,
+}
+
+pub(crate) struct DryRunPreview {
+    pub response: ApplyResponse,
+    pub files: Vec<TextPreview>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ApplyFileResult {
     pub file: String,
@@ -197,6 +208,12 @@ pub(crate) fn apply_resolved_text_update(
 pub fn dry_run_multi_file_changeset(
     changeset: &MultiFileChangeset,
 ) -> Result<ApplyResponse, IdenteditError> {
+    Ok(preview_multi_file_changeset(changeset)?.response)
+}
+
+pub(crate) fn preview_multi_file_changeset(
+    changeset: &MultiFileChangeset,
+) -> Result<DryRunPreview, IdenteditError> {
     if changeset.files.is_empty() {
         return Err(IdenteditError::InvalidRequest {
             message: "changeset.files must contain at least one file".to_string(),
@@ -219,6 +236,7 @@ pub fn dry_run_multi_file_changeset(
     let locations = EditLocations::from_plans(&preflight_plans, &move_plans);
 
     let mut applied = Vec::with_capacity(preflight_plans.len() + move_plans.len());
+    let mut files = Vec::with_capacity(preflight_plans.len());
     for plan in preflight_plans {
         applied.push(ApplyFileResult {
             file: plan.file.display().to_string(),
@@ -226,6 +244,7 @@ pub fn dry_run_multi_file_changeset(
             operations_total: plan.operations_total,
             status: ApplyFileStatus::Applied,
         });
+        files.push(plan.into_text_preview());
     }
     for plan in move_plans {
         applied.push(ApplyFileResult {
@@ -243,12 +262,15 @@ pub fn dry_run_multi_file_changeset(
     };
     let dry_run = summarize_dry_run(&applied);
 
-    Ok(ApplyResponse {
-        applied,
-        summary,
-        transaction,
-        dry_run: Some(dry_run),
-        locations,
+    Ok(DryRunPreview {
+        response: ApplyResponse {
+            applied,
+            summary,
+            transaction,
+            dry_run: Some(dry_run),
+            locations,
+        },
+        files,
     })
 }
 

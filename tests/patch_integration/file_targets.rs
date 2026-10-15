@@ -82,7 +82,7 @@ fn patch_file_end_dry_run_diff_outputs_insert_preview_without_writing() {
         String::from_utf8_lossy(&output.stderr)
     );
     let diff = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(diff.contains("@@ -8,0 +8,2 @@"));
+    assert!(diff.contains("@@ -5,3 +5,5 @@"), "{diff}");
     assert!(diff.contains("+# epilogue"));
     assert_eq!(
         fs::read_to_string(&file_path).expect("file should be readable"),

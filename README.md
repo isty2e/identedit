@@ -132,7 +132,7 @@ identedit apply changeset.json
 ## Safety boundary
 
 - `edit` and `apply --dry-run` never modify files.
-- `patch --dry-run --diff` prints a unified diff without writing.
+- `patch --dry-run --diff` prints a unified diff of the validated before/after file text with three context lines, without writing. See [diff preview details](skills/identedit/references/protocol.md#text-diff-previews) for replay and newline behavior.
 - Failed-diff handoff discovers candidates but never applies them.
 - Line repair is opt-in and fails rather than choosing an ambiguous remap.
 - Identedit verifies edit preconditions, not semantic correctness. Run project-specific tests and linters after non-trivial edits.

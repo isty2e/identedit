@@ -37,6 +37,16 @@ pub(super) struct PreflightFilePlan {
     _lock_guard: ApplyFileLock,
 }
 
+impl PreflightFilePlan {
+    pub(super) fn into_text_preview(self) -> super::TextPreview {
+        super::TextPreview {
+            file: self.file,
+            before: self.original_text,
+            after: self.updated_text,
+        }
+    }
+}
+
 pub(super) fn preflight_changesets_in_order(
     changesets: &[FileChange],
     registry: &ProviderRegistry,
