@@ -11,6 +11,22 @@ use super::{
     span_from_node, unique_match,
 };
 
+mod create_missing;
+
+pub(in crate::patch::config_path) use create_missing::{
+    render_missing_json_object, rewrite_json_with_create_missing,
+};
+
+pub(in crate::patch::config_path) fn validate_json_set_value(
+    new_text: &str,
+) -> Result<(), IdenteditError> {
+    serde_json::from_str::<&serde_json::value::RawValue>(new_text)
+        .map(|_| ())
+        .map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("Config path set value must be a single valid JSON value: {error}"),
+        })
+}
+
 pub(in crate::patch::config_path) fn resolve_json_path(
     tree: &Tree,
     source: &[u8],
@@ -35,25 +51,11 @@ pub(in crate::patch::config_path) fn resolve_json_path(
                     ));
                 }
 
-                let mut matches = Vec::new();
-                for child in named_children(current) {
-                    if child.kind() != "pair" {
-                        continue;
-                    }
-                    let Some(key_node) = child.child_by_field_name("key") else {
-                        continue;
-                    };
-                    let Some(raw_key) = node_text(key_node, source) else {
-                        continue;
-                    };
-                    let decoded = decode_json_string(&raw_key)
-                        .unwrap_or_else(|| raw_key.trim_matches('"').to_string());
-                    if decoded == *expected_key {
-                        matches.push(child);
-                    }
-                }
-
-                let matched_pair = unique_match(raw_path, token, matches)?;
+                let matched_pair = unique_match(
+                    raw_path,
+                    token,
+                    matching_json_pairs(current, source, expected_key),
+                )?;
                 let value_node = matched_pair
                     .child_by_field_name("value")
                     .ok_or_else(|| IdenteditError::InvalidRequest {
@@ -164,4 +166,22 @@ pub(in crate::patch::config_path) fn json_root_value(root: Node<'_>) -> Option<N
 
 fn decode_json_string(text: &str) -> Option<String> {
     serde_json::from_str::<String>(text).ok()
+}
+
+fn matching_json_pairs<'tree>(
+    object: Node<'tree>,
+    source: &[u8],
+    expected_key: &str,
+) -> Vec<Node<'tree>> {
+    named_children(object)
+        .into_iter()
+        .filter(|child| {
+            child.kind() == "pair"
+                && child
+                    .child_by_field_name("key")
+                    .and_then(|key| node_text(key, source))
+                    .and_then(|raw| decode_json_string(&raw))
+                    .is_some_and(|key| key == expected_key)
+        })
+        .collect()
 }

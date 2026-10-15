@@ -12,7 +12,10 @@ mod placement;
 mod toml;
 mod yaml;
 
-pub(super) use json::{json_root_value, resolve_json_path};
+pub(super) use json::{
+    json_root_value, render_missing_json_object, resolve_json_path,
+    rewrite_json_with_create_missing, validate_json_set_value,
+};
 pub(super) use toml::{resolve_toml_path, rewrite_toml_with_comment_preserving_create_missing};
 pub(super) use yaml::{
     reject_yaml_implicit_null_single_line_value, render_yaml_comment_only_create_missing_insertion,
