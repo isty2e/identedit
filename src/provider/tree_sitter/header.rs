@@ -1,14 +1,13 @@
-use std::path::Path;
+use tree_sitter::Tree;
 
 use crate::error::IdenteditError;
-use crate::handle::SelectionHandle;
 use crate::provider::normalize_bare_cr_for_parser;
 
 use super::catalog::{
     C_CPP_HEADER_PROVIDER_NAME, C_CPP_HEADER_SYNTAX_ERROR_MESSAGE, c_language_spec,
     cpp_language_spec,
 };
-use super::parser::{collect_nodes, parse_tree_from_source};
+use super::parser::parse_tree_from_source;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HeaderDialect {
@@ -17,9 +16,8 @@ pub(super) enum HeaderDialect {
 }
 
 pub(super) fn parse_c_cpp_header_with_dialect(
-    path: &Path,
     source: &[u8],
-) -> Result<(Vec<SelectionHandle>, HeaderDialect), IdenteditError> {
+) -> Result<(Tree, HeaderDialect), IdenteditError> {
     let parse_source = normalize_bare_cr_for_parser(source);
     debug_assert_eq!(parse_source.len(), source.len());
 
@@ -33,11 +31,11 @@ pub(super) fn parse_c_cpp_header_with_dialect(
     let c_has_error = c_tree.root_node().has_error();
 
     let (selected_tree, dialect) = match (cpp_has_error, c_has_error) {
-        (false, true) => (&cpp_tree, HeaderDialect::Cpp),
-        (true, false) => (&c_tree, HeaderDialect::C),
+        (false, true) => (cpp_tree, HeaderDialect::Cpp),
+        (true, false) => (c_tree, HeaderDialect::C),
         (false, false) => {
             // TODO: Replace this with content-based heuristics for ambiguous headers.
-            (&cpp_tree, HeaderDialect::Cpp)
+            (cpp_tree, HeaderDialect::Cpp)
         }
         (true, true) => {
             return Err(IdenteditError::ParseFailure {
@@ -47,7 +45,5 @@ pub(super) fn parse_c_cpp_header_with_dialect(
         }
     };
 
-    let mut handles = Vec::new();
-    collect_nodes(selected_tree.root_node(), path, source, &mut handles);
-    Ok((handles, dialect))
+    Ok((selected_tree, dialect))
 }

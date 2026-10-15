@@ -4,12 +4,16 @@ use tree_sitter::{Node, Parser};
 
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
-use crate::provider::{StructureProvider, node_text};
+use crate::provider::{ParsedSource, StructureProvider, node_text};
 
 pub struct JsonProvider;
 
 impl StructureProvider for JsonProvider {
-    fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
+    fn parse_source<'source>(
+        &self,
+        _path: &Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
         let mut parser = Parser::new();
         let language = tree_sitter_json::LANGUAGE;
 
@@ -33,9 +37,7 @@ impl StructureProvider for JsonProvider {
             });
         }
 
-        let mut handles = Vec::new();
-        collect_json_nodes(tree.root_node(), path, source, None, &mut handles);
-        Ok(handles)
+        Ok(ParsedSource::json(tree, source))
     }
 
     fn supports_syntax_validation(&self) -> bool {
@@ -55,6 +57,16 @@ impl StructureProvider for JsonProvider {
     fn supported_extensions(&self) -> &'static [&'static str] {
         &["json"]
     }
+}
+
+pub(super) fn collect_handles(
+    tree: tree_sitter::Tree,
+    path: &Path,
+    source: &[u8],
+) -> Vec<SelectionHandle> {
+    let mut handles = Vec::new();
+    collect_json_nodes(tree.root_node(), path, source, None, &mut handles);
+    handles
 }
 
 fn collect_json_nodes(

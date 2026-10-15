@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
-use crate::provider::StructureProvider;
+use crate::provider::{ParsedSource, StructureProvider};
 
 mod boundary;
 mod brace_lex;
@@ -19,7 +19,11 @@ use source_lines::collect_lines;
 pub struct FallbackProvider;
 
 impl StructureProvider for FallbackProvider {
-    fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
+    fn parse_source<'source>(
+        &self,
+        path: &Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
         let source_text =
             std::str::from_utf8(source).map_err(|_| IdenteditError::ParseFailure {
                 provider: self.name(),
@@ -58,7 +62,7 @@ impl StructureProvider for FallbackProvider {
             ));
         }
 
-        Ok(handles)
+        Ok(ParsedSource::from_handles(handles))
     }
 
     fn supports_syntax_validation(&self) -> bool {

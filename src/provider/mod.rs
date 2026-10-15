@@ -6,11 +6,13 @@ use crate::handle::SelectionHandle;
 
 mod fallback;
 mod json;
+mod parsed_source;
 mod tree_sitter;
 mod util;
 
 pub use fallback::FallbackProvider;
 pub use json::JsonProvider;
+pub use parsed_source::ParsedSource;
 pub use tree_sitter::{HeaderTreeSitterProvider, TreeSitterProvider};
 pub(crate) use util::{node_text, normalize_bare_cr_for_parser};
 
@@ -25,7 +27,17 @@ pub(crate) fn normalize_extension(value: &str) -> Option<String> {
 }
 
 pub trait StructureProvider {
-    fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError>;
+    fn parse_source<'source>(
+        &self,
+        path: &Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError>;
+
+    fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
+        self.parse_source(path, source)
+            .map(|parsed| parsed.into_handles(path))
+    }
+
     /// Whether `parse` rejects provider-detected syntax errors, not compiler errors.
     fn supports_syntax_validation(&self) -> bool;
     fn can_handle(&self, path: &Path) -> bool;
@@ -105,9 +117,8 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
 
-    use super::{ProviderRegistry, StructureProvider};
+    use super::{ParsedSource, ProviderRegistry, StructureProvider};
     use crate::error::IdenteditError;
-    use crate::handle::SelectionHandle;
 
     struct StubProvider {
         provider_name: &'static str,
@@ -115,12 +126,12 @@ mod tests {
     }
 
     impl StructureProvider for StubProvider {
-        fn parse(
+        fn parse_source<'source>(
             &self,
             _path: &Path,
-            _source: &[u8],
-        ) -> Result<Vec<SelectionHandle>, IdenteditError> {
-            Ok(Vec::new())
+            _source: &'source [u8],
+        ) -> Result<ParsedSource<'source>, IdenteditError> {
+            Ok(ParsedSource::from_handles(Vec::new()))
         }
 
         fn supports_syntax_validation(&self) -> bool {

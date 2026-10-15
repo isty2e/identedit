@@ -7,7 +7,7 @@ use tempfile::tempdir;
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
-use crate::provider::{ProviderRegistry, StructureProvider, TreeSitterProvider};
+use crate::provider::{ParsedSource, ProviderRegistry, StructureProvider, TreeSitterProvider};
 use crate::transform::build::build_changeset;
 
 use super::super::preflight_changesets_in_order;
@@ -15,19 +15,31 @@ use super::super::preflight_changesets_in_order;
 struct ObservedProvider {
     inner: TreeSitterProvider,
     calls: Rc<Cell<usize>>,
+    handle_projections: Rc<Cell<usize>>,
     validates_syntax: bool,
     fail_result_setup: bool,
 }
 
 impl StructureProvider for ObservedProvider {
     fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
+        self.handle_projections
+            .set(self.handle_projections.get() + 1);
+        self.parse_source(path, source)
+            .map(|parsed| parsed.into_handles(path))
+    }
+
+    fn parse_source<'source>(
+        &self,
+        path: &Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
         self.calls.set(self.calls.get() + 1);
         if self.fail_result_setup && self.calls.get() > 1 {
             return Err(IdenteditError::LanguageSetup {
                 message: "result parser setup failed".to_string(),
             });
         }
-        self.inner.parse(path, source)
+        self.inner.parse_source(path, source)
     }
 
     fn supports_syntax_validation(&self) -> bool {
@@ -55,9 +67,48 @@ fn registry(
     ProviderRegistry::from_providers(vec![Box::new(ObservedProvider {
         inner: TreeSitterProvider::python(),
         calls: Rc::clone(calls),
+        handle_projections: Rc::new(Cell::new(0)),
         validates_syntax,
         fail_result_setup,
     })])
+}
+
+#[test]
+fn final_validation_does_not_project_selection_handles() {
+    let root = tempdir().unwrap();
+    let file = super::create_python_target(root.path());
+    let before = std::fs::read(&file).unwrap();
+    let handles = TreeSitterProvider::python().parse(&file, &before).unwrap();
+    let target = handles
+        .iter()
+        .find(|handle| handle.name.as_deref() == Some("process_data"))
+        .unwrap();
+    let changeset = crate::transform::build::build_replace_changeset(
+        &file,
+        &target.identity,
+        target.text.clone(),
+    )
+    .unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let handle_projections = Rc::new(Cell::new(0));
+    let registry = ProviderRegistry::from_providers(vec![Box::new(ObservedProvider {
+        inner: TreeSitterProvider::python(),
+        calls: Rc::clone(&calls),
+        handle_projections: Rc::clone(&handle_projections),
+        validates_syntax: true,
+        fail_result_setup: false,
+    })]);
+
+    let plans = preflight_changesets_in_order(&[changeset], &registry).unwrap();
+
+    assert_eq!(calls.get(), 2, "source and result still need parsing");
+    assert_eq!(
+        handle_projections.get(),
+        1,
+        "only source handles are needed"
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    drop(plans);
 }
 
 #[test]
