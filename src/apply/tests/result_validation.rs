@@ -25,12 +25,12 @@ impl StructureProvider for ObservedProvider {
         self.handle_projections
             .set(self.handle_projections.get() + 1);
         self.parse_source(path, source)
-            .map(|parsed| parsed.into_handles(path))
+            .map(ParsedSource::into_handles)
     }
 
     fn parse_source<'source>(
         &self,
-        path: &Path,
+        path: &'source Path,
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError> {
         self.calls.set(self.calls.get() + 1);

@@ -109,11 +109,11 @@ fn normalize_basename_alias(value: &str) -> Option<String> {
 impl StructureProvider for HeaderTreeSitterProvider {
     fn parse_source<'source>(
         &self,
-        _path: &Path,
+        path: &'source Path,
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError> {
         let (tree, _) = parse_c_cpp_header_with_dialect(source)?;
-        Ok(ParsedSource::tree_sitter(tree, source))
+        Ok(ParsedSource::tree_sitter(path, tree, source))
     }
 
     fn supports_syntax_validation(&self) -> bool {
@@ -148,11 +148,11 @@ impl StructureProvider for HeaderTreeSitterProvider {
 impl StructureProvider for TreeSitterProvider {
     fn parse_source<'source>(
         &self,
-        _path: &Path,
+        path: &'source Path,
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError> {
         let tree = parse_with_spec(self.spec, source)?;
-        Ok(ParsedSource::tree_sitter(tree, source))
+        Ok(ParsedSource::tree_sitter(path, tree, source))
     }
 
     fn supports_syntax_validation(&self) -> bool {
@@ -314,7 +314,7 @@ mod tests {
         let parsed = provider.parse_source(path, source).unwrap();
         assert_eq!(PROJECTION_LOADS.load(Ordering::SeqCst), 1);
 
-        let handles = parsed.into_handles(path);
+        let handles = parsed.into_handles();
 
         assert_eq!(PROJECTION_LOADS.load(Ordering::SeqCst), 1);
         let function = handles

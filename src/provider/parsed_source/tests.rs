@@ -6,6 +6,39 @@ use crate::hash::hash_text;
 use crate::provider::{JsonProvider, ProviderRegistry, StructureProvider};
 
 #[test]
+fn deferred_projection_keeps_each_sources_file() {
+    let registry = ProviderRegistry::default();
+    for (extension, source) in [
+        ("py", "def first():\n    return 1\n"),
+        ("json", "{\"first\":1}\n"),
+        ("h", "int first(int value);\n"),
+        ("unknown", "function first() { return 1; }\n"),
+    ] {
+        let first_path = std::path::PathBuf::from(format!("first.{extension}"));
+        let second_path = std::path::PathBuf::from(format!("second.{extension}"));
+        let provider = registry.provider_for(&first_path).unwrap();
+        let first = provider
+            .parse_source(&first_path, source.as_bytes())
+            .unwrap();
+        let second = provider
+            .parse_source(&second_path, source.as_bytes())
+            .unwrap();
+
+        let second_handles = second.into_handles();
+        let first_handles = first.into_handles();
+
+        assert!(!first_handles.is_empty());
+        assert!(!second_handles.is_empty());
+        assert!(first_handles.iter().all(|handle| handle.file == first_path));
+        assert!(
+            second_handles
+                .iter()
+                .all(|handle| handle.file == second_path)
+        );
+    }
+}
+
+#[test]
 fn deferred_handles_preserve_original_bytes_and_metadata() {
     let cases: &[(&str, &str)] = &[
         ("fixture.py", "def first(value):\n    return value + 1\n"),
@@ -35,7 +68,7 @@ fn deferred_handles_preserve_original_bytes_and_metadata() {
         let path = Path::new(file);
         let provider = registry.provider_for(path).unwrap();
         let parsed = provider.parse_source(path, source.as_bytes()).unwrap();
-        let handles = parsed.into_handles(path);
+        let handles = parsed.into_handles();
 
         assert!(!handles.is_empty(), "{file}");
         for handle in handles {
@@ -55,7 +88,7 @@ fn deferred_json_projection_preserves_decoding_and_duplicate_occurrences() {
     let path = Path::new("fixture.json");
     let source = br#"{"outer.part":{"inner::key":true,"inner::key":false},"a\u0062":1}"#;
     let parsed = JsonProvider.parse_source(path, source).unwrap();
-    let handles = parsed.into_handles(path);
+    let handles = parsed.into_handles();
     let booleans = handles
         .iter()
         .filter(|handle| handle.kind == "boolean")
@@ -101,7 +134,7 @@ fn source_observations_preserve_rejection_and_fallback_noncoverage() {
         fallback
             .parse_source(path, b"plain text\n")
             .unwrap()
-            .into_handles(path)
+            .into_handles()
             .is_empty()
     );
     assert!(matches!(

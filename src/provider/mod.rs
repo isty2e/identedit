@@ -29,13 +29,13 @@ pub(crate) fn normalize_extension(value: &str) -> Option<String> {
 pub trait StructureProvider {
     fn parse_source<'source>(
         &self,
-        path: &Path,
+        path: &'source Path,
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError>;
 
     fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
         self.parse_source(path, source)
-            .map(|parsed| parsed.into_handles(path))
+            .map(ParsedSource::into_handles)
     }
 
     /// Whether `parse` rejects provider-detected syntax errors, not compiler errors.
@@ -128,7 +128,7 @@ mod tests {
     impl StructureProvider for StubProvider {
         fn parse_source<'source>(
             &self,
-            _path: &Path,
+            _path: &'source Path,
             _source: &'source [u8],
         ) -> Result<ParsedSource<'source>, IdenteditError> {
             Ok(ParsedSource::from_handles(Vec::new()))

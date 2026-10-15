@@ -21,7 +21,7 @@ pub struct FallbackProvider;
 impl StructureProvider for FallbackProvider {
     fn parse_source<'source>(
         &self,
-        path: &Path,
+        path: &'source Path,
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError> {
         let source_text =

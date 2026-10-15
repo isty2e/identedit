@@ -11,7 +11,7 @@ pub struct JsonProvider;
 impl StructureProvider for JsonProvider {
     fn parse_source<'source>(
         &self,
-        _path: &Path,
+        path: &'source Path,
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError> {
         let mut parser = Parser::new();
@@ -37,7 +37,7 @@ impl StructureProvider for JsonProvider {
             });
         }
 
-        Ok(ParsedSource::json(tree, source))
+        Ok(ParsedSource::json(path, tree, source))
     }
 
     fn supports_syntax_validation(&self) -> bool {

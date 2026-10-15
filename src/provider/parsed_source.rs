@@ -10,21 +10,29 @@ pub struct ParsedSource<'source> {
 }
 
 enum Representation<'source> {
-    TreeSitter { tree: Tree, source: &'source [u8] },
-    Json { tree: Tree, source: &'source [u8] },
+    TreeSitter {
+        path: &'source Path,
+        tree: Tree,
+        source: &'source [u8],
+    },
+    Json {
+        path: &'source Path,
+        tree: Tree,
+        source: &'source [u8],
+    },
     Handles(Vec<SelectionHandle>),
 }
 
 impl<'source> ParsedSource<'source> {
-    pub(super) fn tree_sitter(tree: Tree, source: &'source [u8]) -> Self {
+    pub(super) fn tree_sitter(path: &'source Path, tree: Tree, source: &'source [u8]) -> Self {
         Self {
-            representation: Representation::TreeSitter { tree, source },
+            representation: Representation::TreeSitter { path, tree, source },
         }
     }
 
-    pub(super) fn json(tree: Tree, source: &'source [u8]) -> Self {
+    pub(super) fn json(path: &'source Path, tree: Tree, source: &'source [u8]) -> Self {
         Self {
-            representation: Representation::Json { tree, source },
+            representation: Representation::Json { path, tree, source },
         }
     }
 
@@ -34,12 +42,12 @@ impl<'source> ParsedSource<'source> {
         }
     }
 
-    pub fn into_handles(self, path: &Path) -> Vec<SelectionHandle> {
+    pub fn into_handles(self) -> Vec<SelectionHandle> {
         match self.representation {
-            Representation::TreeSitter { tree, source } => {
+            Representation::TreeSitter { path, tree, source } => {
                 super::tree_sitter::collect_handles(tree, path, source)
             }
-            Representation::Json { tree, source } => {
+            Representation::Json { path, tree, source } => {
                 super::json::collect_handles(tree, path, source)
             }
             Representation::Handles(handles) => handles,
