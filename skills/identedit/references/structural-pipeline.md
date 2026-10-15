@@ -183,7 +183,7 @@ Request payload must include exactly one shape:
 | `insert_after` | `node` | Insert text immediately after a structure |
 | `move_before` | `node` source + dest | Move source node to just before destination node |
 | `move_after` | `node` source + dest | Move source node to just after destination node |
-| `scoped_regex` | `node` | Regex replace within the node's text |
+| `scoped_regex` | `node` | Raw regex replace within the node's text, including strings and comments; not a symbol-aware rename |
 | `insert` | `file_start` | Insert text at beginning of file |
 | `insert` | `file_end` | Insert text at end of file |
 

@@ -15,7 +15,7 @@ Use for repeated targets, context-mismatch recovery, config paths, precondition-
 |---|---|---|
 | Inspect one symbol and nearby code, with edit-ready addresses | `read file --symbol Class.method --context 3` | [Symbols](#function-or-method) |
 | Replace a function by name, without looking up an identity | `patch file --symbol Class.method --replace --text-file body.txt` | [Symbols](#function-or-method) |
-| Change text only inside one function/class | `patch file --symbol name --scoped-regex 'old' --scoped-replacement 'new'` | [Symbols](#function-or-method) |
+| Regex-replace raw text inside one function/class | `patch file --symbol name --scoped-regex 'old' --scoped-replacement 'new'` | [Symbols](#function-or-method) |
 | Edit an exact line/range among repeated text | `read --mode line file`, then `patch file --at "LINE:HASH" --replace 'new text'` | [Lines](#exact-line-or-range) |
 | Preview a patch without writing | Add `--dry-run --diff` | [Preview](#text-preview-and-verification) |
 | Supply multiline text without shell escaping | `--text-file body.txt` or `--stdin-text` | [Text input](#text-preview-and-verification) |
@@ -46,12 +46,14 @@ The first line starts at `def`; subsequent lines retain their intended file inde
 
 `identedit read src/example.py --symbol Processor.process_data --context 3` shows the complete symbol and up to three surrounding lines per side. Copy the identity after `# node --at` for a node edit. Context is labeled separately; boundary lines may extend beyond the node span. Use `--json --verbose` for the exact raw node `text`. For line edits, copy a `LINE:HASH` and preserve indentation after the `|` marker.
 
-To change text only inside a symbol:
+To regex-replace raw text inside a symbol:
 
 ```bash
 identedit patch src/example.py --symbol Processor.process_data \
   --scoped-regex 'old_name' --scoped-replacement 'new_name'
 ```
+
+The node only bounds the search: matching text in identifiers, strings, and comments is replaced. This is not a symbol-aware rename.
 
 Already have a node identity? Use `--at <identity-hex16>` instead of `--symbol`. For kind-specific glob matching, use `--kind function_definition --name 'process_*'`.
 
