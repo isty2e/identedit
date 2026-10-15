@@ -97,6 +97,46 @@ fn unchanged_line_preview_is_empty() {
 }
 
 #[test]
+fn colored_cli_diff_has_identical_line_endings_to_plain_output() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("sample.txt");
+    let ansi = regex::Regex::new("\x1b\\[[0-9;]*m").unwrap();
+    let anchor = format!("1:{}", common::compute_line_hash("old"));
+    for source in ["old\n", "old\r\n", "old"] {
+        fs::write(&file, source).unwrap();
+        let render = |color: &str| {
+            let output = Command::new(env!("CARGO_BIN_EXE_identedit"))
+                .current_dir(root.path())
+                .args([
+                    "patch",
+                    "sample.txt",
+                    "--at",
+                    &anchor,
+                    "--replace",
+                    "new",
+                    "--dry-run",
+                    "--diff",
+                    "--color",
+                    color,
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let plain = render("never");
+        let colored = render("always");
+        assert_eq!(ansi.replace_all(&colored, ""), plain, "{source:?}");
+        assert!(!colored.contains("\n\x1b[0m"));
+        assert_eq!(fs::read_to_string(&file).unwrap(), source);
+    }
+}
+
+#[test]
 fn config_preview_includes_actual_json_create_missing_reserialization() {
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("sample.json");
@@ -302,6 +342,18 @@ fn external_patch_replays_cli_previews_to_the_actual_apply_bytes() {
             replacement.trim_end_matches('\n'),
         ],
     );
+    assert_external_round_trip(
+        &tool,
+        is_gnu,
+        "nested/sample.txt",
+        "old\r\n",
+        &[
+            "--at",
+            &format!("1:{}", common::compute_line_hash("old")),
+            "--replace",
+            "new",
+        ],
+    );
 }
 
 fn assert_external_round_trip(
@@ -316,6 +368,7 @@ fn assert_external_round_trip(
 
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join(name);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
     fs::write(&file, before).unwrap();
     let args: Vec<_> = std::iter::once(name)
         .chain(options.iter().copied())

@@ -11,7 +11,6 @@ const GREEN: &str = "\x1b[32m";
 const CYAN: &str = "\x1b[36m";
 const CONTEXT_LINES: usize = 3;
 const MAX_ALIGNMENT_LINES: usize = 20_000;
-const MAX_ALIGNMENT_CELLS: usize = 100_000_000;
 const MAX_ALIGNMENT_BYTES: usize = 8 * 1024 * 1024;
 
 pub(super) fn render_file_diff(file: &Path, before: &str, after: &str, color: ColorMode) -> String {
@@ -117,7 +116,6 @@ fn aligned_ops(old: &[&str], new: &[&str]) -> Vec<DiffOp> {
 
 fn alignment_within_budget(old: &[&str], new: &[&str]) -> bool {
     old.len().saturating_add(new.len()) <= MAX_ALIGNMENT_LINES
-        && old.len().saturating_mul(new.len()) <= MAX_ALIGNMENT_CELLS
         && old
             .iter()
             .chain(new)
@@ -127,9 +125,17 @@ fn alignment_within_budget(old: &[&str], new: &[&str]) -> bool {
 
 fn render_colored(output: &mut String, text: &str, color: &str, enabled: bool) {
     if enabled && !color.is_empty() {
+        let (content, terminator) = if let Some(content) = text.strip_suffix("\r\n") {
+            (content, "\r\n")
+        } else if let Some(content) = text.strip_suffix('\n') {
+            (content, "\n")
+        } else {
+            (text, "")
+        };
         output.push_str(color);
-        output.push_str(text);
+        output.push_str(content);
         output.push_str(RESET);
+        output.push_str(terminator);
     } else {
         output.push_str(text);
     }

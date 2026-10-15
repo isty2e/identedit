@@ -159,6 +159,20 @@ fn color_is_optional_without_changing_payload_bytes() {
 }
 
 #[test]
+fn color_reset_precedes_the_physical_line_terminator() {
+    for (text, expected) in [
+        ("+new\n", "\x1b[32m+new\x1b[0m\n"),
+        ("+new\r\n", "\x1b[32m+new\x1b[0m\r\n"),
+        ("+new", "\x1b[32m+new\x1b[0m"),
+        ("+new\r", "\x1b[32m+new\r\x1b[0m"),
+    ] {
+        let mut output = String::new();
+        render_colored(&mut output, text, GREEN, true);
+        assert_eq!(output, expected);
+    }
+}
+
+#[test]
 fn largest_admitted_disjoint_rewrite_replays_exactly() {
     let before: String = (0..MAX_ALIGNMENT_LINES / 2)
         .map(|n| format!("old {n}\n"))

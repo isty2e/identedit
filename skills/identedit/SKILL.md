@@ -98,7 +98,7 @@ identedit patch example.py --symbol target_fn --replace --stdin-text < /tmp/new_
 
 For a non-trivial patch, run the same request with `--dry-run --diff`, inspect the unified diff, then rerun without those flags to apply it. The preview does not write; plain `patch` does.
 
-Diffs show actual validated file bytes, including surrounding indentation, with three context lines. No-ops emit no diff; very large changes may use one non-minimal hunk. For replay use `--color never`. Hunk numbers count LF lines, not read anchors (which also count standalone CR); never copy hunk coordinates as anchors. Preview does not reserve a later write or validate syntax.
+Diffs show actual validated file bytes, including surrounding indentation, with three context lines. No-ops emit no diff; very large changes may use one non-minimal hunk. For portable replay, use `--color never` and paths relative to the replay directory, without `..` components. Hunk numbers count LF lines, not read anchors (which also count standalone CR); never copy hunk coordinates as anchors. Preview does not reserve a later write or validate syntax.
 
 For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
 
