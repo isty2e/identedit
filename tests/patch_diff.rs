@@ -137,7 +137,7 @@ fn colored_cli_diff_has_identical_line_endings_to_plain_output() {
 }
 
 #[test]
-fn config_preview_includes_actual_json_create_missing_reserialization() {
+fn config_preview_shows_only_the_local_json_member_insertion() {
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("sample.json");
     let source = "{\"zeta\": 1, \"alpha\": {}}\n";
@@ -155,9 +155,11 @@ fn config_preview_includes_actual_json_create_missing_reserialization() {
     assert_eq!(fs::read_to_string(&file).unwrap(), source);
     patch(root.path(), &args, false);
     let updated = fs::read_to_string(&file).unwrap();
+    assert_eq!(updated, "{\"zeta\": 1, \"alpha\": {\"enabled\":true}}\n");
     for line in updated.split_inclusive('\n') {
         assert!(diff.contains(&format!("+{line}")), "{diff}");
     }
+    assert_eq!(diff.lines().count(), 5, "{diff}");
 }
 
 #[test]

@@ -1,36 +1,6 @@
 use crate::error::IdenteditError;
 use crate::handle::Span;
 
-use super::syntax::{PathToken, expected_path_container_error};
-
-pub(super) fn render_json_with_create_missing(
-    source_text: &str,
-    path_tokens: &[PathToken],
-    raw_path: &str,
-    new_text: &str,
-) -> Result<String, IdenteditError> {
-    let mut root: serde_json::Value = if source_text.trim().is_empty() {
-        serde_json::Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(source_text).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!("Config path create-missing could not parse JSON document: {error}"),
-        })?
-    };
-    let parsed_new_value: serde_json::Value =
-        serde_json::from_str(new_text).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!("Config path set value is not valid JSON: {error}"),
-        })?;
-    apply_json_set_create_missing(&mut root, path_tokens, raw_path, &parsed_new_value)?;
-
-    let rendered =
-        serde_json::to_string_pretty(&root).map_err(|error| IdenteditError::InvalidRequest {
-            message: format!(
-                "Config path create-missing could not serialize JSON document: {error}"
-            ),
-        })?;
-    Ok(apply_source_line_ending_style(&rendered, source_text))
-}
-
 pub(super) fn parse_toml_value_fragment(fragment: &str) -> Result<toml::Value, IdenteditError> {
     let wrapped = format!("__identedit_tmp__ = {fragment}");
     let mut table: toml::Table =
@@ -99,88 +69,6 @@ pub(super) fn append_requires_array_error(raw_path: &str, actual_kind: &str) -> 
         message: format!(
             "Config path '{raw_path}' append requires an array/sequence target, found node kind '{actual_kind}'"
         ),
-    }
-}
-
-fn apply_json_set_create_missing(
-    current: &mut serde_json::Value,
-    path_tokens: &[PathToken],
-    raw_path: &str,
-    new_value: &serde_json::Value,
-) -> Result<(), IdenteditError> {
-    let Some((head, tail)) = path_tokens.split_first() else {
-        *current = new_value.clone();
-        return Ok(());
-    };
-
-    match head {
-        PathToken::Key(key) => {
-            let object = match current {
-                serde_json::Value::Object(object) => object,
-                _ => {
-                    return Err(expected_path_container_error(
-                        raw_path,
-                        head,
-                        json_value_kind_name(current),
-                    ));
-                }
-            };
-            if tail.is_empty() {
-                object.insert(key.clone(), new_value.clone());
-                return Ok(());
-            }
-            if !object.contains_key(key) {
-                object.insert(key.clone(), empty_json_container_for_token(&tail[0]));
-            }
-            let child = object
-                .get_mut(key)
-                .ok_or_else(|| IdenteditError::InvalidRequest {
-                    message: format!("Config path '{raw_path}' segment '{key}' was not found"),
-                })?;
-            apply_json_set_create_missing(child, tail, raw_path, new_value)
-        }
-        PathToken::Index(index) => {
-            let array = match current {
-                serde_json::Value::Array(array) => array,
-                _ => {
-                    return Err(expected_path_container_error(
-                        raw_path,
-                        head,
-                        json_value_kind_name(current),
-                    ));
-                }
-            };
-            if *index >= array.len() {
-                return Err(array_index_out_of_bounds_error(
-                    raw_path,
-                    *index,
-                    array.len(),
-                ));
-            }
-            if tail.is_empty() {
-                array[*index] = new_value.clone();
-                return Ok(());
-            }
-            apply_json_set_create_missing(&mut array[*index], tail, raw_path, new_value)
-        }
-    }
-}
-
-fn empty_json_container_for_token(next: &PathToken) -> serde_json::Value {
-    match next {
-        PathToken::Key(_) => serde_json::Value::Object(serde_json::Map::new()),
-        PathToken::Index(_) => serde_json::Value::Array(Vec::new()),
-    }
-}
-
-fn json_value_kind_name(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
     }
 }
 
@@ -308,24 +196,6 @@ fn line_ending_literal(source_text: &str) -> &'static str {
         LineEndingStyle::Lf => "\n",
         LineEndingStyle::Crlf => "\r\n",
         LineEndingStyle::Cr => "\r",
-    }
-}
-
-fn apply_source_line_ending_style(rendered: &str, source_text: &str) -> String {
-    let style = detect_line_ending_style(source_text);
-    let had_trailing_newline = source_text.ends_with('\n') || source_text.ends_with('\r');
-
-    let mut normalized = rendered.replace("\r\n", "\n").replace('\r', "\n");
-    if !had_trailing_newline {
-        while normalized.ends_with('\n') {
-            normalized.pop();
-        }
-    }
-
-    match style {
-        LineEndingStyle::Lf => normalized,
-        LineEndingStyle::Crlf => normalized.replace('\n', "\r\n"),
-        LineEndingStyle::Cr => normalized.replace('\n', "\r"),
     }
 }
 

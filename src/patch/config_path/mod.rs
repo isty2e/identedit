@@ -12,13 +12,14 @@ mod resolve;
 mod safety;
 mod syntax;
 
-use render::{render_append_array_replacement, render_json_with_create_missing};
+use render::render_append_array_replacement;
 use resolve::{
     ResolvedContainerEdit, find_handle_for_span, json_root_value,
-    reject_yaml_implicit_null_single_line_value, render_yaml_comment_only_create_missing_insertion,
-    resolve_json_path, resolve_toml_path, resolve_yaml_path, rewrite_container_text,
-    rewrite_full_source_text, rewrite_toml_with_comment_preserving_create_missing,
-    rewrite_yaml_with_comment_preserving_create_missing, span_from_node,
+    reject_yaml_implicit_null_single_line_value, render_missing_json_object,
+    render_yaml_comment_only_create_missing_insertion, resolve_json_path, resolve_toml_path,
+    resolve_yaml_path, rewrite_container_text, rewrite_full_source_text,
+    rewrite_json_with_create_missing, rewrite_toml_with_comment_preserving_create_missing,
+    rewrite_yaml_with_comment_preserving_create_missing, span_from_node, validate_json_set_value,
     yaml_document_root_value_at, yaml_root_value, yaml_set_value_replace_span,
     yaml_set_value_replacement_text, yaml_single_line_value_with_trailing_line_endings,
 };
@@ -97,6 +98,12 @@ pub fn resolve_config_path_operation(
     }
     let path_tokens = parse_config_path(raw_path)?;
 
+    if let ConfigPathOperation::Set { new_text, .. } = &operation
+        && matches!(format, ConfigFormat::Json)
+    {
+        validate_json_set_value(new_text)?;
+    }
+
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
@@ -104,7 +111,8 @@ pub fn resolve_config_path_operation(
         && matches!(format, ConfigFormat::Json)
         && json_effectively_empty_source(source_text)
     {
-        let updated = render_json_with_create_missing("", &path_tokens, raw_path, new_text)?;
+        let updated = render_missing_json_object(&path_tokens, raw_path, new_text)?;
+        validate_rendered_config_document(&format, "", &updated)?;
         let target = if source.is_empty() {
             TransformTarget::FileStart {
                 expected_file_hash: hash_bytes(&source),
@@ -448,7 +456,8 @@ fn resolve_config_path_set_with_create_missing(
         }
     }
     let updated_root_text = match request.format {
-        ConfigFormat::Json => render_json_with_create_missing(
+        ConfigFormat::Json => rewrite_json_with_create_missing(
+            request.tree,
             request.source_text,
             request.path_tokens,
             request.raw_path,
@@ -491,17 +500,6 @@ fn resolve_config_path_set_with_create_missing(
         &updated_root_text
     };
     validate_rendered_config_document(request.format, request.source_text, validation_source)?;
-
-    if matches!(request.format, ConfigFormat::Json) && request.source.is_empty() {
-        return Ok(EditOperation::try_new(
-            TransformTarget::FileStart {
-                expected_file_hash: hash_bytes(request.source),
-            },
-            OpKind::Insert {
-                new_text: updated_root_text,
-            },
-        )?);
-    }
 
     if matches!(request.format, ConfigFormat::Toml)
         && toml_effectively_empty_source(request.source_text)
@@ -594,7 +592,11 @@ fn toml_effectively_empty_source(source_text: &str) -> bool {
 }
 
 fn json_effectively_empty_source(source_text: &str) -> bool {
-    source_text.trim().is_empty()
+    source_text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(source_text)
+        .bytes()
+        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
 }
 
 fn yaml_effectively_empty_source(source_text: &str) -> bool {
