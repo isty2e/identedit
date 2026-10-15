@@ -44,6 +44,8 @@ def process_data(self, x, y):
 
 The first line starts at `def`; subsequent lines retain their intended file indentation. No dedent or reindent is performed. Decorators and comments outside the selected span stay untouched.
 
+Node payloads from `--text-file` or `--stdin-text` are inserted verbatim, including any final newline. That newline can split an existing line, add a blank line before a preserved source newline, or terminate an unterminated last line. Omit the payload's final newline unless that effect is intended.
+
 `identedit read src/example.py --symbol Processor.process_data --context 3` shows the complete symbol and up to three surrounding lines per side. Copy the identity after `# node --at` for a node edit. Context is labeled separately; boundary lines may extend beyond the node span. Use `--json --verbose` for the exact raw node `text`. For line edits, copy a `LINE:HASH` and preserve indentation after the `|` marker.
 
 To regex-replace raw text inside a symbol:
