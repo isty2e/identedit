@@ -52,13 +52,13 @@ impl StructureProvider for CountedPython {
         true
     }
     fn can_handle(&self, path: &Path) -> bool {
-        self.inner.can_handle(path)
+        self.inner.can_handle(path) || path.extension().is_some_and(|extension| extension == "rs")
     }
     fn name(&self) -> &'static str {
         self.inner.name()
     }
     fn supported_extensions(&self) -> &'static [&'static str] {
-        self.inner.supported_extensions()
+        &["py", "rs"]
     }
 }
 
@@ -95,7 +95,8 @@ fn symbol_args() -> EditIntentArgs {
 #[test]
 fn node_patch_routes_share_source_work_but_always_validate_the_result() {
     let root = tempdir().unwrap();
-    let file = root.path().join("fixture.py");
+    // A fresh default registry would choose Rust, not the injected Python provider.
+    let file = root.path().join("fixture.rs");
     std::fs::write(&file, SOURCE).unwrap();
     let handles = TreeSitterProvider::python()
         .parse(&file, SOURCE.as_bytes())
