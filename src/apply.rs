@@ -10,8 +10,10 @@ mod move_ops;
 mod preflight;
 mod receipt;
 mod replacements;
+mod structure_report;
 
 pub(crate) use receipt::EditLocations;
+pub(crate) use structure_report::StructureChanges;
 
 use move_ops::{
     commit_move_plans, preflight_move_plans, rollback_committed_moves,
@@ -47,6 +49,7 @@ pub struct ApplyResponse {
     pub summary: ApplySummary,
     pub transaction: ApplyTransaction,
     pub locations: EditLocations,
+    pub structure_changes: StructureChanges,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<ApplyDryRunSummary>,
 }
@@ -240,6 +243,7 @@ pub(crate) fn preview_multi_file_changeset_with_context(
     let move_plans = preflight_move_plans(&move_execution_order)?;
 
     let locations = EditLocations::from_plans(&preflight_plans, &move_plans);
+    let structure_changes = StructureChanges::from_plans(&preflight_plans, &move_plans);
 
     let mut applied = Vec::with_capacity(preflight_plans.len() + move_plans.len());
     let mut files = Vec::with_capacity(preflight_plans.len());
@@ -275,6 +279,7 @@ pub(crate) fn preview_multi_file_changeset_with_context(
             transaction,
             dry_run: Some(dry_run),
             locations,
+            structure_changes,
         },
         files,
     })
@@ -390,6 +395,7 @@ where
     let preflight_plans = preflight_changesets_in_order(&edit_changesets, context)?;
     let move_plans = preflight_move_plans(&move_execution_order)?;
     let locations = EditLocations::from_plans(&preflight_plans, &move_plans);
+    let structure_changes = StructureChanges::from_plans(&preflight_plans, &move_plans);
     let commit_batch = prepare_commit_batch(preflight_plans);
 
     let committed_edits = if commit_batch.preflight_plans.is_empty() {
@@ -449,6 +455,7 @@ where
         transaction,
         dry_run: None,
         locations,
+        structure_changes,
     })
 }
 

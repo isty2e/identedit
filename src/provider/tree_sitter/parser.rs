@@ -5,7 +5,8 @@ use tree_sitter::{Node, Parser};
 
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
-use crate::provider::{node_text, normalize_bare_cr_for_parser};
+use crate::named_structure::NamedNode;
+use crate::provider::{NameProjectionError, node_text, normalize_bare_cr_for_parser};
 
 use super::catalog::{LanguageSource, LanguageSpec};
 
@@ -59,29 +60,65 @@ pub(super) fn collect_nodes(
     source: &[u8],
     handles: &mut Vec<SelectionHandle>,
 ) {
-    if node.is_named()
-        && let Some(text) = node_text(node, source)
-    {
-        let kind = node.kind().to_string();
-        let name = extract_node_name(node, source);
-        let span = Span {
-            start: node.start_byte(),
-            end: node.end_byte(),
-        };
+    visit_nodes(node, source, &mut |node, name| {
+        if let Some(text) = node_text(node, source) {
+            handles.push(SelectionHandle::from_parts(
+                path.to_path_buf(),
+                Span {
+                    start: node.start_byte(),
+                    end: node.end_byte(),
+                },
+                node.kind().to_string(),
+                name,
+                text,
+            ));
+        }
+    });
+}
 
-        handles.push(SelectionHandle::from_parts(
-            path.to_path_buf(),
-            span,
-            kind,
-            name,
-            text,
-        ));
+pub(super) fn collect_named_nodes(
+    node: Node<'_>,
+    source: &[u8],
+) -> Result<Vec<NamedNode>, NameProjectionError> {
+    let mut names = Vec::new();
+    let valid = visit_nodes(node, source, &mut |node, name| {
+        if let Some(name) = name {
+            names.push(NamedNode {
+                span: Span {
+                    start: node.start_byte(),
+                    end: node.end_byte(),
+                },
+                kind: node.kind().to_string(),
+                name,
+            });
+        }
+    });
+    if valid {
+        Ok(names)
+    } else {
+        Err(NameProjectionError::InvalidSpan)
+    }
+}
+
+fn visit_nodes<'tree>(
+    node: Node<'tree>,
+    source: &[u8],
+    visit: &mut impl FnMut(Node<'tree>, Option<String>),
+) -> bool {
+    let mut valid = true;
+    if node.is_named() {
+        if node.start_byte() <= node.end_byte() && node.end_byte() <= source.len() {
+            visit(node, extract_node_name(node, source));
+        } else {
+            valid = false;
+        }
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_nodes(child, path, source, handles);
+        valid &= visit_nodes(child, source, visit);
     }
+    valid
 }
 
 fn extract_node_name(node: Node<'_>, source: &[u8]) -> Option<String> {

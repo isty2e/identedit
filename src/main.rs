@@ -12,6 +12,7 @@ mod grammar;
 mod handle;
 mod hash;
 mod hashline;
+mod named_structure;
 mod patch;
 mod provider;
 mod selector;

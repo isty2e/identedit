@@ -1,10 +1,13 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
 use crate::error::IdenteditError;
 use crate::handle::{SelectionHandle, Span};
-use crate::provider::{ParsedSource, StructureProvider, node_text};
+use crate::named_structure::NamedNode;
+use crate::provider::{NameProjectionError, node_source};
+use crate::provider::{ParsedSource, StructureProvider};
 
 pub struct JsonProvider;
 
@@ -65,58 +68,97 @@ pub(super) fn collect_handles(
     source: &[u8],
 ) -> Vec<SelectionHandle> {
     let mut handles = Vec::new();
-    collect_json_nodes(tree.root_node(), path, source, None, &mut handles);
+    visit_json_nodes(
+        tree.root_node(),
+        source,
+        None,
+        &mut |span, kind, name, text| {
+            handles.push(SelectionHandle::from_parts(
+                path.to_path_buf(),
+                span,
+                kind.to_string(),
+                name,
+                text.into_owned(),
+            ));
+        },
+    );
     handles
 }
 
-fn collect_json_nodes(
-    node: Node<'_>,
-    path: &Path,
+pub(super) fn collect_named_nodes(
+    tree: &tree_sitter::Tree,
     source: &[u8],
+) -> Result<Vec<NamedNode>, NameProjectionError> {
+    let mut names = Vec::new();
+    let valid = visit_json_nodes(
+        tree.root_node(),
+        source,
+        None,
+        &mut |span, kind, name, _| {
+            if let Some(name) = name {
+                names.push(NamedNode {
+                    span,
+                    kind: kind.to_string(),
+                    name,
+                });
+            }
+        },
+    );
+    if valid {
+        Ok(names)
+    } else {
+        Err(NameProjectionError::InvalidSpan)
+    }
+}
+
+fn visit_json_nodes<'source>(
+    node: Node<'_>,
+    source: &'source [u8],
     inherited_name: Option<String>,
-    handles: &mut Vec<SelectionHandle>,
-) {
+    visit: &mut impl FnMut(Span, &'static str, Option<String>, Cow<'source, str>),
+) -> bool {
     if node.kind() == "pair" {
-        collect_pair(node, path, source, handles);
-        return;
+        return visit_pair(node, source, visit);
     }
 
-    if let Some(kind) = normalized_kind(node.kind())
-        && let Some(text) = node_text(node, source)
-    {
+    let mut valid = true;
+    if let Some(kind) = normalized_kind(node.kind()) {
         let span = Span {
             start: node.start_byte(),
             end: node.end_byte(),
         };
-        handles.push(SelectionHandle::from_parts(
-            path.to_path_buf(),
-            span,
-            kind.to_string(),
-            inherited_name.clone(),
-            text,
-        ));
+        if let Some(text) = node_source(node, source) {
+            visit(span, kind, inherited_name.clone(), text);
+        } else {
+            valid = false;
+        }
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_json_nodes(child, path, source, inherited_name.clone(), handles);
+        valid &= visit_json_nodes(child, source, inherited_name.clone(), visit);
     }
+    valid
 }
 
-fn collect_pair(node: Node<'_>, path: &Path, source: &[u8], handles: &mut Vec<SelectionHandle>) {
+fn visit_pair<'source>(
+    node: Node<'_>,
+    source: &'source [u8],
+    visit: &mut impl FnMut(Span, &'static str, Option<String>, Cow<'source, str>),
+) -> bool {
     let key_node = match node.child_by_field_name("key") {
         Some(node) => node,
-        None => return,
+        None => return false,
     };
 
     let value_node = match node.child_by_field_name("value") {
         Some(node) => node,
-        None => return,
+        None => return false,
     };
 
-    let key_raw = match node_text(key_node, source) {
+    let key_raw = match node_source(key_node, source) {
         Some(text) => text,
-        None => return,
+        None => return false,
     };
 
     let key_name = decode_json_string(&key_raw).unwrap_or(key_raw.trim_matches('"').to_string());
@@ -125,15 +167,9 @@ fn collect_pair(node: Node<'_>, path: &Path, source: &[u8], handles: &mut Vec<Se
         end: key_node.end_byte(),
     };
 
-    handles.push(SelectionHandle::from_parts(
-        path.to_path_buf(),
-        key_span,
-        "key".to_string(),
-        Some(key_name.clone()),
-        key_raw,
-    ));
+    visit(key_span, "key", Some(key_name.clone()), key_raw);
 
-    collect_json_nodes(value_node, path, source, Some(key_name), handles);
+    visit_json_nodes(value_node, source, Some(key_name), visit)
 }
 
 fn normalized_kind(node_kind: &str) -> Option<&'static str> {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::apply::{EditLocations, apply_resolved_text_update};
+use crate::apply::{EditLocations, StructureChanges, apply_resolved_text_update};
 use crate::error::IdenteditError;
 use crate::hashline::{
     HashlineApplyError, HashlineApplyMode, HashlineCheckError, HashlineCheckResult,
@@ -29,6 +29,7 @@ pub enum HashlineModeResponse {
 
 #[derive(Debug, Serialize)]
 pub struct HashlinePatchResponse {
+    pub structure_changes: StructureChanges,
     pub file: PathBuf,
     pub auto_repair: bool,
     pub dry_run: bool,
@@ -150,6 +151,7 @@ fn apply_hashline_patch_request(
             .map(|location| (location.edit_index, location.span)),
     );
 
+    let structure_changes = StructureChanges::out_of_scope(&verified.file);
     if changed {
         apply_resolved_text_update(
             &verified.file,
@@ -161,6 +163,7 @@ fn apply_hashline_patch_request(
     }
 
     let response = HashlinePatchResponse {
+        structure_changes,
         file: verified.file,
         auto_repair: verified.auto_repair,
         dry_run: verified.dry_run,
