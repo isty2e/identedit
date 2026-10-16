@@ -29,7 +29,6 @@ pub enum HashlineModeResponse {
 
 #[derive(Debug, Serialize)]
 pub struct HashlinePatchResponse {
-    pub structure_changes: StructureChanges,
     pub file: PathBuf,
     pub auto_repair: bool,
     pub dry_run: bool,
@@ -39,6 +38,7 @@ pub struct HashlinePatchResponse {
     pub operations_total: usize,
     pub operations_applied: usize,
     pub locations: EditLocations,
+    pub structure_changes: StructureChanges,
 }
 
 #[derive(Debug)]
@@ -163,7 +163,6 @@ fn apply_hashline_patch_request(
     }
 
     let response = HashlinePatchResponse {
-        structure_changes,
         file: verified.file,
         auto_repair: verified.auto_repair,
         dry_run: verified.dry_run,
@@ -176,6 +175,7 @@ fn apply_hashline_patch_request(
         operations_total: applied.operations_total,
         operations_applied: applied.operations_applied,
         locations,
+        structure_changes,
     };
 
     Ok(HashlinePatchExecution {

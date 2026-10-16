@@ -43,6 +43,8 @@ Generic structural-confinement and symbol/container-preservation rejection rules
 
 Successful JSON `patch` and `apply` responses include `structure_changes` in both default and verbose output, including dry-run. This observes name/count changes for files containing node-target operations; it never rejects an edit or infers rename/move intent. `edit` only builds a plan, discovery-only `patch --from-diff` keeps its candidate response, and `--diff` emits no report on stdout or informational report on stderr.
 
+Names are not limited to declarations. Any provider-named node can contribute, including default parameters, keyword arguments and local variable declarators; body-only edits can therefore change the report.
+
 For example, a method becoming nested inside another method can produce:
 
 ```json
@@ -72,7 +74,7 @@ For example, a method becoming nested inside another method can produce:
 }
 ```
 
-- Each file has one observation status: `checked`, `unavailable`, or `out_of_scope`. A checked file with no differences contributes no changed entries. Unavailable files include `reason: "unsupported_provider"` for fallback/non-capable observations or `reason: "projection_failed"` for recoverable observation failure. These states are not checked empty observations. Line/file-boundary-only files, empty operation lists and whole-file moves are out of scope and gain no structural parsing for this report.
+- Each file has one observation status: `checked`, `unavailable`, or `out_of_scope`. A checked file with no differences contributes no changed entries. Unavailable files include `reason: "unsupported_provider"` for fallback/non-capable observations or `reason: "projection_failed"` for recoverable observation failure. These states are not checked empty observations. Line/file-boundary-only files, empty operation lists and whole-file moves are out of scope and gain no structural parsing for this report. The envelope remains present even when every file is `out_of_scope`.
 - `files` describes input changeset file units; a whole-file move contributes its source file. `files.total` and the summary coverage counts include all units, while `files.entries` contains at most 16, sorted by file. `files.omitted` explicitly counts unlisted file identities; do not assume an omitted file was checked or unchanged.
 - Compare occurrence counts by file, provider `kind` and full qualified name. Overloads/getters/setters with the same key remain multiple occurrences. Body or decorator changes alone need not change those counts. Names follow the existing selector's named-span containment interpretation, including opaque names and stable equal-span ordering, not compiler/LSP scope. Identity hashes and declaration text are not comparison keys. Stable semantic identity across provider versions or `.h` dialect selection is not promised.
 - `summary.added` and `summary.removed` are exact occurrence increases/decreases among checked files only; unavailable files contribute no invented counts. `changes.total` counts changed keys, not occurrences or edit operations. Each entry gives its full-key `before_count` and `after_count`.
