@@ -15,7 +15,11 @@ identedit apply --dry-run changeset.json
 identedit apply changeset.json
 ```
 
-`apply --dry-run` takes apply locks during validation; `patch --dry-run` (including `--diff`) can take the same locks. Concurrent previews or writes to the same file can return `resource_busy`; preview locks are released before the command returns and do not reserve a later write.
+`apply --dry-run` and `patch --dry-run` (including `--diff`) take apply locks when they reach apply validation. Line-target no-ops skip that stage. Overlapping identedit previews or apply runs on the same file can return `resource_busy`; preview locks are released before the command returns and do not reserve a later write.
+
+Apply validation opens the file for both reading and writing, so even previews need write access.
+
+On Unix, locks are generally advisory and do not protect against programs that ignore them. On Windows, locks can also deny other programs read/write access.
 
 Wrapped stdin mode:
 
@@ -46,7 +50,7 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 | `target_missing` | Structure no longer exists | Re-run read to discover current state |
 | `ambiguous_target` | Multiple matches for a selector | Inspect `error.candidates`, then retry with `--symbol <qualified_name>`, `--at <identity>`, or JSON `span_hint` |
 | `path_changed` | File modified during apply | Re-run full pipeline (`read`, `edit`, `apply`) |
-| `resource_busy` | Another operation holds the target file's apply lock | Wait briefly, retry |
+| `resource_busy` | Apply lock held, e.g. by another identedit preview or apply | Wait briefly, then retry once within the [shared target limit](../SKILL.md#recovery-and-output-contracts) |
 | `rollback_failed` | Apply failed and rollback incomplete | Inspect files manually, then re-run pipeline |
 | `parse_failure`, `error.stage: "source"` | Provider rejected the original source | Repair the source with direct editing, then retry |
 | `parse_failure`, `error.stage: "proposed_result"` | Provider rejected the proposed file; no transaction writes started | Correct replacement text or other edits, then retry once with `--dry-run` |

@@ -105,6 +105,8 @@ identedit patch example.py --symbol target_fn --replace --stdin-text < /tmp/new_
 
 For a non-trivial patch, run the same request with `--dry-run --diff`, inspect the unified diff, then rerun without those flags to apply it. The preview does not write; plain `patch` does.
 
+Apply validation takes exclusive locks and requires write access even for dry-runs. Avoid concurrent identedit previews or apply runs on the same file.
+
 Diffs show actual validated file bytes, including surrounding indentation, with three context lines. No-ops emit no diff; very large changes may use one non-minimal hunk. For portable replay, use `--color never` and paths relative to the replay directory, without `..` components. Hunk numbers count LF lines, not read anchors (which also count standalone CR); never copy hunk coordinates as anchors. Preview does not reserve a later write.
 
 For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
@@ -174,10 +176,11 @@ Allow at most one retry per target; a second failure means stop using identedit 
 |---|---|
 | `precondition_failed`, `target_missing` | Re-read, rebuild, retry once; use `read --mode line` for line targets |
 | `ambiguous_target` | Inspect candidates; retry with a qualified symbol, identity, or span hint |
+| `resource_busy` | Another identedit preview/apply may hold the file's apply lock; wait briefly, then retry once within the shared target limit |
 | `parse_failure`, `error.stage: "proposed_result"` | Correct raw payload/other edits; retry once with `--dry-run` |
 | `parse_failure`, `error.stage: "source"` | Original source was rejected; use direct editing to repair it |
 | Other `parse_failure`, `no_provider`, another hard error | Inspect diagnostics; fall back to direct editing if appropriate |
-| Apply/rollback/resource error | Inspect recovery details; load `references/transactions.md` if bundled |
+| Other apply/rollback/resource error | Inspect recovery details; load `references/transactions.md` if bundled |
 
 Line repair shares the same retry budget. References are optional; use reported recovery details rather than blindly retrying a transaction error.
 
