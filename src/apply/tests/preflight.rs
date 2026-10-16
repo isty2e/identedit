@@ -2,8 +2,8 @@ use tempfile::tempdir;
 
 use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
 use crate::error::IdenteditError;
+use crate::execution_context::ExecutionContext;
 use crate::hash::{ContentHash, hash_bytes};
-use crate::provider::ProviderRegistry;
 use crate::transform::build::build_replace_changeset;
 use crate::transform::parse::parse_handles_for_file;
 
@@ -227,8 +227,8 @@ fn preflight_builds_file_plans_without_mutating_sources() {
     )
     .expect("changeset_b should be built");
 
-    let registry = ProviderRegistry::default();
-    let plans = preflight_changesets_in_order(&[changeset_a, changeset_b], &registry)
+    let context = ExecutionContext::new();
+    let plans = preflight_changesets_in_order(&[changeset_a, changeset_b], &context)
         .expect("preflight should succeed for both files");
 
     assert_eq!(plans.len(), 2);
@@ -287,8 +287,8 @@ fn preflight_fails_fast_and_preserves_all_file_contents() {
         ))
         .expect("node replacement target should remain canonical");
 
-    let registry = ProviderRegistry::default();
-    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &registry)
+    let context = ExecutionContext::new();
+    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &context)
         .expect_err("preflight should fail when one file has an unresolved target");
     match error {
         IdenteditError::PreconditionFailed { .. } => {}
@@ -312,9 +312,9 @@ fn preflight_holds_file_locks_until_plans_are_dropped() {
     )
     .expect("changeset should be built");
 
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let plans =
-        preflight_changesets_in_order(&[changeset], &registry).expect("preflight should succeed");
+        preflight_changesets_in_order(&[changeset], &context).expect("preflight should succeed");
     assert_eq!(plans.len(), 1);
 
     let lock_error =
@@ -357,8 +357,8 @@ fn preflight_orders_plans_by_canonical_path_not_input_order() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     assert_eq!(plans.len(), 2);
     assert_eq!(
@@ -395,8 +395,8 @@ fn preflight_rejects_duplicate_logical_file_entries_before_locking() {
     )
     .expect("changeset_b should be built");
 
-    let registry = ProviderRegistry::default();
-    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &registry)
+    let context = ExecutionContext::new();
+    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &context)
         .expect_err("duplicate logical path entries should be rejected");
     match error {
         IdenteditError::InvalidRequest { message } => {
@@ -435,8 +435,8 @@ fn preflight_rejects_duplicate_entries_for_hardlink_aliases() {
     )
     .expect("changeset_b should be built");
 
-    let registry = ProviderRegistry::default();
-    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &registry)
+    let context = ExecutionContext::new();
+    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &context)
         .expect_err("hardlink alias entries should be rejected as duplicate file entries");
     match error {
         IdenteditError::InvalidRequest { message } => {
@@ -482,8 +482,8 @@ fn preflight_rejects_duplicate_entries_for_symlinked_dot_segment_aliases() {
     )
     .expect("changeset_b should be built");
 
-    let registry = ProviderRegistry::default();
-    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &registry)
+    let context = ExecutionContext::new();
+    let error = preflight_changesets_in_order(&[changeset_a, changeset_b], &context)
         .expect_err("duplicate canonical entries through symlink+dot aliases should be rejected");
     match error {
         IdenteditError::InvalidRequest { message } => {
@@ -532,10 +532,10 @@ fn preflight_rejects_non_adjacent_hardlink_alias_entries() {
     )
     .expect("canonical changeset should be built");
 
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let error = preflight_changesets_in_order(
         &[changeset_middle, changeset_alias, changeset_canonical],
-        &registry,
+        &context,
     )
     .expect_err("non-adjacent hardlink alias entries should be rejected");
 
@@ -590,10 +590,10 @@ fn preflight_rejects_non_adjacent_hardlink_alias_entries_before_locking_middle_f
     .expect("alias changeset should be built");
 
     let _middle_lock = acquire_apply_lock(&middle).expect("middle lock should be acquired");
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let error = preflight_changesets_in_order(
         &[changeset_canonical, changeset_middle, changeset_alias],
-        &registry,
+        &context,
     )
     .expect_err("duplicate detection should fail before attempting middle lock");
 
@@ -639,19 +639,19 @@ fn preflight_duplicate_hardlink_diagnostic_is_input_order_independent_with_non_a
     )
     .expect("alias changeset should be built");
 
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let first = preflight_changesets_in_order(
         &[
             changeset_middle.clone(),
             changeset_alias.clone(),
             changeset_canonical.clone(),
         ],
-        &registry,
+        &context,
     )
     .expect_err("first permutation should reject duplicate alias entries");
     let second = preflight_changesets_in_order(
         &[changeset_canonical, changeset_middle, changeset_alias],
-        &registry,
+        &context,
     )
     .expect_err("second permutation should reject duplicate alias entries");
 
@@ -712,7 +712,7 @@ fn preflight_rejects_three_non_adjacent_hardlink_alias_entries() {
     )
     .expect("canonical changeset should be built");
 
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let error = preflight_changesets_in_order(
         &[
             changeset_alias_z,
@@ -720,7 +720,7 @@ fn preflight_rejects_three_non_adjacent_hardlink_alias_entries() {
             changeset_alias_b,
             changeset_canonical,
         ],
-        &registry,
+        &context,
     )
     .expect_err("multiple non-adjacent hardlink aliases should be rejected");
 
@@ -765,8 +765,8 @@ fn preflight_allows_three_distinct_files_with_identical_contents() {
     )
     .expect("changeset_m should be built");
 
-    let registry = ProviderRegistry::default();
-    let plans = preflight_changesets_in_order(&[changeset_z, changeset_a, changeset_m], &registry)
+    let context = ExecutionContext::new();
+    let plans = preflight_changesets_in_order(&[changeset_z, changeset_a, changeset_m], &context)
         .expect("distinct files should be accepted");
 
     assert_eq!(plans.len(), 3);
@@ -789,9 +789,9 @@ fn prepare_commit_batch_captures_rollback_snapshots_before_write() {
         "def process_data(value):\n    return value * 88".to_string(),
     )
     .expect("changeset should be built");
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let preflight_plans =
-        preflight_changesets_in_order(&[changeset], &registry).expect("preflight should succeed");
+        preflight_changesets_in_order(&[changeset], &context).expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
 
     assert_eq!(commit_batch.preflight_plans.len(), 1);
@@ -825,8 +825,8 @@ fn commit_preflight_batch_applies_changes_in_deterministic_order() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
     let committed = commit_preflight_batch(commit_batch, || Ok(()), || Ok(()))
@@ -875,8 +875,8 @@ fn commit_batch_failure_rolls_back_already_written_files() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
 
@@ -926,9 +926,9 @@ fn post_rename_failure_rolls_back_the_current_file() {
         "def process_data(value):\n    return value * 777".to_string(),
     )
     .expect("changeset should be built");
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let plans =
-        preflight_changesets_in_order(&[changeset], &registry).expect("preflight should succeed");
+        preflight_changesets_in_order(&[changeset], &context).expect("preflight should succeed");
     let batch = prepare_commit_batch(plans);
 
     let error = commit_preflight_batch_with_write_hook(
@@ -969,8 +969,8 @@ fn rollback_refuses_to_overwrite_external_change_after_commit() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     let batch = prepare_commit_batch(plans);
 
@@ -1046,8 +1046,8 @@ fn commit_batch_precondition_failure_rolls_back_already_written_files() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
 
@@ -1124,8 +1124,8 @@ fn commit_batch_path_swap_failure_rolls_back_already_written_files() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
 
@@ -1199,8 +1199,8 @@ fn rollback_failure_surfaces_rollback_failed_error() {
     )
     .expect("changeset_a should be built");
 
-    let registry = ProviderRegistry::default();
-    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &registry)
+    let context = ExecutionContext::new();
+    let preflight_plans = preflight_changesets_in_order(&[changeset_b, changeset_a], &context)
         .expect("preflight should succeed");
     let commit_batch = prepare_commit_batch(preflight_plans);
 
@@ -1260,9 +1260,9 @@ fn commit_preflight_batch_rejects_rollback_snapshot_count_mismatch() {
         "def process_data(value):\n    return value * 999".to_string(),
     )
     .expect("changeset should be built");
-    let registry = ProviderRegistry::default();
+    let context = ExecutionContext::new();
     let preflight_plans =
-        preflight_changesets_in_order(&[changeset], &registry).expect("preflight should succeed");
+        preflight_changesets_in_order(&[changeset], &context).expect("preflight should succeed");
     let mut commit_batch = prepare_commit_batch(preflight_plans);
     commit_batch.rollback_snapshots.clear();
 

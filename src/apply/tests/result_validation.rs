@@ -6,9 +6,10 @@ use tempfile::tempdir;
 
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
+use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
 use crate::provider::{ParsedSource, ProviderRegistry, StructureProvider, TreeSitterProvider};
-use crate::transform::build::build_changeset;
+use crate::transform::build::{build_changeset, build_changeset_with_context};
 
 use super::super::preflight_changesets_in_order;
 
@@ -59,18 +60,130 @@ impl StructureProvider for ObservedProvider {
     }
 }
 
-fn registry(
+fn context(
     calls: &Rc<Cell<usize>>,
     validates_syntax: bool,
     fail_result_setup: bool,
-) -> ProviderRegistry {
-    ProviderRegistry::from_providers(vec![Box::new(ObservedProvider {
-        inner: TreeSitterProvider::python(),
-        calls: Rc::clone(calls),
-        handle_projections: Rc::new(Cell::new(0)),
-        validates_syntax,
-        fail_result_setup,
-    })])
+) -> ExecutionContext {
+    ExecutionContext::with_registry(ProviderRegistry::from_providers(vec![Box::new(
+        ObservedProvider {
+            inner: TreeSitterProvider::python(),
+            calls: Rc::clone(calls),
+            handle_projections: Rc::new(Cell::new(0)),
+            validates_syntax,
+            fail_result_setup,
+        },
+    )]))
+}
+
+fn prepared_target_replacement(
+    file: &Path,
+    source: &str,
+    context: &ExecutionContext,
+) -> crate::changeset::FileChange {
+    let handles = TreeSitterProvider::python()
+        .parse(file, source.as_bytes())
+        .unwrap();
+    let target = handles
+        .iter()
+        .find(|handle| handle.name.as_deref() == Some("target"))
+        .unwrap();
+    let operation = EditOperation::try_new(
+        TransformTarget::node(
+            target.identity.clone(),
+            target.kind.clone(),
+            Some(target.span),
+            target.expected_old_hash.clone(),
+        ),
+        OpKind::Replace {
+            new_text: "def target():\n    return 2".to_string(),
+        },
+    )
+    .unwrap();
+    build_changeset_with_context(file, vec![operation], context).unwrap()
+}
+
+#[test]
+fn cached_build_source_cannot_bypass_the_apply_lock() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("fixture.py");
+    let source = "def target():\n    return 1\n";
+    std::fs::write(&file, source).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let context = context(&calls, true, false);
+    let changeset = prepared_target_replacement(&file, source, &context);
+    let lock = super::super::acquire_apply_lock(&file).unwrap();
+
+    let error = preflight_changesets_in_order(&[changeset], &context).unwrap_err();
+
+    assert!(matches!(error, IdenteditError::ResourceBusy { .. }));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    drop(lock);
+}
+
+#[test]
+fn build_to_locked_preflight_changes_are_reparsed_without_a_whole_file_stale_rule() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("fixture.py");
+    let source = "def target():\n    return 1\n\ndef other():\n    return 3\n";
+    for selected_text_changed in [false, true] {
+        std::fs::write(&file, source).unwrap();
+        let calls = Rc::new(Cell::new(0));
+        let context = context(&calls, true, false);
+        let changeset = prepared_target_replacement(&file, source, &context);
+        let changed = if selected_text_changed {
+            source.replace("return 1", "return 8")
+        } else {
+            source.replace("return 3", "return 4")
+        };
+        std::fs::write(&file, &changed).unwrap();
+
+        let result = preflight_changesets_in_order(&[changeset], &context);
+
+        if selected_text_changed {
+            assert!(matches!(
+                result,
+                Err(IdenteditError::PreconditionFailed { .. })
+            ));
+            assert_eq!(calls.get(), 2);
+        } else {
+            let plans = result.unwrap();
+            assert_eq!(
+                plans[0].updated_text,
+                changed.replace("return 1", "return 2")
+            );
+            assert_eq!(
+                calls.get(),
+                3,
+                "changed source and proposed result are both parsed"
+            );
+            drop(plans);
+        }
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+    }
+}
+
+#[test]
+fn cached_build_source_does_not_hide_current_read_or_source_parse_errors() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("fixture.py");
+    let source = "def target():\n    return 1\n";
+    for changed in [b"def broken(:".as_slice(), &[0xff]] {
+        std::fs::write(&file, source).unwrap();
+        let calls = Rc::new(Cell::new(0));
+        let context = context(&calls, true, false);
+        let changeset = prepared_target_replacement(&file, source, &context);
+        std::fs::write(&file, changed).unwrap();
+
+        let error = preflight_changesets_in_order(&[changeset], &context).unwrap_err();
+
+        if changed == [0xff] {
+            assert!(matches!(error, IdenteditError::Io { .. }));
+        } else {
+            assert!(matches!(error, IdenteditError::ParseFailure { .. }));
+        }
+        assert_eq!(std::fs::read(&file).unwrap(), changed);
+    }
 }
 
 #[test]
@@ -91,15 +204,18 @@ fn final_validation_does_not_project_selection_handles() {
     .unwrap();
     let calls = Rc::new(Cell::new(0));
     let handle_projections = Rc::new(Cell::new(0));
-    let registry = ProviderRegistry::from_providers(vec![Box::new(ObservedProvider {
-        inner: TreeSitterProvider::python(),
-        calls: Rc::clone(&calls),
-        handle_projections: Rc::clone(&handle_projections),
-        validates_syntax: true,
-        fail_result_setup: false,
-    })]);
+    let context =
+        ExecutionContext::with_registry(ProviderRegistry::from_providers(vec![Box::new(
+            ObservedProvider {
+                inner: TreeSitterProvider::python(),
+                calls: Rc::clone(&calls),
+                handle_projections: Rc::clone(&handle_projections),
+                validates_syntax: true,
+                fail_result_setup: false,
+            },
+        )]));
 
-    let plans = preflight_changesets_in_order(&[changeset], &registry).unwrap();
+    let plans = preflight_changesets_in_order(&[changeset], &context).unwrap();
 
     assert_eq!(calls.get(), 2, "source and result still need parsing");
     assert_eq!(
@@ -138,8 +254,7 @@ fn node_file_is_parsed_once_before_and_once_after_all_edits_independent_of_provi
         .collect();
     let changeset = build_changeset(&file, operations).unwrap();
     let calls = Rc::new(Cell::new(0));
-    let plans =
-        preflight_changesets_in_order(&[changeset], &registry(&calls, true, false)).unwrap();
+    let plans = preflight_changesets_in_order(&[changeset], &context(&calls, true, false)).unwrap();
     assert_eq!(calls.get(), 2);
     drop(plans);
 
@@ -148,7 +263,7 @@ fn node_file_is_parsed_once_before_and_once_after_all_edits_independent_of_provi
         file,
         operations: vec![],
     };
-    let plans = preflight_changesets_in_order(&[empty], &registry(&calls, true, false)).unwrap();
+    let plans = preflight_changesets_in_order(&[empty], &context(&calls, true, false)).unwrap();
     assert_eq!(
         calls.get(),
         1,
@@ -182,8 +297,7 @@ fn unsupported_result_validation_does_not_perform_a_second_parse() {
     .unwrap();
     let changeset = build_changeset(&file, vec![operation]).unwrap();
     let calls = Rc::new(Cell::new(0));
-    let plans =
-        preflight_changesets_in_order(&[changeset], &registry(&calls, false, true)).unwrap();
+    let plans = preflight_changesets_in_order(&[changeset], &context(&calls, false, true)).unwrap();
     assert_eq!(calls.get(), 1);
     assert!(plans[0].updated_text.contains("def invalid("));
 }
@@ -213,7 +327,7 @@ fn result_setup_failure_is_not_reclassified_as_syntax_or_fallback_success() {
     let changeset = build_changeset(&file, vec![operation]).unwrap();
     let calls = Rc::new(Cell::new(0));
     let error =
-        preflight_changesets_in_order(&[changeset], &registry(&calls, true, true)).unwrap_err();
+        preflight_changesets_in_order(&[changeset], &context(&calls, true, true)).unwrap_err();
     assert!(matches!(error, IdenteditError::LanguageSetup { .. }));
     assert_eq!(calls.get(), 2);
     assert_eq!(std::fs::read(&file).unwrap(), before);

@@ -3,16 +3,17 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::apply::{
-    ApplyResponse, apply_multi_file_changeset, dry_run_multi_file_changeset,
-    preview_multi_file_changeset,
+    ApplyResponse, apply_multi_file_changeset_with_context,
+    preview_multi_file_changeset_with_context,
 };
 use crate::changeset::{EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget};
 use crate::cli::apply::shape_apply_response;
 use crate::cli::edit_intent::{NodeEditIntent, PreparedEditIntent};
 use crate::error::IdenteditError;
+use crate::execution_context::ExecutionContext;
 use crate::patch::engine::run_resolve_verify_apply;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
-use crate::transform::build::build_changeset;
+use crate::transform::build::build_changeset_with_context;
 
 use super::super::line_patch::{
     HashlinePatchExecution, HashlinePatchResponse, execute_hashline_patch,
@@ -101,12 +102,18 @@ pub(super) fn execute_flag_patch_request(
     execution: PatchExecution,
 ) -> Result<PatchCommandOutput, IdenteditError> {
     match intent {
-        PreparedEditIntent::Node(intent) => {
-            execute_node_flag_patch_request(intent, execution.apply_backed)
-        }
-        PreparedEditIntent::Canonical(intent) => {
-            run_patch_edit_operation(intent.file, intent.operation, execution.apply_backed, None)
-        }
+        PreparedEditIntent::Node(intent) => execute_node_flag_patch_request(
+            intent,
+            execution.apply_backed,
+            &ExecutionContext::new(),
+        ),
+        PreparedEditIntent::Canonical(intent) => run_patch_edit_operation(
+            intent.file,
+            intent.operation,
+            execution.apply_backed,
+            None,
+            &ExecutionContext::new(),
+        ),
         PreparedEditIntent::Line(intent) => match execution.line.output {
             PatchOutputMode::Json => {
                 let response = execute_hashline_patch(
@@ -135,13 +142,15 @@ pub(super) fn execute_flag_patch_request(
 fn execute_node_flag_patch_request(
     intent: NodeEditIntent,
     execution: ApplyBackedExecution,
+    context: &ExecutionContext,
 ) -> Result<PatchCommandOutput, IdenteditError> {
-    let resolved = intent.resolve()?;
+    let resolved = intent.resolve_with_context(context)?;
     run_patch_edit_operation(
         resolved.file,
         resolved.operation,
         execution,
         resolved.regex_replacements,
+        context,
     )
 }
 
@@ -151,9 +160,10 @@ pub(super) fn run_patch_node_operation(
     op: OpKind,
     execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
+    context: &ExecutionContext,
 ) -> Result<PatchCommandOutput, IdenteditError> {
     let operation = EditOperation::try_new(target, op)?;
-    run_patch_edit_operation(file, operation, execution, regex_replacements)
+    run_patch_edit_operation(file, operation, execution, regex_replacements, context)
 }
 
 fn run_patch_edit_operation(
@@ -161,16 +171,17 @@ fn run_patch_edit_operation(
     operation: EditOperation,
     execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
+    context: &ExecutionContext,
 ) -> Result<PatchCommandOutput, IdenteditError> {
     run_resolve_verify_apply(
         || {
-            let file_change = build_changeset(&file, vec![operation])?;
+            let file_change = build_changeset_with_context(&file, vec![operation], context)?;
             Ok(wrap_single_file(file_change))
         },
         verify_prepared_changeset,
         |changeset| match execution.output {
             PatchOutputMode::Diff { color } => {
-                let preview = preview_multi_file_changeset(&changeset)?;
+                let preview = preview_multi_file_changeset_with_context(&changeset, context)?;
                 Ok(PatchCommandOutput::Text(
                     preview
                         .files
@@ -181,9 +192,10 @@ fn run_patch_edit_operation(
             }
             PatchOutputMode::Json => {
                 let response = if execution.dry_run {
-                    dry_run_multi_file_changeset(&changeset)
+                    preview_multi_file_changeset_with_context(&changeset, context)
+                        .map(|preview| preview.response)
                 } else {
-                    apply_multi_file_changeset(&changeset)
+                    apply_multi_file_changeset_with_context(&changeset, context)
                 }?;
                 serialize_node_patch_response(response, execution.verbose, regex_replacements)
                     .map(PatchCommandOutput::Json)
@@ -203,7 +215,12 @@ pub(super) fn run_patch_edit_operation_json(
         operation,
         ApplyBackedExecution::json(dry_run, verbose),
         None,
+        &ExecutionContext::new(),
     )?;
+    json_patch_output(output)
+}
+
+fn json_patch_output(output: PatchCommandOutput) -> Result<Value, IdenteditError> {
     match output {
         PatchCommandOutput::Json(value) => Ok(value),
         PatchCommandOutput::Text(_) => Err(IdenteditError::InvalidRequest {
@@ -227,14 +244,9 @@ pub(super) fn run_patch_node_operation_json(
         op,
         ApplyBackedExecution::json(dry_run, verbose),
         regex_replacements,
+        &ExecutionContext::new(),
     )?;
-    match output {
-        PatchCommandOutput::Json(value) => Ok(value),
-        PatchCommandOutput::Text(_) => Err(IdenteditError::InvalidRequest {
-            message: "Internal patch error: JSON mode unexpectedly produced text output"
-                .to_string(),
-        }),
-    }
+    json_patch_output(output)
 }
 
 pub(super) fn run_patch_scoped_regex_node_operation(
@@ -245,17 +257,20 @@ pub(super) fn run_patch_scoped_regex_node_operation(
     dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
-    let rewritten = rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement)?;
-    run_patch_node_operation_json(
+    let context = ExecutionContext::new();
+    let rewritten =
+        rewrite_node_target_with_scoped_regex(&file, &target, &pattern, &replacement, &context)?;
+    let output = run_patch_node_operation(
         file,
         target,
         OpKind::Replace {
             new_text: rewritten.new_text,
         },
-        dry_run,
-        verbose,
+        ApplyBackedExecution::json(dry_run, verbose),
         Some(rewritten.replacements),
-    )
+        &context,
+    )?;
+    json_patch_output(output)
 }
 
 fn serialize_node_patch_response(
@@ -304,3 +319,6 @@ fn verify_prepared_changeset(
 ) -> Result<MultiFileChangeset, IdenteditError> {
     Ok(changeset)
 }
+
+#[cfg(test)]
+mod tests;

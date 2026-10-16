@@ -8,7 +8,6 @@ use crate::changeset::FileChange;
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::hash::hash_bytes;
-use crate::provider::ProviderRegistry;
 use crate::transform::build::resolve_changeset_targets_in_handles;
 use crate::transform::conflict::validate_change_conflicts;
 
@@ -48,17 +47,16 @@ impl PreflightFilePlan {
 
 pub(super) fn preflight_changesets_in_order(
     changesets: &[FileChange],
-    registry: &ProviderRegistry,
+    context: &ExecutionContext,
 ) -> Result<Vec<PreflightFilePlan>, IdenteditError> {
     let ordered_changesets = order_changesets_for_preflight(changesets)?;
-    let context = ExecutionContext::new();
-    let mut plans = Vec::with_capacity(changesets.len());
-    for changeset in ordered_changesets {
-        let plan = preflight_changeset(changeset, registry, &context)?;
-        plans.push(plan);
-    }
+    let plans = ordered_changesets
+        .into_iter()
+        .map(|changeset| preflight_changeset(changeset, context))
+        .collect();
+    context.clear_source_observation();
 
-    Ok(plans)
+    plans
 }
 
 pub(super) fn validate_unique_changeset_files(
@@ -174,7 +172,6 @@ fn order_changesets_for_preflight(
 
 fn preflight_changeset(
     changeset: &FileChange,
-    registry: &ProviderRegistry,
     context: &ExecutionContext,
 ) -> Result<PreflightFilePlan, IdenteditError> {
     let lock_guard = acquire_apply_lock(&changeset.file)?;
@@ -188,15 +185,17 @@ fn preflight_changeset(
         .iter()
         .any(|operation| operation.target().requires_node_resolution());
     let provider = if changeset.operations.is_empty() || has_node_operations {
-        Some(registry.provider_for(&changeset.file)?)
+        Some(context.registry().provider_for(&changeset.file)?)
     } else {
         None
     };
-    let handles = provider
-        .map(|provider| provider.parse(&changeset.file, source_text.as_bytes()))
-        .transpose()?
-        .unwrap_or_default();
-    let matched_changes = resolve_changeset_targets_in_handles(changeset, &source_text, &handles)?;
+    let observation = provider
+        .map(|_| context.observe_source(&changeset.file, source_text.as_bytes()))
+        .transpose()?;
+    let handles = observation
+        .as_ref()
+        .map_or(&[][..], |source| source.handles());
+    let matched_changes = resolve_changeset_targets_in_handles(changeset, &source_text, handles)?;
     validate_change_conflicts(&matched_changes)?;
     validate_preview_consistency(changeset, &matched_changes)?;
     let replacements = matched_changes_to_replacements(matched_changes)?;

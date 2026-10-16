@@ -1,7 +1,8 @@
 use std::path::Path;
+use std::rc::Rc;
 
 use crate::error::IdenteditError;
-use crate::execution_context::ExecutionContext;
+use crate::execution_context::{ExecutionContext, SourceObservation};
 use crate::handle::SelectionHandle;
 use crate::hash::HASH_HEX_LEN;
 use crate::hashline::{HASHLINE_PUBLIC_HEX_LEN, LineAnchor};
@@ -29,15 +30,19 @@ pub(super) enum NodeTargetSelector {
 }
 
 impl NodeTargetSelector {
-    pub(super) fn resolve(self, file: &Path) -> Result<SelectionHandle, IdenteditError> {
+    pub(super) fn resolve(
+        self,
+        file: &Path,
+        context: &ExecutionContext,
+    ) -> Result<SelectionHandle, IdenteditError> {
         match self {
-            Self::Identity(identity) => resolve_unique_identity_handle(file, &identity),
+            Self::Identity(identity) => resolve_unique_identity_handle(file, &identity, context),
             Self::Selector { kind, name_pattern } => {
-                resolve_unique_selector_handle(file, &kind, &name_pattern)
+                resolve_unique_selector_handle(file, &kind, &name_pattern, context)
             }
             Self::Symbol(symbol) => {
-                let (source_text, handles) = parse_target_handles(file)?;
-                resolve_symbol(file, &source_text, &handles, &symbol)
+                let (source_text, observation) = parse_target_handles(file, context)?;
+                resolve_symbol(file, &source_text, observation.handles(), &symbol)
             }
         }
     }
@@ -127,9 +132,11 @@ fn is_hex_with_len(value: &str, len: usize) -> bool {
 fn resolve_unique_identity_handle(
     file: &Path,
     identity: &str,
+    context: &ExecutionContext,
 ) -> Result<SelectionHandle, IdenteditError> {
-    let (source_text, handles) = parse_target_handles(file)?;
-    let matches = handles
+    let (source_text, observation) = parse_target_handles(file, context)?;
+    let matches = observation
+        .handles()
         .iter()
         .filter(|handle| handle.identity == identity)
         .cloned()
@@ -145,7 +152,11 @@ fn resolve_unique_identity_handle(
             identity: identity.to_string(),
             file: file.display().to_string(),
             candidates: candidates.len(),
-            candidate_contexts: build_candidate_contexts(candidates, &handles, &source_text),
+            candidate_contexts: build_candidate_contexts(
+                candidates,
+                observation.handles(),
+                &source_text,
+            ),
         }),
     }
 }
@@ -154,15 +165,16 @@ fn resolve_unique_selector_handle(
     file: &Path,
     kind: &str,
     name_pattern: &str,
+    context: &ExecutionContext,
 ) -> Result<SelectionHandle, IdenteditError> {
-    let (source_text, handles) = parse_target_handles(file)?;
+    let (source_text, observation) = parse_target_handles(file, context)?;
     let selector = Selector {
         kind: kind.to_string(),
         name_pattern: Some(name_pattern.to_string()),
         exclude_kinds: vec![],
     };
     let selector_description = format!("kind='{kind}', name='{name_pattern}'");
-    let matches = selector.filter(handles.clone())?;
+    let matches = selector.filter(observation.handles().to_vec())?;
 
     match matches.as_slice() {
         [] => Err(IdenteditError::TargetMissingSelector {
@@ -174,14 +186,20 @@ fn resolve_unique_selector_handle(
             selector: selector_description,
             file: file.display().to_string(),
             candidates: candidates.len(),
-            candidate_contexts: build_candidate_contexts(candidates, &handles, &source_text),
+            candidate_contexts: build_candidate_contexts(
+                candidates,
+                observation.handles(),
+                &source_text,
+            ),
         }),
     }
 }
 
-fn parse_target_handles(file: &Path) -> Result<(String, Vec<SelectionHandle>), IdenteditError> {
-    let context = ExecutionContext::new();
+fn parse_target_handles(
+    file: &Path,
+    context: &ExecutionContext,
+) -> Result<(String, Rc<SourceObservation>), IdenteditError> {
     let source_text = context.read_file_utf8(file)?;
-    let handles = context.parse_handles_for_source(file, source_text.as_bytes())?;
-    Ok((source_text, handles))
+    let observation = context.observe_source(file, source_text.as_bytes())?;
+    Ok((source_text, observation))
 }

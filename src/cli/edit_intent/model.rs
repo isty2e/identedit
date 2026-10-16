@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
+use crate::execution_context::ExecutionContext;
 use crate::hashline::HashlineEdit;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
 
@@ -51,7 +52,14 @@ pub(crate) struct ResolvedNodeEditIntent {
 
 impl NodeEditIntent {
     pub(crate) fn resolve(self) -> Result<ResolvedNodeEditIntent, IdenteditError> {
-        let handle = self.selector.resolve(&self.file)?;
+        self.resolve_with_context(&ExecutionContext::new())
+    }
+
+    pub(crate) fn resolve_with_context(
+        self,
+        context: &ExecutionContext,
+    ) -> Result<ResolvedNodeEditIntent, IdenteditError> {
+        let handle = self.selector.resolve(&self.file, context)?;
         let target = TransformTarget::node(
             handle.identity,
             handle.kind,
@@ -70,6 +78,7 @@ impl NodeEditIntent {
                     &target,
                     &pattern,
                     &replacement,
+                    context,
                 )?;
                 (
                     OpKind::Replace {

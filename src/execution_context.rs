@@ -1,23 +1,74 @@
-use std::path::Path;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::provider::ProviderRegistry;
 
-/// Request-scoped execution context that owns shared runtime dependencies.
+/// Runtime dependencies and source observations scoped to one execution.
 pub(crate) struct ExecutionContext {
     registry: ProviderRegistry,
+    last_source: RefCell<Option<Rc<SourceObservation>>>,
+}
+
+pub(crate) struct SourceObservation {
+    file: PathBuf,
+    source: Box<[u8]>,
+    handles: Vec<SelectionHandle>,
+}
+
+impl SourceObservation {
+    fn matches(&self, file: &Path, source: &[u8]) -> bool {
+        self.file.as_os_str() == file.as_os_str() && self.source.as_ref() == source
+    }
+
+    pub(crate) fn handles(&self) -> &[SelectionHandle] {
+        &self.handles
+    }
 }
 
 impl ExecutionContext {
     pub(crate) fn new() -> Self {
+        Self::with_registry(ProviderRegistry::default())
+    }
+
+    pub(crate) fn with_registry(registry: ProviderRegistry) -> Self {
         Self {
-            registry: ProviderRegistry::default(),
+            registry,
+            last_source: RefCell::new(None),
         }
     }
 
     pub(crate) fn registry(&self) -> &ProviderRegistry {
         &self.registry
+    }
+
+    pub(crate) fn observe_source(
+        &self,
+        file: &Path,
+        source: &[u8],
+    ) -> Result<Rc<SourceObservation>, IdenteditError> {
+        // The registry is fixed for this context; no observation crosses that boundary.
+        if let Some(observation) = self.last_source.borrow().as_ref()
+            && observation.matches(file, source)
+        {
+            return Ok(Rc::clone(observation));
+        }
+
+        self.last_source.replace(None);
+        let handles = self.parse_handles_for_source(file, source)?;
+        let observation = Rc::new(SourceObservation {
+            file: file.to_path_buf(),
+            source: source.into(),
+            handles,
+        });
+        self.last_source.replace(Some(Rc::clone(&observation)));
+        Ok(observation)
+    }
+
+    pub(crate) fn clear_source_observation(&self) {
+        self.last_source.replace(None);
     }
 
     pub(crate) fn parse_handles_for_file(
@@ -57,3 +108,6 @@ impl Default for ExecutionContext {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests;

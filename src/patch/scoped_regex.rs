@@ -4,7 +4,7 @@ use regex::Regex;
 
 use crate::changeset::TransformTarget;
 use crate::error::IdenteditError;
-use crate::transform::parse::parse_handles_for_file;
+use crate::execution_context::ExecutionContext;
 use crate::transform::resolve::resolve_target_in_handles;
 
 #[derive(Debug, Clone)]
@@ -18,12 +18,14 @@ pub(crate) fn rewrite_node_target_with_scoped_regex(
     target: &TransformTarget,
     pattern: &str,
     replacement: &str,
+    context: &ExecutionContext,
 ) -> Result<ScopedRegexRewrite, IdenteditError> {
     let regex = Regex::new(pattern).map_err(|error| IdenteditError::InvalidRequest {
         message: format!("Invalid scoped regex pattern: {error}"),
     })?;
-    let handles = parse_handles_for_file(file)?;
-    let resolved = resolve_target_in_handles(file, &handles, target)?;
+    let source = context.read_file_bytes(file)?;
+    let observation = context.observe_source(file, &source)?;
+    let resolved = resolve_target_in_handles(file, observation.handles(), target)?;
 
     let replacements = regex.find_iter(&resolved.text).count();
     if replacements == 0 {
