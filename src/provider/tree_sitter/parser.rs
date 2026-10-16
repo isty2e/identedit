@@ -11,9 +11,8 @@ use super::catalog::{LanguageSource, LanguageSpec};
 
 pub(super) fn parse_with_spec(
     spec: &'static LanguageSpec,
-    path: &Path,
     source: &[u8],
-) -> Result<Vec<SelectionHandle>, IdenteditError> {
+) -> Result<tree_sitter::Tree, IdenteditError> {
     let parse_source = if spec.normalize_bare_cr {
         normalize_bare_cr_for_parser(source)
     } else {
@@ -29,9 +28,7 @@ pub(super) fn parse_with_spec(
         });
     }
 
-    let mut handles = Vec::new();
-    collect_nodes(tree.root_node(), path, source, &mut handles);
-    Ok(handles)
+    Ok(tree)
 }
 
 pub(super) fn parse_tree_from_source(

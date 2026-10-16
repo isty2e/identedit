@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::error::IdenteditError;
 use crate::grammar::InstalledGrammar;
 use crate::handle::SelectionHandle;
-use crate::provider::{StructureProvider, normalize_extension};
+use crate::provider::{ParsedSource, StructureProvider, normalize_extension};
 
 mod catalog;
 mod header;
@@ -107,9 +107,13 @@ fn normalize_basename_alias(value: &str) -> Option<String> {
 }
 
 impl StructureProvider for HeaderTreeSitterProvider {
-    fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
-        let (handles, _) = parse_c_cpp_header_with_dialect(path, source)?;
-        Ok(handles)
+    fn parse_source<'source>(
+        &self,
+        path: &'source Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
+        let (tree, _) = parse_c_cpp_header_with_dialect(source)?;
+        Ok(ParsedSource::tree_sitter(path, tree, source))
     }
 
     fn supports_syntax_validation(&self) -> bool {
@@ -142,8 +146,13 @@ impl StructureProvider for HeaderTreeSitterProvider {
 }
 
 impl StructureProvider for TreeSitterProvider {
-    fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
-        parse_with_spec(self.spec, path, source)
+    fn parse_source<'source>(
+        &self,
+        path: &'source Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
+        let tree = parse_with_spec(self.spec, source)?;
+        Ok(ParsedSource::tree_sitter(path, tree, source))
     }
 
     fn supports_syntax_validation(&self) -> bool {
@@ -191,10 +200,21 @@ impl StructureProvider for TreeSitterProvider {
     }
 }
 
+pub(super) fn collect_handles(
+    tree: tree_sitter::Tree,
+    path: &Path,
+    source: &[u8],
+) -> Vec<SelectionHandle> {
+    let mut handles = Vec::new();
+    parser::collect_nodes(tree.root_node(), path, source, &mut handles);
+    handles
+}
+
 #[cfg(test)]
 mod tests {
     use std::panic::panic_any;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{
         HeaderDialect, HeaderTreeSitterProvider, LanguageSource, LanguageSpec, TreeSitterProvider,
@@ -207,6 +227,13 @@ mod tests {
     const CUSTOM_SYNTAX_MESSAGE_EXTENSIONS: &[&str] = &["pyspec"];
     const MULTI_EXTENSION_EXTENSIONS: &[&str] = &["py", "pyi", "pyw"];
     const INVALID_EXTENSION_TOKENS: &[&str] = &["", "   ", ".PYI", "Py"];
+
+    static PROJECTION_LOADS: AtomicUsize = AtomicUsize::new(0);
+
+    fn load_counted_language() -> Result<tree_sitter::Language, IdenteditError> {
+        PROJECTION_LOADS.fetch_add(1, Ordering::SeqCst);
+        Ok(load_python_language())
+    }
 
     const DYNAMIC_FAILURE_SPEC: LanguageSpec = LanguageSpec {
         name: "tree-sitter-dynamic-failure-test",
@@ -268,6 +295,34 @@ mod tests {
             .into_iter()
             .find(|provider| provider.can_handle(path))
             .unwrap_or_else(|| panic!("expected bundled provider for '{}'", path.display()))
+    }
+
+    #[test]
+    fn projecting_an_observation_does_not_parse_again() {
+        const SPEC: LanguageSpec = LanguageSpec {
+            name: "tree-sitter-counted-projection-test",
+            extensions: &["counted"],
+            source: LanguageSource::DynamicLoader(load_counted_language),
+            syntax_error_message: "Syntax errors detected in counted source",
+            normalize_bare_cr: true,
+        };
+        let provider = TreeSitterProvider::from_spec(&SPEC);
+        let path = Path::new("fixture.counted");
+        let source = "def 이름(value):\r    return value\r".as_bytes();
+        PROJECTION_LOADS.store(0, Ordering::SeqCst);
+
+        let parsed = provider.parse_source(path, source).unwrap();
+        assert_eq!(PROJECTION_LOADS.load(Ordering::SeqCst), 1);
+
+        let handles = parsed.into_handles();
+
+        assert_eq!(PROJECTION_LOADS.load(Ordering::SeqCst), 1);
+        let function = handles
+            .iter()
+            .find(|handle| handle.kind == "function_definition")
+            .unwrap();
+        assert_eq!(function.name.as_deref(), Some("이름"));
+        assert_eq!(function.text, "def 이름(value):\r    return value");
     }
 
     #[test]
@@ -835,7 +890,7 @@ mod tests {
     #[test]
     fn parse_c_cpp_header_prefers_cpp_when_both_parsers_succeed() {
         let source = b"int configure(int value);\n";
-        let (_handles, dialect) = parse_c_cpp_header_with_dialect(Path::new("fixture.h"), source)
+        let (_tree, dialect) = parse_c_cpp_header_with_dialect(source)
             .expect("dual parser should succeed when both grammars accept source");
         assert_eq!(dialect, HeaderDialect::Cpp);
     }
@@ -843,7 +898,7 @@ mod tests {
     #[test]
     fn parse_c_cpp_header_falls_back_to_c_when_cpp_has_errors() {
         let source = b"int configure(value)\nint value;\n{\n    return value;\n}\n";
-        let (_handles, dialect) = parse_c_cpp_header_with_dialect(Path::new("fixture.h"), source)
+        let (_tree, dialect) = parse_c_cpp_header_with_dialect(source)
             .expect("dual parser should fall back to C for C-only header syntax");
         assert_eq!(dialect, HeaderDialect::C);
     }
@@ -851,7 +906,7 @@ mod tests {
     #[test]
     fn parse_c_cpp_header_returns_parse_failure_when_both_grammars_fail() {
         let source = b"int broken( {\n";
-        let error = parse_c_cpp_header_with_dialect(Path::new("fixture.h"), source)
+        let error = parse_c_cpp_header_with_dialect(source)
             .expect_err("invalid header source should fail under both grammars");
 
         match error {

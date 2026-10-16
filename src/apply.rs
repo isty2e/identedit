@@ -214,6 +214,13 @@ pub fn dry_run_multi_file_changeset(
 pub(crate) fn preview_multi_file_changeset(
     changeset: &MultiFileChangeset,
 ) -> Result<DryRunPreview, IdenteditError> {
+    preview_multi_file_changeset_with_context(changeset, &ExecutionContext::new())
+}
+
+pub(crate) fn preview_multi_file_changeset_with_context(
+    changeset: &MultiFileChangeset,
+    context: &ExecutionContext,
+) -> Result<DryRunPreview, IdenteditError> {
     if changeset.files.is_empty() {
         return Err(IdenteditError::InvalidRequest {
             message: "changeset.files must contain at least one file".to_string(),
@@ -229,8 +236,7 @@ pub(crate) fn preview_multi_file_changeset(
         .cloned()
         .collect::<Vec<_>>();
 
-    let context = ExecutionContext::new();
-    let preflight_plans = preflight_changesets_in_order(&edit_changesets, context.registry())?;
+    let preflight_plans = preflight_changesets_in_order(&edit_changesets, context)?;
     let move_plans = preflight_move_plans(&move_execution_order)?;
 
     let locations = EditLocations::from_plans(&preflight_plans, &move_plans);
@@ -336,6 +342,36 @@ where
 
 fn apply_changesets_with_hooks<Before, After>(
     changesets: &[FileChange],
+    before_write_hook: Before,
+    after_verify_hook: After,
+) -> Result<ApplyResponse, IdenteditError>
+where
+    Before: FnMut() -> Result<(), IdenteditError>,
+    After: FnMut() -> Result<(), IdenteditError>,
+{
+    apply_changesets_with_context(
+        changesets,
+        &ExecutionContext::new(),
+        before_write_hook,
+        after_verify_hook,
+    )
+}
+
+pub(crate) fn apply_multi_file_changeset_with_context(
+    changeset: &MultiFileChangeset,
+    context: &ExecutionContext,
+) -> Result<ApplyResponse, IdenteditError> {
+    if changeset.files.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: "changeset.files must contain at least one file".to_string(),
+        });
+    }
+    apply_changesets_with_context(&changeset.files, context, || Ok(()), || Ok(()))
+}
+
+fn apply_changesets_with_context<Before, After>(
+    changesets: &[FileChange],
+    context: &ExecutionContext,
     mut before_write_hook: Before,
     mut after_verify_hook: After,
 ) -> Result<ApplyResponse, IdenteditError>
@@ -351,8 +387,7 @@ where
         .cloned()
         .collect::<Vec<_>>();
 
-    let context = ExecutionContext::new();
-    let preflight_plans = preflight_changesets_in_order(&edit_changesets, context.registry())?;
+    let preflight_plans = preflight_changesets_in_order(&edit_changesets, context)?;
     let move_plans = preflight_move_plans(&move_execution_order)?;
     let locations = EditLocations::from_plans(&preflight_plans, &move_plans);
     let commit_batch = prepare_commit_batch(preflight_plans);

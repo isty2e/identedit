@@ -92,16 +92,27 @@ pub(crate) fn build_changeset(
     instructions: Vec<EditOperation>,
 ) -> Result<FileChange, IdenteditError> {
     let context = ExecutionContext::new();
+    build_changeset_with_context(file, instructions, &context)
+}
+
+pub(crate) fn build_changeset_with_context(
+    file: &Path,
+    instructions: Vec<EditOperation>,
+    context: &ExecutionContext,
+) -> Result<FileChange, IdenteditError> {
     let source_text = context.read_file_utf8(file)?;
     let requires_structure_parse = instructions
         .iter()
         .any(|instruction| instruction.target().requires_node_resolution());
-    let handles = if requires_structure_parse {
-        parse_handles_for_source_with_context(file, source_text.as_bytes(), &context)?
+    let observation = if requires_structure_parse {
+        Some(context.observe_source(file, source_text.as_bytes())?)
     } else {
-        Vec::new()
+        None
     };
-    build_changeset_with_handles(file, &source_text, &handles, instructions)
+    let handles = observation
+        .as_ref()
+        .map_or(&[][..], |source| source.handles());
+    build_changeset_with_handles(file, &source_text, handles, instructions)
 }
 
 fn build_changeset_with_handles(
