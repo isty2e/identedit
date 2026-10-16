@@ -181,6 +181,20 @@ Errors use this shape:
 
 `suggestion` is optional. `ambiguous_target` may also include a `candidates` array with structured target context.
 
+### Ambiguity candidate details
+
+Contextual ambiguity errors retain the full match count but show at most the first 16 candidates in their existing order. Matching is not capped or deduplicated, and no candidate is selected automatically. Each displayed record retains its identity, expected-old hash, kind, provider name, qualified name, span, line and preview. Names and guards are not shortened; this is an entry-count bound, not an absolute response-byte bound.
+
+When a collected list is shortened, `error.candidate_summary` contains `total` (all matches) and `omitted` (matches minus displayed records). It is absent for complete lists. Errors from paths that do not collect context, including some JSON/apply ambiguities, keep both `candidates` and `candidate_summary` absent; absence does not mean zero matches. Unshortened and contextless errors keep their existing response, including recovery text. Shortened errors include specific recovery guidance. `--verbose` does not lift the cap.
+
+To discover omitted targets, use `read --json` on the affected file **without `--symbol` or filters**. `read --symbol` uses the same ambiguity resolver and can return another shortened error. Optional kind/name filters intentionally narrow discovery and need not reproduce the original match set; `--name` is a glob over the provider's raw name, not a containing-name path. Do not derive it by splitting a qualified name: opaque provider names can contain dots.
+
+Default AST JSON handles contain addresses and hashes, not the diagnostic `qualified_name`, `line` or `preview`. Add `--verbose` when exact node `text` is needed to distinguish signatures or bodies; it does not add those diagnostic fields. Copy the chosen guards and span into a node target, using `span_hint` for repeated identities. `patch --json` supports this for one operation; `edit --json` builds a plan or batch. Discovery observes current files, not a reserved earlier snapshot. Do not repeat a write command just to expand diagnostics.
+
+Successful AST discovery still returns all matches of its filters; this error limit does not cap it. There is no ambiguity-list paging or full-detail switch; recovery uses read-only discovery. Failed-diff candidates, line-check remap candidates, `locations` and `structure_changes` have separate contracts.
+
+### Other error details
+
 Line checks rejected by `patch` or `apply --repair` keep the `invalid_request` type and expose an optional `line_check` object containing `ok`, `summary`, and `mismatches` (including remap candidates). Read that object directly; diagnostics are no longer JSON encoded inside `message`. Other precondition failures may still use `precondition_failed` without `line_check`.
 
 If apply input declares `command: "edit"` and fails changeset parsing, the error retains the parse reason and suggests `identedit edit --json < request.json | identedit apply`. This is guidance only: input is never converted or applied automatically.

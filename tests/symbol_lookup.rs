@@ -1,19 +1,20 @@
 //! Run the opt-in comparison with two release binaries:
 //! `IDENTEDIT_SYMBOL_BASELINE=/path/to/baseline cargo test --locked --release
 //! --test symbol_lookup compare_symbol_lookup_scaling -- --ignored --nocapture`.
-//! The baseline must be built before the optimization, with the same lockfile
+//! The baseline must return unlimited ambiguity candidates and use the same lockfile
 //! and toolchain. Keep this harness in both builds and build the baseline with
 //! `cargo test --locked --release --test symbol_lookup --no-run` so the Cargo
 //! build mode and dependency features match. Timings include process startup,
-//! parsing and JSON output. Same-name qualification and ambiguity diagnostics
-//! are measured separately, not promised linear scaling.
+//! parsing and JSON output. Large ambiguity cases compare different output policies
+//! using strict projection equivalence, not pure lookup speed. Other cases retain
+//! byte equality. Same-name lookup and diagnostics are not promised linear scaling.
 
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tempfile::tempdir;
 
 mod common;
@@ -201,6 +202,29 @@ fn assert_same_output(actual: &Output, expected: &Output) {
     assert!(actual.stderr == expected.stderr, "stderr differs");
 }
 
+fn assert_ambiguity_projection(actual: &Output, baseline: &Output) {
+    assert_eq!(baseline.status.code(), Some(1));
+    assert_eq!(actual.status.code(), baseline.status.code());
+    assert_eq!(actual.stderr, baseline.stderr);
+    let mut expected: Value = serde_json::from_slice(&baseline.stdout).unwrap();
+    assert_eq!(expected["error"]["type"], "ambiguous_target");
+    let error = expected["error"].as_object_mut().unwrap();
+    let candidates = error.get_mut("candidates").unwrap().as_array_mut().unwrap();
+    let total = candidates.len();
+    assert!(total > 16, "baseline must return unlimited candidates");
+    candidates.truncate(16);
+    error.insert(
+        "candidate_summary".to_string(),
+        json!({"total": total, "omitted": total - 16}),
+    );
+    error.insert(
+        "suggestion".to_string(),
+        json!("Use a more specific selector, or run 'identedit read --json <file>' without --symbol or filters to list all nodes. Add --verbose for bodies; --name matches provider names, not qualified paths. Copy guards and span_hint into patch --json or edit --json."),
+    );
+    let actual: Value = serde_json::from_slice(&actual.stdout).unwrap();
+    assert_eq!(actual, expected);
+}
+
 fn compare_case(
     baseline: &Path,
     candidate: &Path,
@@ -208,13 +232,15 @@ fn compare_case(
     query: Option<&str>,
     size: usize,
     label: &str,
+    assert_output: fn(&Output, &Output),
 ) {
     let mut args = vec!["read", file.to_str().unwrap(), "--json"];
     if let Some(query) = query {
         args.extend(["--symbol", query]);
     }
     let expected = run_binary(baseline, &args);
-    assert_same_output(&run_binary(candidate, &args), &expected);
+    let expected_candidate = run_binary(candidate, &args);
+    assert_output(&expected_candidate, &expected);
     let response: Value = serde_json::from_slice(&expected.stdout).unwrap();
     let count = if expected.status.success() {
         response["summary"]["matches"].as_u64().unwrap()
@@ -231,7 +257,7 @@ fn compare_case(
             let start = Instant::now();
             let actual = run_binary(binary, &args);
             samples[index].push(start.elapsed());
-            assert_same_output(&actual, &expected);
+            assert_same_output(&actual, [&expected, &expected_candidate][index]);
         }
     }
 
@@ -276,10 +302,56 @@ fn verify_inventory(baseline: &Path, candidate: &Path, file: &Path, function_cou
 }
 
 #[test]
-#[ignore = "requires a pinned pre-optimization release binary in IDENTEDIT_SYMBOL_BASELINE"]
+#[ignore = "requires a pinned unlimited-candidate binary in IDENTEDIT_SYMBOL_BASELINE"]
+fn compare_ambiguity_contract_with_unlimited_baseline() {
+    let baseline = std::env::var_os("IDENTEDIT_SYMBOL_BASELINE").unwrap();
+    let baseline = Path::new(&baseline);
+    let candidate = Path::new(env!("CARGO_BIN_EXE_identedit"));
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("duplicates.py");
+
+    for count in [2, 16, 17, 1000] {
+        let source = "def duplicate():\n    return 0\n\n".repeat(count);
+        fs::write(&file, &source).unwrap();
+        for command in ["read", "edit", "patch"] {
+            let mut args = vec![command, file.to_str().unwrap(), "--symbol", "duplicate"];
+            if command == "read" {
+                args.push("--json");
+            } else {
+                args.push("--delete");
+            }
+            if command == "patch" {
+                args.push("--dry-run");
+            }
+            let expected = run_binary(baseline, &args);
+            let actual = run_binary(candidate, &args);
+            if count > 16 {
+                assert_ambiguity_projection(&actual, &expected);
+            } else {
+                assert_same_output(&actual, &expected);
+            }
+            assert_eq!(fs::read_to_string(&file).unwrap(), source);
+        }
+
+        if count == 17 {
+            compare_case(
+                baseline,
+                candidate,
+                &file,
+                Some("duplicate"),
+                count,
+                "projection-contract",
+                assert_ambiguity_projection,
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires a pinned unlimited-candidate release binary in IDENTEDIT_SYMBOL_BASELINE"]
 fn compare_symbol_lookup_scaling() {
     let baseline = std::env::var_os("IDENTEDIT_SYMBOL_BASELINE")
-        .expect("set IDENTEDIT_SYMBOL_BASELINE to the pre-optimization release binary");
+        .expect("set IDENTEDIT_SYMBOL_BASELINE to the unlimited-candidate release binary");
     let baseline = Path::new(&baseline);
     let candidate = Path::new(env!("CARGO_BIN_EXE_identedit"));
     for (label, binary) in [("baseline", baseline), ("candidate", candidate)] {
@@ -304,8 +376,24 @@ fn compare_symbol_lookup_scaling() {
             .collect::<String>();
         fs::write(&file, &source).unwrap();
         verify_inventory(baseline, candidate, &file, size);
-        compare_case(baseline, candidate, &file, None, size, "flat-inventory");
-        compare_case(baseline, candidate, &file, Some("f0"), size, "flat-bare");
+        compare_case(
+            baseline,
+            candidate,
+            &file,
+            None,
+            size,
+            "flat-inventory",
+            assert_same_output,
+        );
+        compare_case(
+            baseline,
+            candidate,
+            &file,
+            Some("f0"),
+            size,
+            "flat-bare",
+            assert_same_output,
+        );
         compare_case(
             baseline,
             candidate,
@@ -313,6 +401,7 @@ fn compare_symbol_lookup_scaling() {
             Some("absent"),
             size,
             "flat-missing",
+            assert_same_output,
         );
 
         let file = dir.path().join("nested.py");
@@ -332,6 +421,7 @@ fn compare_symbol_lookup_scaling() {
             Some("Container.f0"),
             size,
             "nested-qualified",
+            assert_same_output,
         );
         compare_case(
             baseline,
@@ -340,6 +430,7 @@ fn compare_symbol_lookup_scaling() {
             Some("Other.f0"),
             size,
             "nested-wrong-container",
+            assert_same_output,
         );
     }
 
@@ -354,6 +445,7 @@ fn compare_symbol_lookup_scaling() {
             Some("duplicate"),
             size,
             "same-name-ambiguity",
+            assert_ambiguity_projection,
         );
 
         let file = dir.path().join("same-name-qualified.py");
@@ -369,6 +461,7 @@ fn compare_symbol_lookup_scaling() {
             Some("C0.duplicate"),
             size,
             "same-name-qualified",
+            assert_same_output,
         );
     }
 }

@@ -6,6 +6,7 @@ use crate::handle::SelectionHandle;
 use crate::named_structure::{QUALIFIED_NAME_SEPARATOR, QualifiedNames};
 
 const CANDIDATE_PREVIEW_MAX_CHARS: usize = 120;
+const CANDIDATE_CONTEXT_LIMIT: usize = 16;
 
 pub(super) fn resolve_symbol(
     file: &Path,
@@ -30,7 +31,6 @@ pub(super) fn resolve_symbol(
                     .for_handle(handle)
             })
         })
-        .cloned()
         .collect::<Vec<_>>();
     let selector_description = format!("symbol='{query}'");
 
@@ -39,24 +39,28 @@ pub(super) fn resolve_symbol(
             selector: selector_description,
             file: file.display().to_string(),
         }),
-        [single] => Ok(single.clone()),
+        [single] => Ok((*single).clone()),
         candidates => Err(IdenteditError::AmbiguousTargetSelector {
             selector: selector_description,
             file: file.display().to_string(),
             candidates: candidates.len(),
-            candidate_contexts: build_candidate_contexts(candidates, handles, source_text),
+            candidate_contexts: build_candidate_contexts(
+                candidates,
+                names.get_or_init(|| QualifiedNames::from_handles(handles)),
+                source_text,
+            ),
         }),
     }
 }
 
 pub(super) fn build_candidate_contexts(
-    candidates: &[SelectionHandle],
-    all_handles: &[SelectionHandle],
+    candidates: &[&SelectionHandle],
+    names: &QualifiedNames<'_>,
     source_text: &str,
 ) -> Vec<TargetCandidateContext> {
-    let names = QualifiedNames::from_handles(all_handles);
     candidates
         .iter()
+        .take(CANDIDATE_CONTEXT_LIMIT)
         .map(|candidate| TargetCandidateContext {
             identity: candidate.identity.clone(),
             expected_old_hash: candidate.expected_old_hash.to_string(),

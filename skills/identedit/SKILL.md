@@ -61,7 +61,7 @@ The node only bounds the search: matching text in identifiers, strings, and comm
 
 Already have a node identity? Use `--at <identity-hex16>` instead of `--symbol`. For kind-specific glob matching, use `--kind function_definition --name 'process_*'`.
 
-Ambiguity fails without writing and returns `error.candidates`. Inspect them; retry with a qualified symbol, an identity from `read`, or a narrower name glob.
+Ambiguity fails without writing. When collected, `error.candidates` contains at most 16 original-order records; `error.candidate_summary: {total, omitted}` appears only when shortened. To inspect omitted targets, use `read --json` for the file **without `--symbol` or filters**; add `--verbose` for body text. `--name` filters provider names, not qualified paths. Repeated identities need copied `span_hint` in `patch --json` (one operation) or `edit --json` (plans). See the [candidate contract](references/protocol.md#ambiguity-candidate-details).
 
 ### Exact line or range
 
@@ -177,7 +177,7 @@ Allow at most one retry per target; a second failure means stop using identedit 
 | Failure | Next action |
 |---|---|
 | `precondition_failed`, `target_missing` | Re-read, rebuild, retry once; use `read --mode line` for line targets |
-| `ambiguous_target` | Inspect candidates; retry with a qualified symbol, identity, or span hint |
+| `ambiguous_target` | Inspect candidates and omitted counts; follow [node recovery](#function-or-method), then retry with the intended target |
 | `resource_busy` | Another identedit preview/apply may hold the file's apply lock; wait briefly, then retry once within the shared target limit |
 | `parse_failure`, `error.stage: "proposed_result"` | Correct raw payload/other edits; retry once with `--dry-run` |
 | `parse_failure`, `error.stage: "source"` | Original source was rejected; use direct editing to repair it |

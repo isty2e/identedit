@@ -6,6 +6,7 @@ use crate::execution_context::{ExecutionContext, SourceObservation};
 use crate::handle::SelectionHandle;
 use crate::hash::HASH_HEX_LEN;
 use crate::hashline::{HASHLINE_PUBLIC_HEX_LEN, LineAnchor};
+use crate::named_structure::QualifiedNames;
 use crate::selector::Selector;
 
 use super::super::node_selection::{build_candidate_contexts, resolve_symbol};
@@ -139,7 +140,6 @@ fn resolve_unique_identity_handle(
         .handles()
         .iter()
         .filter(|handle| handle.identity == identity)
-        .cloned()
         .collect::<Vec<_>>();
 
     match matches.as_slice() {
@@ -147,14 +147,14 @@ fn resolve_unique_identity_handle(
             identity: identity.to_string(),
             file: file.display().to_string(),
         }),
-        [single] => Ok(single.clone()),
+        [single] => Ok((*single).clone()),
         candidates => Err(IdenteditError::AmbiguousTarget {
             identity: identity.to_string(),
             file: file.display().to_string(),
             candidates: candidates.len(),
             candidate_contexts: build_candidate_contexts(
                 candidates,
-                observation.handles(),
+                &QualifiedNames::from_handles(observation.handles()),
                 &source_text,
             ),
         }),
@@ -174,25 +174,21 @@ fn resolve_unique_selector_handle(
         exclude_kinds: vec![],
     };
     let selector_description = format!("kind='{kind}', name='{name_pattern}'");
-    let matches = selector
-        .filter(observation.handles())?
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let matches = selector.filter(observation.handles())?;
 
     match matches.as_slice() {
         [] => Err(IdenteditError::TargetMissingSelector {
             selector: selector_description,
             file: file.display().to_string(),
         }),
-        [single] => Ok(single.clone()),
+        [single] => Ok((*single).clone()),
         candidates => Err(IdenteditError::AmbiguousTargetSelector {
             selector: selector_description,
             file: file.display().to_string(),
             candidates: candidates.len(),
             candidate_contexts: build_candidate_contexts(
                 candidates,
-                observation.handles(),
+                &QualifiedNames::from_handles(observation.handles()),
                 &source_text,
             ),
         }),
