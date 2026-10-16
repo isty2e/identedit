@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
 
@@ -32,10 +34,10 @@ impl Selector {
         Ok(())
     }
 
-    pub fn filter(
+    pub fn filter<Handle: Borrow<SelectionHandle>>(
         &self,
-        handles: Vec<SelectionHandle>,
-    ) -> Result<Vec<SelectionHandle>, IdenteditError> {
+        handles: impl IntoIterator<Item = Handle>,
+    ) -> Result<Vec<Handle>, IdenteditError> {
         self.validate()?;
 
         let compiled_pattern = self
@@ -50,7 +52,7 @@ impl Selector {
 
         let filtered = handles
             .into_iter()
-            .filter(|handle| self.matches(handle, compiled_pattern.as_ref()))
+            .filter(|handle| self.matches(handle.borrow(), compiled_pattern.as_ref()))
             .collect();
 
         Ok(filtered)
@@ -223,5 +225,100 @@ mod tests {
             filtered.is_empty(),
             "exclude_kinds should take precedence over kind inclusion"
         );
+    }
+
+    #[test]
+    fn filter_borrows_matches_in_input_order_without_deduplicating() {
+        let handles = vec![
+            handle("function_definition", Some("process_data"), "first"),
+            handle("class_definition", Some("process_data"), "class"),
+            handle("function_definition", Some("helper"), "helper"),
+            handle("function_definition", Some("process_more"), "second"),
+            handle("function_definition", Some("process_data"), "first"),
+            handle("function_definition", Some("process*"), "literal"),
+            handle("function_definition", None, "unnamed"),
+        ];
+
+        for (name_pattern, exclude_kind, expected_indices) in [
+            (Some("process_*"), false, vec![0, 3, 4]),
+            (Some("process[*]"), false, vec![5]),
+            (None, false, vec![0, 2, 3, 4, 5, 6]),
+            (Some("*"), true, vec![]),
+            (Some("missing*"), false, vec![]),
+        ] {
+            let selector = Selector {
+                kind: "function_definition".to_string(),
+                name_pattern: name_pattern.map(ToString::to_string),
+                exclude_kinds: if exclude_kind {
+                    vec!["function_definition".to_string()]
+                } else {
+                    vec![]
+                },
+            };
+
+            let filtered = selector.filter(&handles).expect("filter should succeed");
+
+            assert_eq!(filtered.len(), expected_indices.len());
+            for (matched, index) in filtered.into_iter().zip(expected_indices) {
+                assert!(std::ptr::eq(matched, &handles[index]));
+            }
+        }
+    }
+
+    #[test]
+    fn filter_moves_owned_handles_without_copying_node_text() {
+        let selector = Selector {
+            kind: "function_definition".to_string(),
+            name_pattern: Some("process_*".to_string()),
+            exclude_kinds: vec![],
+        };
+        let matched = handle(
+            "function_definition",
+            Some("process_data"),
+            "def process_data(): pass",
+        );
+        let original_text_buffer = matched.text.as_ptr();
+        let handles = vec![
+            handle("function_definition", Some("helper"), "def helper(): pass"),
+            matched,
+        ];
+
+        let filtered = selector.filter(handles).expect("filter should succeed");
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].text, "def process_data(): pass");
+        assert_eq!(filtered[0].text.as_ptr(), original_text_buffer);
+    }
+
+    #[test]
+    fn filter_rejects_invalid_selectors_before_reading_borrowed_handles() {
+        let handles = [handle("function_definition", Some("target"), "text")];
+
+        for kind in ["   ", "function_definition"] {
+            let selector = Selector {
+                kind: kind.to_string(),
+                name_pattern: Some("[".to_string()),
+                exclude_kinds: vec![],
+            };
+            let unvisited_handles = handles
+                .iter()
+                .inspect(|_| panic!("invalid selectors must fail before iteration"));
+
+            let error = selector
+                .filter(unvisited_handles)
+                .expect_err("invalid selector should fail");
+
+            if kind.trim().is_empty() {
+                assert!(matches!(
+                    error,
+                    crate::error::IdenteditError::InvalidRequest { .. }
+                ));
+            } else {
+                assert!(matches!(
+                    error,
+                    crate::error::IdenteditError::InvalidNamePattern { .. }
+                ));
+            }
+        }
     }
 }

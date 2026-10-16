@@ -174,7 +174,11 @@ fn resolve_unique_selector_handle(
         exclude_kinds: vec![],
     };
     let selector_description = format!("kind='{kind}', name='{name_pattern}'");
-    let matches = selector.filter(observation.handles().to_vec())?;
+    let matches = selector
+        .filter(observation.handles())?
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
 
     match matches.as_slice() {
         [] => Err(IdenteditError::TargetMissingSelector {
