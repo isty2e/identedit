@@ -15,7 +15,7 @@ identedit apply --dry-run changeset.json
 identedit apply changeset.json
 ```
 
-`apply --dry-run` and `patch --dry-run` (including `--diff`) take apply locks when they reach apply validation. Line-target no-ops skip that stage. Overlapping identedit previews or apply runs on the same file can return `resource_busy`; preview locks are released before the command returns and do not reserve a later write.
+`apply --dry-run` and `patch --dry-run` (including `--diff`) take apply locks when they reach apply validation. Direct line-target `patch` no-ops skip that stage, but `apply --dry-run` still locks unchanged planned edits. Overlapping identedit previews or apply runs on the same file can return `resource_busy`; preview locks are released before the command returns and do not reserve a later write.
 
 Apply validation opens the file for both reading and writing, so even previews need write access.
 
