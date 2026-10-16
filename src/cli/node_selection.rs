@@ -1,10 +1,11 @@
+use std::cell::OnceCell;
 use std::path::Path;
 
 use crate::error::{IdenteditError, TargetCandidateContext};
 use crate::handle::SelectionHandle;
+use crate::named_structure::{QUALIFIED_NAME_SEPARATOR, QualifiedNames};
 
 const CANDIDATE_PREVIEW_MAX_CHARS: usize = 120;
-const QUALIFIED_NAME_SEPARATOR: &str = ".";
 
 pub(super) fn resolve_symbol(
     file: &Path,
@@ -19,9 +20,16 @@ pub(super) fn resolve_symbol(
         });
     }
 
+    let names = OnceCell::new();
     let matches = handles
         .iter()
-        .filter(|handle| symbol_matches(handle, handles, query))
+        .filter(|handle| {
+            symbol_matches(handle, query, || {
+                names
+                    .get_or_init(|| QualifiedNames::from_handles(handles))
+                    .for_handle(handle)
+            })
+        })
         .cloned()
         .collect::<Vec<_>>();
     let selector_description = format!("symbol='{query}'");
@@ -46,6 +54,7 @@ pub(super) fn build_candidate_contexts(
     all_handles: &[SelectionHandle],
     source_text: &str,
 ) -> Vec<TargetCandidateContext> {
+    let names = QualifiedNames::from_handles(all_handles);
     candidates
         .iter()
         .map(|candidate| TargetCandidateContext {
@@ -53,7 +62,7 @@ pub(super) fn build_candidate_contexts(
             expected_old_hash: candidate.expected_old_hash.to_string(),
             kind: candidate.kind.clone(),
             name: candidate.name.clone(),
-            qualified_name: qualified_symbol_name(candidate, all_handles),
+            qualified_name: names.for_handle(candidate),
             span: candidate.span,
             line: line_number_for_offset(source_text, candidate.span.start),
             preview: preview_for_candidate(candidate),
@@ -61,7 +70,11 @@ pub(super) fn build_candidate_contexts(
         .collect()
 }
 
-fn symbol_matches(handle: &SelectionHandle, handles: &[SelectionHandle], query: &str) -> bool {
+fn symbol_matches(
+    handle: &SelectionHandle,
+    query: &str,
+    qualified_name: impl FnOnce() -> Option<String>,
+) -> bool {
     let Some(name) = handle.name.as_deref() else {
         return false;
     };
@@ -72,24 +85,7 @@ fn symbol_matches(handle: &SelectionHandle, handles: &[SelectionHandle], query: 
         || (query
             .strip_suffix(name)
             .is_some_and(|prefix| prefix.ends_with(QUALIFIED_NAME_SEPARATOR))
-            && qualified_symbol_name(handle, handles).is_some_and(|qualified| qualified == query))
-}
-
-fn qualified_symbol_name(handle: &SelectionHandle, handles: &[SelectionHandle]) -> Option<String> {
-    let name = handle.name.as_ref()?;
-    let mut parts = handles
-        .iter()
-        .filter(|candidate| is_named_ancestor(candidate, handle))
-        .collect::<Vec<_>>();
-    parts.sort_by_key(|candidate| (candidate.span.start, std::cmp::Reverse(candidate.span.end)));
-
-    let mut qualified = parts
-        .into_iter()
-        .filter_map(|candidate| candidate.name.as_deref())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    qualified.push(name.clone());
-    Some(qualified.join(QUALIFIED_NAME_SEPARATOR))
+            && qualified_name().is_some_and(|qualified| qualified == query))
 }
 
 fn line_number_for_offset(source_text: &str, offset: usize) -> usize {
@@ -166,16 +162,6 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn is_named_ancestor(candidate: &SelectionHandle, handle: &SelectionHandle) -> bool {
-    candidate.name.is_some()
-        && candidate.span.start <= handle.span.start
-        && handle.span.end <= candidate.span.end
-        && !(candidate.span.start == handle.span.start
-            && candidate.span.end == handle.span.end
-            && candidate.kind == handle.kind
-            && candidate.name == handle.name)
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -183,10 +169,20 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::handle::{SelectionHandle, Span};
+    use crate::named_structure::QualifiedNames;
 
-    use super::{
-        line_number_for_offset, preview_for_candidate, qualified_symbol_name, symbol_matches,
-    };
+    use super::{line_number_for_offset, preview_for_candidate};
+
+    fn qualified_symbol_name(
+        handle: &SelectionHandle,
+        handles: &[SelectionHandle],
+    ) -> Option<String> {
+        QualifiedNames::from_handles(handles).for_handle(handle)
+    }
+
+    fn symbol_matches(handle: &SelectionHandle, handles: &[SelectionHandle], query: &str) -> bool {
+        super::symbol_matches(handle, query, || qualified_symbol_name(handle, handles))
+    }
 
     fn named_handle(name: Option<&str>, kind: &str, start: usize, end: usize) -> SelectionHandle {
         SelectionHandle::from_parts(

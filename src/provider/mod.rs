@@ -12,9 +12,10 @@ mod util;
 
 pub use fallback::FallbackProvider;
 pub use json::JsonProvider;
+pub(crate) use parsed_source::NameProjectionError;
 pub use parsed_source::ParsedSource;
 pub use tree_sitter::{HeaderTreeSitterProvider, TreeSitterProvider};
-pub(crate) use util::{node_text, normalize_bare_cr_for_parser};
+pub(crate) use util::{node_source, node_text, normalize_bare_cr_for_parser};
 
 pub(crate) fn normalize_extension(value: &str) -> Option<String> {
     let trimmed = value.trim();

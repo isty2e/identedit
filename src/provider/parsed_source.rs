@@ -3,6 +3,13 @@ use std::path::Path;
 use tree_sitter::Tree;
 
 use crate::handle::SelectionHandle;
+use crate::named_structure::NamedNode;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NameProjectionError {
+    Unsupported,
+    InvalidSpan,
+}
 
 /// A provider observation, not necessarily a syntax-validation proof.
 pub struct ParsedSource<'source> {
@@ -51,6 +58,18 @@ impl<'source> ParsedSource<'source> {
                 super::json::collect_handles(tree, path, source)
             }
             Representation::Handles(handles) => handles,
+        }
+    }
+
+    pub(crate) fn named_nodes(&self) -> Result<Vec<NamedNode>, NameProjectionError> {
+        match &self.representation {
+            Representation::TreeSitter { tree, source, .. } => {
+                super::tree_sitter::collect_named_nodes(tree, source)
+            }
+            Representation::Json { tree, source, .. } => {
+                super::json::collect_named_nodes(tree, source)
+            }
+            Representation::Handles(_) => Err(NameProjectionError::Unsupported),
         }
     }
 }

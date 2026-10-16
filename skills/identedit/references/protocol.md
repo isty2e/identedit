@@ -39,6 +39,52 @@ This is provider acceptance, not compiler, indentation, scope, or behavioral val
 
 Generic structural-confinement and symbol/container-preservation rejection rules are unsupported: raw replacement requests do not specify the intended output structure, and legitimate restructuring can resemble an error. These rules remain deferred until requests can express expected structure or maintainers accept a separately scoped contract. Node-result parsing does not resolve the Python placement failures in [issue #16](https://github.com/isty2e/identedit/issues/16).
 
+## Named-structure changes
+
+Successful JSON `patch` and `apply` responses include `structure_changes` in both default and verbose output, including dry-run. This observes name/count changes for files containing node-target operations; it never rejects an edit or infers rename/move intent. `edit` only builds a plan, discovery-only `patch --from-diff` keeps its candidate response, and `--diff` emits no report on stdout or informational report on stderr.
+
+Names are not limited to declarations. Any provider-named node can contribute, including default parameters, keyword arguments and local variable declarators; body-only edits can therefore change the report.
+
+For example, a method becoming nested inside another method can produce:
+
+```json
+{
+  "structure_changes": {
+    "summary": {
+      "checked_files": 1,
+      "unavailable_files": 0,
+      "out_of_scope_files": 0,
+      "added": 1,
+      "removed": 1
+    },
+    "files": {
+      "total": 1,
+      "omitted": 0,
+      "entries": [{"file": "example.py", "status": "checked"}]
+    },
+    "changes": {
+      "total": 2,
+      "omitted": 0,
+      "entries": [
+        {"file": "example.py", "kind": "function_definition", "qualified_name": "Example.target", "before_count": 1, "after_count": 0},
+        {"file": "example.py", "kind": "function_definition", "qualified_name": "Example.first.target", "before_count": 0, "after_count": 1}
+      ]
+    }
+  }
+}
+```
+
+- Each file has one observation status: `checked`, `unavailable`, or `out_of_scope`. A checked file with no differences contributes no changed entries. Unavailable files include `reason: "unsupported_provider"` for fallback/non-capable observations or `reason: "projection_failed"` for recoverable observation failure. These states are not checked empty observations. Line/file-boundary-only files, empty operation lists and whole-file moves are out of scope and gain no structural parsing for this report. The envelope remains present even when every file is `out_of_scope`.
+- `files` describes input changeset file units; a whole-file move contributes its source file. `files.total` and the summary coverage counts include all units, while `files.entries` contains at most 16, sorted by file. `files.omitted` explicitly counts unlisted file identities; do not assume an omitted file was checked or unchanged.
+- Compare occurrence counts by file, provider `kind` and full qualified name. Overloads/getters/setters with the same key remain multiple occurrences. Body or decorator changes alone need not change those counts. Names follow the existing selector's named-span containment interpretation, including opaque names and stable equal-span ordering, not compiler/LSP scope. Identity hashes and declaration text are not comparison keys. Stable semantic identity across provider versions or `.h` dialect selection is not promised.
+- `summary.added` and `summary.removed` are exact occurrence increases/decreases among checked files only; unavailable files contribute no invented counts. `changes.total` counts changed keys, not occurrences or edit operations. Each entry gives its full-key `before_count` and `after_count`.
+- `changes.entries` contains at most 16 entries across the response. Ordering is file, decreases before increases, full qualified name, then kind. `changes.omitted` counts changed entries not shown. Counts and ordering are computed before display limits, including when a container rename changes many qualified names. `--verbose` does not expand either receipt limit.
+- Qualified names longer than 120 Unicode scalar values are shortened from the front with `…`, retaining the tail/leaf within that limit, and have `qualified_name_truncated: true`. An absent flag means false. Truncated names are display fragments, not exact selectors; equal displayed fragments are not merged. A leaf longer than the limit is itself shortened from the front.
+
+Observations use the complete locked preflight source and proposed bytes, including co-resident edits. They are computed before writes, without rereading mutable paths after commit. Dry-run reports planned changes; a committed receipt describes that successful transaction's proposed bytes, not a fresh post-write read or reservation. Result-parse errors retain their ordinary failure precedence; recoverable optional observation failures do not change edit acceptance. Error and rollback responses have no success report.
+
+An empty checked difference is not proof of valid syntax, indentation or behavior. Review the named entries rather than only their totals, and retain ordinary language/test verification. The [node-result parsing boundary](#node-result-parsing) and its unsupported generic-rejection policy remain unchanged.
+
 ## Raw move text
 
 The `edit --json` operations `move_before`, `move_after`, `move_to_before`, and `move_to_after` accept optional string fields `prefix` and `suffix`. At the resolved destination, Identedit inserts `prefix + selected node bytes + suffix` exactly once. The source selection, content hash checks and deletion remain unchanged: affixes do not expand the source span or remove surrounding whitespace or comments.

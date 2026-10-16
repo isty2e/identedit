@@ -19,14 +19,23 @@ struct ObservedProvider {
     handle_projections: Rc<Cell<usize>>,
     validates_syntax: bool,
     fail_result_setup: bool,
+    corrupt_name_span: bool,
 }
 
 impl StructureProvider for ObservedProvider {
     fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
         self.handle_projections
             .set(self.handle_projections.get() + 1);
-        self.parse_source(path, source)
-            .map(ParsedSource::into_handles)
+        let mut handles = self.parse_source(path, source)?.into_handles();
+        if self.corrupt_name_span {
+            handles
+                .iter_mut()
+                .find(|handle| handle.name.as_deref() == Some("other"))
+                .unwrap()
+                .span
+                .end = source.len() + 1;
+        }
+        Ok(handles)
     }
 
     fn parse_source<'source>(
@@ -72,6 +81,7 @@ fn context(
             handle_projections: Rc::new(Cell::new(0)),
             validates_syntax,
             fail_result_setup,
+            corrupt_name_span: false,
         },
     )]))
 }
@@ -212,6 +222,7 @@ fn final_validation_does_not_project_selection_handles() {
                 handle_projections: Rc::clone(&handle_projections),
                 validates_syntax: true,
                 fail_result_setup: false,
+                corrupt_name_span: false,
             },
         )]));
 
@@ -225,6 +236,89 @@ fn final_validation_does_not_project_selection_handles() {
     );
     assert_eq!(std::fs::read(&file).unwrap(), before);
     drop(plans);
+}
+
+#[test]
+fn optional_observation_failure_preserves_mutation_and_cannot_mask_result_rejection() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("fixture.py");
+    let source = "def target():\n    return 1\n\ndef other():\n    return 3\n";
+
+    for reject_result in [false, true] {
+        std::fs::write(&file, source).unwrap();
+        let calls = Rc::new(Cell::new(0));
+        let context =
+            ExecutionContext::with_registry(ProviderRegistry::from_providers(vec![Box::new(
+                ObservedProvider {
+                    inner: TreeSitterProvider::python(),
+                    calls: Rc::clone(&calls),
+                    handle_projections: Rc::new(Cell::new(0)),
+                    validates_syntax: true,
+                    fail_result_setup: false,
+                    corrupt_name_span: true,
+                },
+            )]));
+        let handles = TreeSitterProvider::python()
+            .parse(&file, source.as_bytes())
+            .unwrap();
+        let target = handles
+            .iter()
+            .find(|handle| handle.name.as_deref() == Some("target"))
+            .unwrap();
+        let new_text = if reject_result {
+            "def broken(:"
+        } else {
+            "def renamed():\n    return 2"
+        };
+        let operation = EditOperation::try_new(
+            TransformTarget::node(
+                target.identity.clone(),
+                target.kind.clone(),
+                Some(target.span),
+                target.expected_old_hash.clone(),
+            ),
+            OpKind::Replace {
+                new_text: new_text.to_string(),
+            },
+        )
+        .unwrap();
+        let changeset = build_changeset_with_context(&file, vec![operation], &context).unwrap();
+
+        let result = super::super::apply_changesets_with_context(
+            &[changeset],
+            &context,
+            || Ok(()),
+            || Ok(()),
+        );
+
+        assert_eq!(
+            calls.get(),
+            2,
+            "source and independent result parsing remain intact"
+        );
+        if reject_result {
+            assert!(matches!(
+                result,
+                Err(IdenteditError::ResultParseFailure { .. })
+            ));
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        } else {
+            let response = serde_json::to_value(result.unwrap()).unwrap();
+            assert_eq!(response["transaction"]["status"], "committed");
+            assert_eq!(
+                response["structure_changes"]["files"]["entries"][0]["status"],
+                "unavailable"
+            );
+            assert_eq!(
+                response["structure_changes"]["files"]["entries"][0]["reason"],
+                "projection_failed"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&file).unwrap(),
+                source.replace("def target():\n    return 1", new_text)
+            );
+        }
+    }
 }
 
 #[test]

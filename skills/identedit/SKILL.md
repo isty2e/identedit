@@ -113,6 +113,8 @@ For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (incl
 
 Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. A `parse_failure` with `error.stage: "proposed_result"` means no transaction files were changed: correct the payload and retry with `--dry-run`. `edit` only builds a plan and does not run this result check.
 
+Review `structure_changes` in successful JSON `patch`/`apply` receipts, including dry-run. It reports named-structure occurrence changes: inspect file statuses and decreased/increased names, not just summary counts. Names are not declaration-only; default parameters, keyword arguments and local variable declarators can appear when the provider names them. `checked` with no changes is not a syntax/behavior proof; `unavailable` or `out_of_scope` means no observation. Respect omitted/truncated markers; `--diff` has no report. See the [report contract](references/protocol.md#named-structure-changes).
+
 Provider acceptance is not semantic correctness: Python indentation errors and unintended nesting can still pass. No indentation or missing separators are inferred. After a non-trivial edit, run the narrowest relevant project verifier, e.g. `python -m compileall example.py` and the affected tests. If verification fails, treat the workflow as failed and make at most one bounded follow-up edit attempt.
 
 ## Planned edits and recovery

@@ -3,7 +3,8 @@ use std::path::Path;
 use crate::error::IdenteditError;
 use crate::handle::compute_identity;
 use crate::hash::hash_text;
-use crate::provider::{JsonProvider, ProviderRegistry, StructureProvider};
+use crate::named_structure::QualifiedNames;
+use crate::provider::{JsonProvider, NameProjectionError, ProviderRegistry, StructureProvider};
 
 #[test]
 fn deferred_projection_keeps_each_sources_file() {
@@ -140,5 +141,77 @@ fn source_observations_preserve_rejection_and_fallback_noncoverage() {
     assert!(matches!(
         fallback.parse_source(path, &[0xff]),
         Err(IdenteditError::ParseFailure { .. })
+    ));
+}
+
+#[test]
+fn lightweight_names_equal_full_handle_projection_across_provider_rules() {
+    let registry = ProviderRegistry::default();
+    for (file, source) in [
+        (
+            "fixture.py",
+            "class Example:\r    @staticmethod\r    def 대상():\r        pass\r",
+        ),
+        (
+            "fixture.js",
+            "class Example { get value() { return 1; } set value(x) {} }",
+        ),
+        (
+            "fixture.ts",
+            "function target(x: number): number; function target(x: any) { return x; }",
+        ),
+        ("fixture.lua", "function tools.init() return 1 end"),
+        (
+            "fixture.rs",
+            "struct Example; impl Example { fn target() {} }",
+        ),
+        (
+            "fixture.json",
+            r#"{"outer.part":{"inner":1,"inner":2},"":true,"a\u0062":"value"}"#,
+        ),
+        (
+            "fixture.h",
+            "int target(value)\nint value;\n{ return value; }\n",
+        ),
+        (
+            "fixture.h",
+            "template <typename T> struct Box { T value; };",
+        ),
+    ] {
+        let path = Path::new(file);
+        let provider = registry.provider_for(path).unwrap();
+        let parsed = provider.parse_source(path, source.as_bytes()).unwrap();
+        let names = parsed.named_nodes().unwrap();
+        let handles = parsed.into_handles();
+        let full = handles
+            .iter()
+            .filter_map(|handle| Some((handle.span, handle.kind.as_str(), handle.name.as_deref()?)))
+            .collect::<Vec<_>>();
+        let light = names
+            .iter()
+            .map(|node| (node.span, node.kind.as_str(), node.name.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(light, full, "{file}");
+        assert_eq!(
+            QualifiedNames::from_nodes(&names).counts(),
+            QualifiedNames::from_handles(&handles).counts(),
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn eager_fallback_is_unavailable_not_an_empty_named_observation() {
+    let registry = ProviderRegistry::default();
+    let path = Path::new("fixture.unknown");
+    let parsed = registry
+        .provider_for(path)
+        .unwrap()
+        .parse_source(path, b"plain text\n")
+        .unwrap();
+    assert!(matches!(
+        parsed.named_nodes(),
+        Err(NameProjectionError::Unsupported)
     ));
 }

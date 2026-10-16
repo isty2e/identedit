@@ -3,6 +3,13 @@ use std::borrow::Cow;
 use tree_sitter::Node;
 
 pub(crate) fn node_text(node: Node<'_>, source: &[u8]) -> Option<String> {
+    node_source(node, source).map(Cow::into_owned)
+}
+
+pub(crate) fn node_source<'source>(
+    node: Node<'_>,
+    source: &'source [u8],
+) -> Option<Cow<'source, str>> {
     let start = node.start_byte();
     let end = node.end_byte();
 
@@ -10,7 +17,7 @@ pub(crate) fn node_text(node: Node<'_>, source: &[u8]) -> Option<String> {
         return None;
     }
 
-    Some(String::from_utf8_lossy(&source[start..end]).to_string())
+    Some(String::from_utf8_lossy(&source[start..end]))
 }
 
 pub(crate) fn normalize_bare_cr_for_parser(source: &[u8]) -> Cow<'_, [u8]> {

@@ -21,6 +21,7 @@ use super::io::{AtomicWritePhase, write_text_atomically_tracked_with_hook};
 use super::replacements::{
     apply_replacements_to_text, matched_changes_to_replacements, validate_preview_consistency,
 };
+use super::structure_report::FileObservation;
 use super::{ApplyFileResult, ApplyFileStatus, EditLocations};
 
 #[derive(Debug)]
@@ -28,6 +29,7 @@ pub(super) struct PreflightFilePlan {
     pub(super) file: PathBuf,
     pub(super) operations_total: usize,
     pub(super) locations: EditLocations,
+    pub(super) structure: FileObservation,
     original_text: String,
     original_permissions: std::fs::Permissions,
     pub(super) updated_text: String,
@@ -88,6 +90,7 @@ pub(super) fn preflight_resolved_text_update(
         file: file.to_path_buf(),
         operations_total,
         locations: EditLocations::default(),
+        structure: FileObservation::out_of_scope(),
         original_text: source_text,
         original_permissions,
         updated_text,
@@ -215,10 +218,11 @@ fn preflight_changeset(
     let original_text = source_text.clone();
     let updated_text = apply_replacements_to_text(&changeset.file, source_text, replacements)?;
 
-    if has_node_operations
-        && let Some(provider) = provider.filter(|provider| provider.supports_syntax_validation())
+    let structure = if !has_node_operations {
+        FileObservation::out_of_scope()
+    } else if let Some(provider) = provider.filter(|provider| provider.supports_syntax_validation())
     {
-        provider
+        let result = provider
             .parse_source(&changeset.file, updated_text.as_bytes())
             .map_err(|error| match error {
                 IdenteditError::ParseFailure { provider, message } => {
@@ -230,12 +234,16 @@ fn preflight_changeset(
                 }
                 other => other,
             })?;
-    }
+        FileObservation::observe(&original_text, handles, &result)
+    } else {
+        FileObservation::unsupported()
+    };
 
     Ok(PreflightFilePlan {
         file: changeset.file.clone(),
         operations_total: changeset.operations.len(),
         locations,
+        structure,
         original_text,
         original_permissions,
         updated_text,

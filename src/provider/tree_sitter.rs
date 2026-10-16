@@ -210,6 +210,13 @@ pub(super) fn collect_handles(
     handles
 }
 
+pub(super) fn collect_named_nodes(
+    tree: &tree_sitter::Tree,
+    source: &[u8],
+) -> Result<Vec<crate::named_structure::NamedNode>, super::NameProjectionError> {
+    parser::collect_named_nodes(tree.root_node(), source)
+}
+
 #[cfg(test)]
 mod tests {
     use std::panic::panic_any;
@@ -312,6 +319,10 @@ mod tests {
         PROJECTION_LOADS.store(0, Ordering::SeqCst);
 
         let parsed = provider.parse_source(path, source).unwrap();
+        assert_eq!(PROJECTION_LOADS.load(Ordering::SeqCst), 1);
+
+        let names = parsed.named_nodes().unwrap();
+        assert!(names.iter().any(|node| node.name == "이름"));
         assert_eq!(PROJECTION_LOADS.load(Ordering::SeqCst), 1);
 
         let handles = parsed.into_handles();

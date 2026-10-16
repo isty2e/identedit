@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::apply::{
     ApplyDryRunSummary, ApplyFailureInjection, ApplyFileResult, ApplyResponse, ApplySummary,
-    ApplyTransaction, EditLocations, apply_multi_file_changeset,
+    ApplyTransaction, EditLocations, StructureChanges, apply_multi_file_changeset,
     apply_multi_file_changeset_with_injection, dry_run_multi_file_changeset,
 };
 use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget};
@@ -52,6 +52,7 @@ pub struct ApplyCliResponse {
     pub summary: ApplySummary,
     pub transaction: ApplyTransaction,
     pub locations: EditLocations,
+    pub structure_changes: StructureChanges,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<ApplyDryRunSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -335,6 +336,7 @@ pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> Ap
         transaction,
         dry_run,
         locations,
+        structure_changes,
     } = response;
 
     ApplyCliResponse {
@@ -343,6 +345,7 @@ pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> Ap
         dry_run,
         applied: verbose.then_some(applied),
         locations,
+        structure_changes,
     }
 }
 
