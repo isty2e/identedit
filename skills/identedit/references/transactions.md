@@ -48,7 +48,7 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 |---|---|---|
 | `precondition_failed` | File changed since read | Re-run read, rebuild edit request, retry once |
 | `target_missing` | Structure no longer exists | Re-run read to discover current state |
-| `ambiguous_target` | Multiple matches for a selector | Inspect `error.candidates`, then retry with `--symbol <qualified_name>`, `--at <identity>`, or JSON `span_hint` |
+| `ambiguous_target` | Multiple matches for a selector | Inspect candidates and any `candidate_summary`; for omitted targets, use `read --json` without `--symbol` or filters, adding `--verbose` for bodies. Use the chosen guards and JSON `span_hint` for duplicate identities; see the [candidate contract](protocol.md#ambiguity-candidate-details) |
 | `path_changed` | File modified during apply | Re-run full pipeline (`read`, `edit`, `apply`) |
 | `resource_busy` | Apply lock held, e.g. by another identedit preview or apply | Wait briefly, then retry once within the [shared target limit](../SKILL.md#recovery-and-output-contracts) |
 | `rollback_failed` | Apply failed and rollback incomplete | Inspect files manually, then re-run pipeline |

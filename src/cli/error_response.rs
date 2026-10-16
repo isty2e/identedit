@@ -3,6 +3,7 @@ use serde::Serialize;
 use crate::error::{IdenteditError, TargetCandidateContext};
 
 const SERIALIZATION_FALLBACK: &str = "{\"error\":{\"type\":\"serialization_error\",\"message\":\"Failed to serialize error response\"}}";
+const BOUNDED_CANDIDATE_SUGGESTION: &str = "Use a more specific selector, or run 'identedit read --json <file>' without --symbol or filters to list all nodes. Add --verbose for bodies; --name matches provider names, not qualified paths. Copy guards and span_hint into patch --json or edit --json.";
 
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
@@ -17,6 +18,12 @@ enum ParseStage {
 }
 
 #[derive(Debug, Serialize)]
+struct CandidateSummary {
+    total: usize,
+    omitted: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct ErrorBody {
     r#type: String,
     message: String,
@@ -26,6 +33,8 @@ struct ErrorBody {
     suggestion: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     candidates: Vec<TargetCandidateContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidate_summary: Option<CandidateSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     line_check: Option<Box<crate::hashline::HashlineCheckResult>>,
 }
@@ -42,19 +51,8 @@ impl ErrorBody {
             stage: None,
             suggestion,
             candidates: vec![],
+            candidate_summary: None,
             line_check: None,
-        }
-    }
-
-    fn with_candidates(
-        error_type: impl Into<String>,
-        message: impl Into<String>,
-        suggestion: Option<String>,
-        candidates: Vec<TargetCandidateContext>,
-    ) -> Self {
-        Self {
-            candidates,
-            ..Self::new(error_type, message, suggestion)
         }
     }
 
@@ -167,22 +165,34 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
             }
         }
         IdenteditError::AmbiguousTarget {
+            candidates: total,
             candidate_contexts,
             ..
         }
         | IdenteditError::AmbiguousTargetSelector {
+            candidates: total,
             candidate_contexts,
             ..
-        } => ErrorResponse {
-            error: ErrorBody::with_candidates(
-                "ambiguous_target",
-                error.to_string(),
-                Some(
-                    "Use a more specific selector or re-run 'identedit read' to disambiguate"
-                        .to_string(),
-                ),
-                candidate_contexts.clone(),
-            ),
+        } => {
+            let candidate_summary = (!candidate_contexts.is_empty()
+                && *total > candidate_contexts.len())
+                .then(|| CandidateSummary {
+                    total: *total,
+                    omitted: *total - candidate_contexts.len(),
+                });
+            let suggestion = if candidate_summary.is_some() {
+                BOUNDED_CANDIDATE_SUGGESTION
+            } else {
+                "Use a more specific selector or re-run 'identedit read' to disambiguate"
+            };
+
+            ErrorResponse {
+                error: ErrorBody {
+                    candidates: candidate_contexts.clone(),
+                    candidate_summary,
+                    ..ErrorBody::new("ambiguous_target", error.to_string(), Some(suggestion.to_string()))
+                },
+            }
         },
         IdenteditError::PreconditionFailed { .. } => ErrorResponse {
             error: ErrorBody::new(
@@ -207,7 +217,109 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::error_response;
-    use crate::error::IdenteditError;
+    use crate::error::{IdenteditError, TargetCandidateContext};
+    use crate::handle::Span;
+
+    fn candidate(index: usize) -> TargetCandidateContext {
+        TargetCandidateContext {
+            identity: format!("{index:016x}"),
+            expected_old_hash: format!("{:016x}", index + 1),
+            kind: "function_definition".to_string(),
+            name: Some("target".to_string()),
+            qualified_name: Some(format!("C{index}.target")),
+            span: Span {
+                start: index * 8,
+                end: index * 8 + 4,
+            },
+            line: index + 1,
+            preview: "def target():".to_string(),
+        }
+    }
+
+    fn ambiguity_errors(
+        total: usize,
+        contexts: Vec<TargetCandidateContext>,
+    ) -> [IdenteditError; 2] {
+        [
+            IdenteditError::AmbiguousTarget {
+                identity: "id".to_string(),
+                file: "fixture.py".to_string(),
+                candidates: total,
+                candidate_contexts: contexts.clone(),
+            },
+            IdenteditError::AmbiguousTargetSelector {
+                selector: "symbol='target'".to_string(),
+                file: "fixture.py".to_string(),
+                candidates: total,
+                candidate_contexts: contexts,
+            },
+        ]
+    }
+
+    #[test]
+    fn candidate_summary_distinguishes_shortened_from_uncollected_contexts() {
+        for (total, shown, summary) in [
+            (2, 2, None),
+            (16, 16, None),
+            (17, 16, Some((17, 1))),
+            (1000, 16, Some((1000, 984))),
+            (17, 0, None),
+        ] {
+            for error in ambiguity_errors(total, (0..shown).map(candidate).collect()) {
+                let rendered = super::render_error_response(&error);
+                let response: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+                let expected = summary.map(
+                    |(total, omitted)| serde_json::json!({"total": total, "omitted": omitted}),
+                );
+                assert_eq!(
+                    response["error"].get("candidate_summary").cloned(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unshortened_and_contextless_ambiguity_keep_legacy_serialized_bytes() {
+        #[derive(serde::Serialize)]
+        struct LegacyResponse<'a> {
+            error: LegacyBody<'a>,
+        }
+
+        #[derive(serde::Serialize)]
+        struct LegacyBody<'a> {
+            r#type: &'static str,
+            message: String,
+            suggestion: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            candidates: Option<&'a [TargetCandidateContext]>,
+        }
+
+        for (total, shown) in [(2, 2), (16, 16), (2, 0), (17, 0), (1000, 0)] {
+            let contexts = (0..shown).map(candidate).collect::<Vec<_>>();
+            for error in ambiguity_errors(total, contexts.clone()) {
+                let target = match &error {
+                    IdenteditError::AmbiguousTarget { .. } => "identity 'id'",
+                    IdenteditError::AmbiguousTargetSelector { .. } => "selector 'symbol='target''",
+                    _ => unreachable!(),
+                };
+                let legacy = LegacyResponse {
+                    error: LegacyBody {
+                        r#type: "ambiguous_target",
+                        message: format!(
+                            "Multiple targets matched {target} in file 'fixture.py' ({total} candidates)"
+                        ),
+                        suggestion: "Use a more specific selector or re-run 'identedit read' to disambiguate",
+                        candidates: (!contexts.is_empty()).then_some(contexts.as_slice()),
+                    },
+                };
+                assert_eq!(
+                    super::render_error_response(&error),
+                    serde_json::to_string_pretty(&legacy).unwrap(),
+                );
+            }
+        }
+    }
 
     fn assert_error_type(
         error: IdenteditError,
