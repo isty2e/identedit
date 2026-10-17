@@ -8,7 +8,7 @@ use crate::handle::{SelectionHandle, Span};
 use crate::named_structure::NamedNode;
 use crate::provider::{NameProjectionError, node_text, normalize_bare_cr_for_parser};
 
-use super::catalog::{LanguageSource, LanguageSpec};
+use super::catalog::{LanguageSource, LanguageSpec, load_python_language};
 
 pub(super) fn parse_with_spec(
     spec: &'static LanguageSpec,
@@ -30,6 +30,49 @@ pub(super) fn parse_with_spec(
     }
 
     Ok(tree)
+}
+
+pub(super) fn parse_proposed_with_spec(
+    spec: &'static LanguageSpec,
+    source: &[u8],
+) -> Result<tree_sitter::Tree, IdenteditError> {
+    let tree = parse_with_spec(spec, source)?;
+    if matches!(&spec.source, LanguageSource::Bundled(_))
+        && tree.language().eq(&load_python_language())
+        && let Some(block) = empty_python_block(&tree)
+    {
+        let owner = block.parent().unwrap_or(block);
+        return Err(IdenteditError::ParseFailure {
+            provider: spec.name,
+            message: format!(
+                "Empty Python block in the proposed result for {} starting at line {}",
+                owner.kind(),
+                owner.start_position().row + 1
+            ),
+        });
+    }
+
+    Ok(tree)
+}
+
+fn empty_python_block(tree: &tree_sitter::Tree) -> Option<Node<'_>> {
+    let mut cursor = tree.walk();
+    loop {
+        let node = cursor.node();
+        if node.is_named() && node.kind() == "block" && node.start_byte() == node.end_byte() {
+            return Some(node);
+        }
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return None;
+            }
+        }
+    }
 }
 
 pub(super) fn parse_tree_from_source(

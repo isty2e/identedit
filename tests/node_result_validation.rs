@@ -595,46 +595,155 @@ fn python_move_to_an_existing_file_end_separator_can_succeed() {
 }
 
 #[test]
-fn provider_acceptance_is_not_python_compilation_or_scope_safety() {
+fn python_empty_result_blocks_are_rejected_in_patch_and_previews() {
     let root = tempdir().unwrap();
     let file = root.path().join("example.py");
-    let before = "class Example:\n    def first(self):\n        return 1\n\n    def target(self):\n        return 2\n\n    def after(self):\n        return 3\n";
+    let before = "class Example:\n    def first(self) -> None:\n        pass\n\n    def target(self) -> None:\n        pass\n\n    def after(self) -> None:\n        pass\n";
+    let payload = "    def target(self) -> None:\n        print(\"replacement\")\n";
+    fs::write(&file, before).unwrap();
 
-    for payload in [
-        "    def target(self):\n        return 9",
-        "    def target(self): return 9",
-    ] {
-        fs::write(&file, before).unwrap();
-        let output = common::run_identedit(&[
+    for mode in [vec!["--dry-run"], vec!["--dry-run", "--diff"], vec![]] {
+        let mut arguments = vec![
             "patch",
             file.to_str().unwrap(),
             "--symbol",
             "Example.target",
             "--replace",
             payload,
-        ]);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stdout)
-        );
-        assert_eq!(
-            fs::read_to_string(&file).unwrap(),
-            before.replacen("def target(self):\n        return 2", payload, 1)
-        );
-        let read = common::run_identedit(&[
-            "read",
-            file.to_str().unwrap(),
-            "--symbol",
-            "Example.first.target",
-            "--json",
-        ]);
-        assert!(
-            read.status.success(),
-            "{}",
-            String::from_utf8_lossy(&read.stdout)
-        );
-        let response: Value = serde_json::from_slice(&read.stdout).unwrap();
-        assert_eq!(response["summary"]["matches"], 1);
+        ];
+        arguments.extend(mode);
+        let output = common::run_identedit(&arguments);
+        assert_rejected(&output, &file, before);
     }
+}
+
+#[test]
+fn python_empty_result_blocks_abort_multi_file_apply_before_any_write() {
+    let root = tempdir().unwrap();
+    let javascript = root.path().join("a.js");
+    let python = root.path().join("z.py");
+    let python_before = "def target():\n    return 1\n";
+    fs::write(&javascript, JAVASCRIPT).unwrap();
+    fs::write(&python, python_before).unwrap();
+    let changeset = compile(json!([
+        {"file": javascript, "operations": [replacement(
+            node_target(&javascript, "function_declaration", Some("target")),
+            VALID_REPLACEMENT
+        )]},
+        {"file": python, "operations": [replacement(
+            node_target(&python, "function_definition", Some("target")),
+            "def target():\n"
+        )]}
+    ]));
+
+    for arguments in [
+        vec!["apply", "--dry-run"],
+        vec!["apply"],
+        vec!["apply", "--repair"],
+    ] {
+        let output = common::run_identedit_with_stdin(&arguments, &changeset.to_string());
+        assert_rejected(&output, &python, python_before);
+        assert_eq!(fs::read_to_string(&javascript).unwrap(), JAVASCRIPT);
+    }
+}
+
+#[test]
+fn python_empty_block_diagnostic_uses_the_proposed_result_line_after_batch_insertion() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("example.py");
+    let before = "def empty():\n\ndef target():\n    return 1\n";
+    fs::write(&file, before).unwrap();
+    let target = node_target(&file, "function_definition", Some("target"));
+    let changeset = compile(json!([{
+        "file": file,
+        "operations": [
+            replacement(target, "def target():\n    return 2"),
+            {
+                "target": {"type": "file_start", "expected_file_hash": common::hash_text(before)},
+                "op": {"type": "insert", "new_text": "# added header\n# second header\n"}
+            }
+        ]
+    }]));
+
+    for dry_run in [true, false] {
+        let output = apply(&changeset, dry_run);
+        assert_rejected(&output, &file, before);
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let message = response["error"]["message"].as_str().unwrap();
+        assert!(message.contains("in the proposed result"), "{message}");
+        assert!(message.ends_with("line 3"), "{message}");
+    }
+}
+
+#[test]
+fn python_existing_empty_blocks_require_complete_final_repair() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("example.py");
+    let before = "def empty():\n\ndef target():\n    return 1\n";
+    fs::write(&file, before).unwrap();
+    let target = node_target(&file, "function_definition", Some("target"));
+    let unchanged_block = compile(json!([{
+        "file": file,
+        "operations": [replacement(target.clone(), "def target():\n    return 1")]
+    }]));
+
+    for dry_run in [true, false] {
+        assert_rejected(&apply(&unchanged_block, dry_run), &file, before);
+    }
+
+    let repaired = compile(json!([{
+        "file": file,
+        "operations": [
+            replacement(node_target(&file, "function_definition", Some("empty")), "def empty():\n    pass"),
+            replacement(target, "def target():\n    return 2")
+        ]
+    }]));
+    assert!(apply(&repaired, true).status.success());
+    assert_eq!(fs::read_to_string(&file).unwrap(), before);
+    assert!(apply(&repaired, false).status.success());
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "def empty():\n    pass\n\ndef target():\n    return 2\n"
+    );
+}
+
+#[test]
+fn compile_valid_unintended_python_nesting_remains_allowed() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("example.py");
+    let before = "class Example:\n    def first(self):\n        return 1\n\n    def target(self):\n        return 2\n\n    def after(self):\n        return 3\n";
+    let payload = "    def target(self): return 9";
+    fs::write(&file, before).unwrap();
+
+    let output = common::run_identedit(&[
+        "patch",
+        file.to_str().unwrap(),
+        "--symbol",
+        "Example.target",
+        "--replace",
+        payload,
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        before.replacen("def target(self):\n        return 2", payload, 1)
+    );
+    let read = common::run_identedit(&[
+        "read",
+        file.to_str().unwrap(),
+        "--symbol",
+        "Example.first.target",
+        "--json",
+    ]);
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stdout)
+    );
+    let response: Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(response["summary"]["matches"], 1);
 }

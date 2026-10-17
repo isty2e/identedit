@@ -155,6 +155,15 @@ impl StructureProvider for TreeSitterProvider {
         Ok(ParsedSource::tree_sitter(path, tree, source))
     }
 
+    fn parse_proposed_source<'source>(
+        &self,
+        path: &'source Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
+        let tree = parser::parse_proposed_with_spec(self.spec, source)?;
+        Ok(ParsedSource::tree_sitter(path, tree, source))
+    }
+
     fn supports_syntax_validation(&self) -> bool {
         true
     }
@@ -216,6 +225,9 @@ pub(super) fn collect_named_nodes(
 ) -> Result<Vec<crate::named_structure::NamedNode>, super::NameProjectionError> {
     parser::collect_named_nodes(tree.root_node(), source)
 }
+
+#[cfg(test)]
+mod result_validation_tests;
 
 #[cfg(test)]
 mod tests {
