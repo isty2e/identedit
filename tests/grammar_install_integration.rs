@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -18,44 +17,44 @@ fn command_available(name: &str) -> bool {
 }
 
 fn locate_tree_sitter_json_source() -> PathBuf {
-    let cargo_home = env::var_os("CARGO_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env::var_os("HOME").expect("HOME must be set")).join(".cargo")
-        });
-    let registry_src = cargo_home.join("registry").join("src");
+    let output = Command::new(env!("CARGO"))
+        .args(["metadata", "--locked", "--format-version", "1"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("cargo metadata should start");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: Value = serde_json::from_slice(&output.stdout).expect("metadata should be JSON");
+    let root_id = metadata["resolve"]["root"]
+        .as_str()
+        .expect("project should have a root package");
+    let root = metadata["resolve"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == root_id)
+        .expect("root package should be resolved");
+    let dependency = root["deps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|dependency| dependency["name"] == "tree_sitter_json")
+        .expect("root should depend on tree-sitter-json");
+    let package = metadata["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["id"] == dependency["pkg"])
+        .expect("selected JSON grammar package should be present");
+    let manifest = Path::new(package["manifest_path"].as_str().unwrap());
 
-    let mut source_dir = None;
-    for hash_dir in
-        fs::read_dir(&registry_src).expect("cargo registry source directory should exist")
-    {
-        let hash_dir = hash_dir.expect("hash directory entry should be readable");
-        if !hash_dir
-            .file_type()
-            .expect("hash directory metadata should be readable")
-            .is_dir()
-        {
-            continue;
-        }
-
-        for crate_dir in
-            fs::read_dir(hash_dir.path()).expect("crate directories should be readable")
-        {
-            let crate_dir = crate_dir.expect("crate directory entry should be readable");
-            let file_name = crate_dir.file_name();
-            let file_name = file_name.to_string_lossy();
-            if file_name.starts_with("tree-sitter-json-") {
-                source_dir = Some(crate_dir.path());
-                break;
-            }
-        }
-
-        if source_dir.is_some() {
-            break;
-        }
-    }
-
-    source_dir.expect("tree-sitter-json crate source must exist in cargo registry")
+    manifest
+        .parent()
+        .expect("JSON grammar manifest should have a directory")
+        .to_path_buf()
 }
 
 fn prepare_local_grammar_repo(repo_dir: &Path) {
@@ -239,7 +238,7 @@ fn grammar_install_with_local_repo_enables_runtime_selection_and_result_validati
     let target_file = workspace.path().join("fixture.jlocal");
     fs::write(
         &target_file,
-        "{\n  \"config\": {\n    \"enabled\": true\n  }\n}\n",
+        "{\n  \"config\": {\n    \"enabled\": true\n  },\n  \"threshold\": 1e+09\n}\n",
     )
     .expect("fixture file should be written");
 
