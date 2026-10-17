@@ -52,15 +52,20 @@ fn node_preview_exposes_the_actual_indentation_not_just_the_node_span() {
         "--symbol",
         "Processor.run",
         "--replace",
-        "    def run(self):\n        return 2",
+        "    def run(self):\n            return 2",
     ];
     let diff = patch(root.path(), &args, true);
     assert!(diff.contains("-    def run(self):\n"), "{diff}");
     assert!(diff.contains("+        def run(self):\n"), "{diff}");
+    assert!(diff.contains("+            return 2\n"), "{diff}");
+    assert_eq!(
+        fs::read_to_string(root.path().join("sample.py")).unwrap(),
+        source
+    );
     patch(root.path(), &args, false);
     assert_eq!(
         fs::read_to_string(root.path().join("sample.py")).unwrap(),
-        "class Processor:\n        def run(self):\n        return 2\n"
+        "class Processor:\n        def run(self):\n            return 2\n"
     );
 }
 
@@ -265,7 +270,7 @@ fn external_patch_replays_cli_previews_to_the_actual_apply_bytes() {
             "--symbol",
             "Processor.run",
             "--replace",
-            "    def run(self):\n        return 2",
+            "    def run(self):\n            return 2",
         ],
     );
     assert_external_round_trip(

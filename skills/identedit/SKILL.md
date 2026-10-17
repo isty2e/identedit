@@ -111,7 +111,7 @@ Diffs show actual validated file bytes, including surrounding indentation, with 
 
 For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
 
-Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. A `parse_failure` with `error.stage: "proposed_result"` means no transaction files were changed: correct the payload and retry with `--dry-run`. `edit` only builds a plan and does not run this result check.
+Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. Bundled Python also rejects empty required blocks in the final result, even if they existed before the edit; repair them in the same batch or use line editing. A `parse_failure` with `error.stage: "proposed_result"` means no transaction files were changed: inspect the reported location, correct the final result, and retry with `--dry-run`. `edit` only builds a plan and does not run this result check. See [node-result parsing](references/protocol.md#node-result-parsing).
 
 Review `structure_changes` in successful JSON `patch`/`apply` receipts, including dry-run. It reports named-structure occurrence changes: inspect file statuses and decreased/increased names, not just summary counts. Names are not declaration-only; default parameters, keyword arguments and local variable declarators can appear when the provider names them. `checked` with no changes is not a syntax/behavior proof; `unavailable` or `out_of_scope` means no observation. Respect omitted/truncated markers; `--diff` has no report. See the [report contract](references/protocol.md#named-structure-changes).
 
@@ -179,7 +179,7 @@ Allow at most one retry per target; a second failure means stop using identedit 
 | `precondition_failed`, `target_missing` | Re-read, rebuild, retry once; use `read --mode line` for line targets |
 | `ambiguous_target` | Inspect candidates and omitted counts; follow [node recovery](#function-or-method), then retry with the intended target |
 | `resource_busy` | Another identedit preview/apply may hold the file's apply lock; wait briefly, then retry once within the shared target limit |
-| `parse_failure`, `error.stage: "proposed_result"` | Correct raw payload/other edits; retry once with `--dry-run` |
+| `parse_failure`, `error.stage: "proposed_result"` | Inspect the location; correct payload/other edits or existing empty Python blocks in the same batch, or use line editing; retry once with `--dry-run` |
 | `parse_failure`, `error.stage: "source"` | Original source was rejected; use direct editing to repair it |
 | Other `parse_failure`, `no_provider`, another hard error | Inspect diagnostics; fall back to direct editing if appropriate |
 | Other apply/rollback/resource error | Inspect recovery details; load `references/transactions.md` if bundled |

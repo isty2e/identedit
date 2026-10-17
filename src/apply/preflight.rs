@@ -223,7 +223,7 @@ fn preflight_changeset(
     } else if let Some(provider) = provider.filter(|provider| provider.supports_syntax_validation())
     {
         let result = provider
-            .parse_source(&changeset.file, updated_text.as_bytes())
+            .parse_proposed_source(&changeset.file, updated_text.as_bytes())
             .map_err(|error| match error {
                 IdenteditError::ParseFailure { provider, message } => {
                     IdenteditError::ResultParseFailure {

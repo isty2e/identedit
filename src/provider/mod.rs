@@ -34,6 +34,15 @@ pub trait StructureProvider {
         source: &'source [u8],
     ) -> Result<ParsedSource<'source>, IdenteditError>;
 
+    /// Parse a final edit result, including provider-owned result restrictions.
+    fn parse_proposed_source<'source>(
+        &self,
+        path: &'source Path,
+        source: &'source [u8],
+    ) -> Result<ParsedSource<'source>, IdenteditError> {
+        self.parse_source(path, source)
+    }
+
     fn parse(&self, path: &Path, source: &[u8]) -> Result<Vec<SelectionHandle>, IdenteditError> {
         self.parse_source(path, source)
             .map(ParsedSource::into_handles)
