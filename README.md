@@ -69,6 +69,8 @@ The supported CLI commands are `read`, `edit`, `apply`, `patch`, `merge`, and `g
 cargo install --path .
 ```
 
+Source builds use a [pinned upstream JSON grammar](https://github.com/tree-sitter/tree-sitter-json/commit/f1e41601eccfb5864e6eb90d23a2f21087f67d9f) for explicit positive exponents such as `1e+09`. Cargo fetches this build dependency from GitHub as needed; it adds no external runtime requirement.
+
 Core editing commands are intended to run on macOS, Linux, and Windows. `identedit grammar install` currently requires macOS or Linux.
 
 ## Common workflows

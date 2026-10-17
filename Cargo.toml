@@ -37,7 +37,9 @@ tree-sitter-kotlin = { package = "tree-sitter-kotlin-ng", version = "1.1.0" }
 tree-sitter-hcl = "1.1.0"
 tree-sitter-lua = "0.4.1"
 tree-sitter-markdown = { package = "tree-sitter-md", version = "0.5.2" }
-tree-sitter-json = "0.24"
+# Git-only until a registry release includes the upstream exponent fix.
+# Crates.io publishing is unsupported; a version fallback would use unfixed 0.24.8.
+tree-sitter-json = { git = "https://github.com/tree-sitter/tree-sitter-json", rev = "f1e41601eccfb5864e6eb90d23a2f21087f67d9f" }
 tree-sitter-proto = "0.2.0"
 tree-sitter-php = "0.24.2"
 tree-sitter-perl = "1.1.2"
