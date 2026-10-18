@@ -24,7 +24,7 @@ pub(super) enum EditTargetIngress {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum NodeTargetSelector {
+pub(crate) enum NodeTargetSelector {
     Identity(String),
     Selector { kind: String, name_pattern: String },
     Symbol(String),
@@ -36,15 +36,24 @@ impl NodeTargetSelector {
         file: &Path,
         context: &ExecutionContext,
     ) -> Result<SelectionHandle, IdenteditError> {
+        let (source_text, observation) = parse_target_handles(file, context)?;
+        self.resolve_in_handles(file, &source_text, observation.handles())
+    }
+
+    pub(crate) fn resolve_in_handles(
+        self,
+        file: &Path,
+        source_text: &str,
+        handles: &[SelectionHandle],
+    ) -> Result<SelectionHandle, IdenteditError> {
         match self {
-            Self::Identity(identity) => resolve_unique_identity_handle(file, &identity, context),
+            Self::Identity(identity) => {
+                resolve_unique_identity_handle(file, &identity, source_text, handles)
+            }
             Self::Selector { kind, name_pattern } => {
-                resolve_unique_selector_handle(file, &kind, &name_pattern, context)
+                resolve_unique_selector_handle(file, &kind, &name_pattern, source_text, handles)
             }
-            Self::Symbol(symbol) => {
-                let (source_text, observation) = parse_target_handles(file, context)?;
-                resolve_symbol(file, &source_text, observation.handles(), &symbol)
-            }
+            Self::Symbol(symbol) => resolve_symbol(file, source_text, handles, &symbol),
         }
     }
 }
@@ -133,11 +142,10 @@ fn is_hex_with_len(value: &str, len: usize) -> bool {
 fn resolve_unique_identity_handle(
     file: &Path,
     identity: &str,
-    context: &ExecutionContext,
+    source_text: &str,
+    handles: &[SelectionHandle],
 ) -> Result<SelectionHandle, IdenteditError> {
-    let (source_text, observation) = parse_target_handles(file, context)?;
-    let matches = observation
-        .handles()
+    let matches = handles
         .iter()
         .filter(|handle| handle.identity == identity)
         .collect::<Vec<_>>();
@@ -154,8 +162,8 @@ fn resolve_unique_identity_handle(
             candidates: candidates.len(),
             candidate_contexts: build_candidate_contexts(
                 candidates,
-                &QualifiedNames::from_handles(observation.handles()),
-                &source_text,
+                &QualifiedNames::from_handles(handles),
+                source_text,
             ),
         }),
     }
@@ -165,16 +173,16 @@ fn resolve_unique_selector_handle(
     file: &Path,
     kind: &str,
     name_pattern: &str,
-    context: &ExecutionContext,
+    source_text: &str,
+    handles: &[SelectionHandle],
 ) -> Result<SelectionHandle, IdenteditError> {
-    let (source_text, observation) = parse_target_handles(file, context)?;
     let selector = Selector {
         kind: kind.to_string(),
         name_pattern: Some(name_pattern.to_string()),
         exclude_kinds: vec![],
     };
     let selector_description = format!("kind='{kind}', name='{name_pattern}'");
-    let matches = selector.filter(observation.handles())?;
+    let matches = selector.filter(handles)?;
 
     match matches.as_slice() {
         [] => Err(IdenteditError::TargetMissingSelector {
@@ -188,8 +196,8 @@ fn resolve_unique_selector_handle(
             candidates: candidates.len(),
             candidate_contexts: build_candidate_contexts(
                 candidates,
-                &QualifiedNames::from_handles(observation.handles()),
-                &source_text,
+                &QualifiedNames::from_handles(handles),
+                source_text,
             ),
         }),
     }

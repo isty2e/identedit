@@ -9,7 +9,10 @@ use crate::error::IdenteditError;
 
 #[derive(Debug, Args)]
 pub struct EditArgs {
-    #[arg(long, help = "Read edit request JSON from stdin")]
+    #[arg(
+        long,
+        help = "Compile guarded targets or unique symbol/selector intents from stdin JSON"
+    )]
     pub json: bool,
     #[command(flatten)]
     pub(crate) intent: EditIntentArgs,

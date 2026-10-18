@@ -128,6 +128,25 @@ jq -n --rawfile new_text /tmp/new_block.py '{
 }' | identedit edit --json | identedit apply
 ```
 
+### Resolve-now node targets
+
+For a unique local/qualified name, use `{"type":"symbol","name":"Processor.process_data"}` as the target. For a unique kind/name glob, use `{"type":"selector","kind":"function_definition","name":"process_*"}`. These work in either edit JSON envelope and in existing structural-move node positions. Do not mix them with copied guard fields; use the guarded node form when an earlier observation must still match.
+
+For example, one operation can compile a raw regex replacement without copying a handle:
+
+```json
+{
+  "command":"edit",
+  "file":"example.py",
+  "operations":[{
+    "target":{"type":"symbol","name":"Processor.process_data"},
+    "op":{"type":"scoped_regex","pattern":"old_name","replacement":"new_name"}
+  }]
+}
+```
+
+It must select exactly one node and match at least once. Edit compiles ordinary guards and replacement text; apply never re-runs the selector or regex. These query targets are not accepted by `patch --json`. See [edit JSON intents](protocol.md#edit-json-intents) for reread/non-sequential semantics, unsupported config-path input and errors with original request pointers.
+
 ## Handle Ref Mode
 
 Use `handle_table` to reduce payload size when several operations reuse handles.

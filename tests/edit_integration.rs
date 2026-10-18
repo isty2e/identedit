@@ -72,6 +72,8 @@ mod flag_mode_and_resolution;
 mod line_parity;
 #[path = "edit_integration/preview_generation.rs"]
 mod preview_generation;
+#[path = "edit_integration/query_intents.rs"]
+mod query_intents;
 #[path = "edit_integration/request_validation.rs"]
 mod request_validation;
 #[path = "edit_integration/resolution_and_filesystem.rs"]

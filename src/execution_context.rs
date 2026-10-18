@@ -71,6 +71,7 @@ impl ExecutionContext {
         self.last_source.replace(None);
     }
 
+    #[cfg(test)]
     pub(crate) fn parse_handles_for_file(
         &self,
         file: &Path,

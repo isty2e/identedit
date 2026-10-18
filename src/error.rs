@@ -131,9 +131,23 @@ pub enum IdenteditError {
 
     #[error("Commit failed and rollback did not fully succeed: {message}")]
     RollbackFailed { message: String },
+
+    #[error("{source}")]
+    EditRequestContext {
+        request_pointers: Vec<String>,
+        #[source]
+        source: Box<IdenteditError>,
+    },
 }
 
 impl IdenteditError {
+    pub(crate) fn with_request_pointers(self, request_pointers: Vec<String>) -> Self {
+        Self::EditRequestContext {
+            request_pointers,
+            source: Box::new(self),
+        }
+    }
+
     pub fn io(path: &Path, source: std::io::Error) -> Self {
         Self::Io {
             path: path.display().to_string(),

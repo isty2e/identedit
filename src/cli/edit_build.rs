@@ -4,17 +4,21 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::changeset::{
     EditOperation, FileChange, MultiFileChangeset, OpKind, TransformTarget, compose_move_text,
 };
 use crate::error::IdenteditError;
+use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
 use crate::handle::Span;
 use crate::hash::{ContentHash, hash_text};
-use crate::transform::build::build_changeset;
-use crate::transform::parse::parse_handles_for_file;
+use crate::patch::scoped_regex::{compile_scoped_regex, rewrite_scoped_node_text};
+use crate::transform::build::{build_changeset, build_changeset_with_context_indexed};
 use crate::transform::resolve::resolve_target_in_handles;
+
+use super::edit_intent::NodeTargetSelector;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,7 +27,7 @@ struct StdinEditRequestWire {
     #[serde(default)]
     file: Option<PathBuf>,
     #[serde(default)]
-    operations: Option<Vec<StdinEditOperationWire>>,
+    operations: Option<Vec<Box<RawValue>>>,
     #[serde(default)]
     handle_table: Option<StdinHandleTableWire>,
     #[serde(default)]
@@ -34,7 +38,7 @@ struct StdinEditRequestWire {
 #[serde(deny_unknown_fields)]
 struct StdinEditFileWire {
     file: PathBuf,
-    operations: Vec<StdinEditOperationWire>,
+    operations: Vec<Box<RawValue>>,
     #[serde(default)]
     handle_table: Option<StdinHandleTableWire>,
 }
@@ -42,13 +46,18 @@ struct StdinEditFileWire {
 #[derive(Debug)]
 struct StdinEditFileRequest {
     file: PathBuf,
-    operations: Vec<StdinEditOperationWire>,
+    operations: Vec<Box<RawValue>>,
     handle_table: Option<StdinHandleTableWire>,
+    file_index: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum StdinEditOp {
+    ScopedRegex {
+        pattern: String,
+        replacement: String,
+    },
     Replace {
         new_text: String,
     },
@@ -110,6 +119,20 @@ struct StdinEditOperationWire {
     op: StdinEditOp,
 }
 
+#[derive(Deserialize)]
+struct RawEditOperationTargets<'a> {
+    #[serde(borrow)]
+    target: Option<&'a RawValue>,
+    #[serde(borrow)]
+    op: RawEditMoveDestination<'a>,
+}
+
+#[derive(Deserialize)]
+struct RawEditMoveDestination<'a> {
+    #[serde(borrow)]
+    destination: Option<&'a RawValue>,
+}
+
 type StdinHandleTableWire = BTreeMap<String, StdinHandleTableEntryWire>;
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +151,40 @@ struct HandleRefTargetWire {
     #[serde(rename = "type")]
     target_type: String,
     r#ref: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum NodeQueryWire {
+    Symbol { name: String },
+    Selector { kind: String, name: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct OperationOrigin {
+    file_index: Option<usize>,
+    operation_index: usize,
+}
+
+impl OperationOrigin {
+    fn pointer(self) -> String {
+        match self.file_index {
+            Some(file) => format!("/files/{file}/operations/{}", self.operation_index),
+            None => format!("/operations/{}", self.operation_index),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LocatedInstruction {
+    operation: EditOperation,
+    origin: OperationOrigin,
+}
+
+#[derive(Debug)]
+struct SelectionObservation {
+    source_text: String,
+    handles: Vec<SelectionHandle>,
 }
 
 #[derive(Debug)]
@@ -154,18 +211,28 @@ struct ParsedEditInstruction {
 #[derive(Debug)]
 struct FileInstructionBucket {
     file: PathBuf,
-    instructions: Vec<EditOperation>,
+    instructions: Vec<LocatedInstruction>,
+    request_pointer: String,
 }
 
-#[derive(Debug, Default)]
-struct NormalizeState {
+struct NormalizeState<'a> {
+    context: &'a ExecutionContext,
     buckets: Vec<FileInstructionBucket>,
     bucket_index: HashMap<PathBuf, usize>,
-    handle_cache: HashMap<PathBuf, Vec<SelectionHandle>>,
+    handle_cache: HashMap<PathBuf, SelectionObservation>,
 }
 
-impl NormalizeState {
-    fn ensure_file_bucket(&mut self, file: PathBuf) {
+impl<'a> NormalizeState<'a> {
+    fn new(context: &'a ExecutionContext) -> Self {
+        Self {
+            context,
+            buckets: Vec::new(),
+            bucket_index: HashMap::new(),
+            handle_cache: HashMap::new(),
+        }
+    }
+
+    fn ensure_file_bucket(&mut self, file: PathBuf, request_pointer: String) {
         if self.bucket_index.contains_key(&file) {
             return;
         }
@@ -174,11 +241,21 @@ impl NormalizeState {
         self.buckets.push(FileInstructionBucket {
             file: file.clone(),
             instructions: Vec::new(),
+            request_pointer,
         });
         self.bucket_index.insert(file, index);
     }
 
-    fn push_instruction_for_file(&mut self, file: PathBuf, instruction: EditOperation) {
+    fn push_instruction_for_file(
+        &mut self,
+        file: PathBuf,
+        instruction: EditOperation,
+        origin: OperationOrigin,
+    ) {
+        let instruction = LocatedInstruction {
+            operation: instruction,
+            origin,
+        };
         if let Some(index) = self.bucket_index.get(&file).copied() {
             self.buckets[index].instructions.push(instruction);
             return;
@@ -188,24 +265,56 @@ impl NormalizeState {
         self.buckets.push(FileInstructionBucket {
             file: file.clone(),
             instructions: vec![instruction],
+            request_pointer: origin.pointer(),
         });
         self.bucket_index.insert(file, index);
     }
 
-    fn resolve_move_endpoint(
+    fn observation(&mut self, file: &Path) -> Result<&SelectionObservation, IdenteditError> {
+        use std::collections::hash_map::Entry;
+
+        match self.handle_cache.entry(file.to_path_buf()) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) => {
+                let source = self.context.read_file_bytes(file)?;
+                let handles = self.context.parse_handles_for_source(file, &source)?;
+                let source_text = String::from_utf8(source).map_err(|error| {
+                    IdenteditError::io(
+                        file,
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+                    )
+                })?;
+                Ok(entry.insert(SelectionObservation {
+                    source_text,
+                    handles,
+                }))
+            }
+        }
+    }
+
+    fn resolve_query(
+        &mut self,
+        file: &Path,
+        query: NodeTargetSelector,
+    ) -> Result<TransformTarget, IdenteditError> {
+        let observation = self.observation(file)?;
+        let handle =
+            query.resolve_in_handles(file, &observation.source_text, &observation.handles)?;
+        Ok(TransformTarget::node(
+            handle.identity,
+            handle.kind,
+            Some(handle.span),
+            handle.expected_old_hash,
+        ))
+    }
+
+    fn resolve_node_target(
         &mut self,
         file: &Path,
         target: &TransformTarget,
     ) -> Result<SelectionHandle, IdenteditError> {
-        let key = file.to_path_buf();
-        let handles = if let Some(existing) = self.handle_cache.get(&key) {
-            existing.clone()
-        } else {
-            let parsed = parse_handles_for_file(file)?;
-            self.handle_cache.insert(key.clone(), parsed.clone());
-            parsed
-        };
-        resolve_target_in_handles(file, &handles, target)
+        let observation = self.observation(file)?;
+        resolve_target_in_handles(file, &observation.handles, target)
     }
 
     fn normalize_cross_file_move_operation(
@@ -213,6 +322,7 @@ impl NormalizeState {
         source_file: &Path,
         source_target: TransformTarget,
         movement: CrossFileMove,
+        origin: OperationOrigin,
     ) -> Result<(), IdenteditError> {
         let CrossFileMove {
             destination_file,
@@ -238,14 +348,15 @@ impl NormalizeState {
             });
         }
 
-        let source_handle = self.resolve_move_endpoint(source_file, &source_target)?;
+        let source_handle = self.resolve_node_target(source_file, &source_target)?;
         let moved_text = compose_move_text(source_handle.text, &prefix, &suffix);
 
-        let _ = self.resolve_move_endpoint(destination_file.as_path(), &destination_target)?;
+        let _ = self.resolve_node_target(destination_file.as_path(), &destination_target)?;
 
         self.push_instruction_for_file(
             source_file.to_path_buf(),
             EditOperation::try_new(source_target, OpKind::Delete)?,
+            origin,
         );
         let destination_op = if insert_before {
             OpKind::InsertBefore {
@@ -259,6 +370,7 @@ impl NormalizeState {
         self.push_instruction_for_file(
             destination_file,
             EditOperation::try_new(destination_target, destination_op)?,
+            origin,
         );
 
         Ok(())
@@ -284,7 +396,6 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
 
     let request: StdinEditRequestWire = serde_json::from_str(&request_body)
         .map_err(|error| IdenteditError::InvalidJsonRequest { source: error })?;
-
     if request.command != "edit" {
         return Err(IdenteditError::InvalidRequest {
             message: format!(
@@ -294,8 +405,9 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
         });
     }
 
+    let context = ExecutionContext::new();
     let file_requests = parse_stdin_edit_shape(request)?;
-    let normalized_buckets = normalize_edit_file_requests(file_requests)?;
+    let normalized_buckets = normalize_edit_file_requests(file_requests, &context)?;
     let mut files = Vec::with_capacity(normalized_buckets.len());
     for bucket in normalized_buckets {
         if bucket.instructions.is_empty() {
@@ -303,9 +415,41 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
                 file: bucket.file,
                 operations: Vec::new(),
             });
-        } else {
-            files.push(build_changeset(&bucket.file, bucket.instructions)?);
+            continue;
         }
+
+        let origins = bucket
+            .instructions
+            .iter()
+            .map(|item| item.origin)
+            .collect::<Vec<_>>();
+        let instructions = bucket
+            .instructions
+            .into_iter()
+            .map(|item| item.operation)
+            .collect();
+        let file_change =
+            build_changeset_with_context_indexed(&bucket.file, instructions, &context).map_err(
+                |failure| {
+                    let pointers = if failure.operation_indices.is_empty() {
+                        vec![bucket.request_pointer]
+                    } else {
+                        let mut locations = failure
+                            .operation_indices
+                            .into_iter()
+                            .map(|index| origins[index])
+                            .collect::<Vec<_>>();
+                        locations.sort_unstable();
+                        locations.dedup();
+                        locations
+                            .into_iter()
+                            .map(OperationOrigin::pointer)
+                            .collect()
+                    };
+                    failure.error.with_request_pointers(pointers)
+                },
+            )?;
+        files.push(file_change);
     }
 
     let mut changeset = MultiFileChangeset {
@@ -318,31 +462,53 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
 
 fn normalize_edit_file_requests(
     file_requests: Vec<StdinEditFileRequest>,
+    context: &ExecutionContext,
 ) -> Result<Vec<FileInstructionBucket>, IdenteditError> {
-    let mut state = NormalizeState::default();
+    let mut state = NormalizeState::new(context);
 
     for file_request in file_requests {
         let source_file = file_request.file;
         let handle_table = file_request.handle_table;
+        let request_pointer = match file_request.file_index {
+            Some(index) => format!("/files/{index}"),
+            None => "/file".to_string(),
+        };
+        state.ensure_file_bucket(source_file.clone(), request_pointer.clone());
         if file_request.operations.is_empty() {
-            validate_noop_file_path(source_file.as_path())?;
-            state.ensure_file_bucket(source_file);
+            validate_noop_file_path(&source_file)
+                .map_err(|error| error.with_request_pointers(vec![request_pointer]))?;
             continue;
         }
-        for operation in file_request.operations {
-            let parsed = parse_edit_operation(operation, handle_table.as_ref())?;
-            match parsed.op {
-                ParsedOperationKind::Canonical(op) => state.push_instruction_for_file(
-                    source_file.clone(),
-                    EditOperation::try_new(parsed.target, op)?,
-                ),
-                ParsedOperationKind::CrossFileMove(movement) => state
-                    .normalize_cross_file_move_operation(
-                        source_file.as_path(),
-                        parsed.target,
-                        movement,
-                    )?,
-            }
+
+        for (operation_index, operation) in file_request.operations.into_iter().enumerate() {
+            let origin = OperationOrigin {
+                file_index: file_request.file_index,
+                operation_index,
+            };
+            let result = (|| {
+                let parsed = parse_edit_operation(
+                    &operation,
+                    handle_table.as_ref(),
+                    &source_file,
+                    &mut state,
+                )?;
+                match parsed.op {
+                    ParsedOperationKind::Canonical(op) => {
+                        let instruction = EditOperation::try_new(parsed.target, op)?;
+                        state.push_instruction_for_file(source_file.clone(), instruction, origin);
+                    }
+                    ParsedOperationKind::CrossFileMove(movement) => {
+                        state.normalize_cross_file_move_operation(
+                            &source_file,
+                            parsed.target,
+                            movement,
+                            origin,
+                        )?;
+                    }
+                }
+                Ok::<(), IdenteditError>(())
+            })();
+            result.map_err(|error| error.with_request_pointers(vec![origin.pointer()]))?;
         }
     }
 
@@ -392,10 +558,12 @@ fn parse_stdin_edit_shape(
         }
         return Ok(files
             .into_iter()
-            .map(|entry| StdinEditFileRequest {
+            .enumerate()
+            .map(|(index, entry)| StdinEditFileRequest {
                 file: entry.file,
                 operations: entry.operations,
                 handle_table: entry.handle_table,
+                file_index: Some(index),
             })
             .collect());
     }
@@ -420,6 +588,7 @@ fn parse_stdin_edit_shape(
         file,
         operations,
         handle_table: request.handle_table,
+        file_index: None,
     }])
 }
 
@@ -431,9 +600,33 @@ fn wrap_single_file(file_change: FileChange) -> MultiFileChangeset {
 }
 
 fn parse_edit_operation(
-    operation: StdinEditOperationWire,
+    raw_operation: &RawValue,
     handle_table: Option<&StdinHandleTableWire>,
+    file: &Path,
+    state: &mut NormalizeState<'_>,
 ) -> Result<ParsedEditInstruction, IdenteditError> {
+    let operation: StdinEditOperationWire = serde_json::from_str(raw_operation.get())
+        .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
+    let raw_targets: RawEditOperationTargets<'_> = serde_json::from_str(raw_operation.get())
+        .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
+    let query_target = operation
+        .target
+        .as_ref()
+        .and_then(|target| target.get("type"))
+        .and_then(Value::as_str);
+    if matches!(query_target, Some("symbol" | "selector")) {
+        let fields: Value = serde_json::from_str(raw_operation.get())
+            .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
+        if ["identity", "kind", "span_hint", "expected_old_hash"]
+            .iter()
+            .any(|key| fields.get(*key).is_some())
+        {
+            return Err(IdenteditError::InvalidRequest {
+                message: "symbol/selector targets cannot be combined with flat node guard fields, including null fields".to_string(),
+            });
+        }
+    }
+
     if let Some(target_wire) = operation.target {
         if operation.identity.is_some()
             || operation.kind.is_some()
@@ -444,9 +637,21 @@ fn parse_edit_operation(
                 message: "operation.target cannot be combined with top-level identity/kind/span_hint/expected_old_hash fields".to_string(),
             });
         }
-
-        let target = parse_edit_target_from_wire(target_wire, handle_table)?;
-        let op = parse_stdin_operation_kind(operation.op, &target, handle_table)?;
+        let target = parse_edit_target_from_wire(
+            target_wire,
+            raw_targets.target,
+            handle_table,
+            file,
+            state,
+        )?;
+        let op = parse_stdin_operation_kind(
+            operation.op,
+            raw_targets.op.destination,
+            &target,
+            handle_table,
+            file,
+            state,
+        )?;
         return Ok(ParsedEditInstruction { target, op });
     }
 
@@ -466,18 +671,44 @@ fn parse_edit_operation(
             .ok_or_else(|| IdenteditError::InvalidRequest {
                 message: "missing field `expected_old_hash`".to_string(),
             })?;
-
     let target = TransformTarget::node(identity, kind, operation.span_hint, expected_old_hash);
-    let op = parse_stdin_operation_kind(operation.op, &target, handle_table)?;
-
+    let op = parse_stdin_operation_kind(
+        operation.op,
+        raw_targets.op.destination,
+        &target,
+        handle_table,
+        file,
+        state,
+    )?;
     Ok(ParsedEditInstruction { target, op })
 }
 
 fn parse_edit_target_from_wire(
     target_wire: Value,
+    raw_target: Option<&RawValue>,
     handle_table: Option<&StdinHandleTableWire>,
+    file: &Path,
+    state: &mut NormalizeState<'_>,
 ) -> Result<TransformTarget, IdenteditError> {
     let target_type = target_wire.get("type").and_then(Value::as_str);
+    if matches!(target_type, Some("symbol" | "selector")) {
+        let raw_target = raw_target.ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "node query target requires its original JSON input".to_string(),
+        })?;
+        let query: NodeQueryWire = serde_json::from_str(raw_target.get()).map_err(|error| {
+            IdenteditError::InvalidRequest {
+                message: format!("invalid node query target: {error}"),
+            }
+        })?;
+        let query = match query {
+            NodeQueryWire::Symbol { name } => NodeTargetSelector::Symbol(name),
+            NodeQueryWire::Selector { kind, name } => NodeTargetSelector::Selector {
+                kind,
+                name_pattern: name,
+            },
+        };
+        return state.resolve_query(file, query);
+    }
     if target_type == Some("handle_ref") {
         let handle_ref: HandleRefTargetWire =
             serde_json::from_value(target_wire).map_err(|error| {
@@ -523,10 +754,29 @@ fn parse_edit_target_from_wire(
 
 fn parse_stdin_operation_kind(
     operation: StdinEditOp,
+    raw_destination: Option<&RawValue>,
     target: &TransformTarget,
     handle_table: Option<&StdinHandleTableWire>,
+    file: &Path,
+    state: &mut NormalizeState<'_>,
 ) -> Result<ParsedOperationKind, IdenteditError> {
     let parsed = match operation {
+        StdinEditOp::ScopedRegex {
+            pattern,
+            replacement,
+        } => {
+            if !target.requires_node_resolution() {
+                return Err(IdenteditError::InvalidRequest {
+                    message: "scoped_regex requires a node target".to_string(),
+                });
+            }
+            let regex = compile_scoped_regex(&pattern)?;
+            let handle = state.resolve_node_target(file, target)?;
+            let rewritten = rewrite_scoped_node_text(&handle.text, &regex, &replacement)?;
+            ParsedOperationKind::Canonical(OpKind::Replace {
+                new_text: rewritten.new_text,
+            })
+        }
         StdinEditOp::Replace { new_text } => ParsedOperationKind::Canonical(match target {
             TransformTarget::Line {
                 end_anchor: Some(_),
@@ -558,7 +808,13 @@ fn parse_stdin_operation_kind(
             prefix,
             suffix,
         } => ParsedOperationKind::Canonical(OpKind::MoveBefore {
-            destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
+            destination: Box::new(parse_edit_target_from_wire(
+                destination,
+                raw_destination,
+                handle_table,
+                file,
+                state,
+            )?),
             prefix,
             suffix,
         }),
@@ -567,7 +823,13 @@ fn parse_stdin_operation_kind(
             prefix,
             suffix,
         } => ParsedOperationKind::Canonical(OpKind::MoveAfter {
-            destination: Box::new(parse_edit_target_from_wire(destination, handle_table)?),
+            destination: Box::new(parse_edit_target_from_wire(
+                destination,
+                raw_destination,
+                handle_table,
+                file,
+                state,
+            )?),
             prefix,
             suffix,
         }),
@@ -576,25 +838,43 @@ fn parse_stdin_operation_kind(
             destination,
             prefix,
             suffix,
-        } => ParsedOperationKind::CrossFileMove(CrossFileMove {
-            destination_file,
-            destination: parse_edit_target_from_wire(destination, handle_table)?,
-            insert_before: true,
-            prefix,
-            suffix,
-        }),
+        } => {
+            let destination = parse_edit_target_from_wire(
+                destination,
+                raw_destination,
+                handle_table,
+                &destination_file,
+                state,
+            )?;
+            ParsedOperationKind::CrossFileMove(CrossFileMove {
+                destination_file,
+                destination,
+                insert_before: true,
+                prefix,
+                suffix,
+            })
+        }
         StdinEditOp::MoveToAfter {
             destination_file,
             destination,
             prefix,
             suffix,
-        } => ParsedOperationKind::CrossFileMove(CrossFileMove {
-            destination_file,
-            destination: parse_edit_target_from_wire(destination, handle_table)?,
-            insert_before: false,
-            prefix,
-            suffix,
-        }),
+        } => {
+            let destination = parse_edit_target_from_wire(
+                destination,
+                raw_destination,
+                handle_table,
+                &destination_file,
+                state,
+            )?;
+            ParsedOperationKind::CrossFileMove(CrossFileMove {
+                destination_file,
+                destination,
+                insert_before: false,
+                prefix,
+                suffix,
+            })
+        }
     };
     Ok(parsed)
 }
@@ -620,3 +900,6 @@ fn apply_preview_mode(changeset: &mut MultiFileChangeset, verbose: bool) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

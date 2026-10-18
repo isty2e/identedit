@@ -121,7 +121,7 @@ Provider acceptance is not semantic correctness: Python indentation errors and u
 
 ### Batch or multi-step pipeline
 
-Use this for multiple operations/files, handle tables, or structural moves. Discover targets with `read --json`; `ast-grep` can help locate structures. Use `repren` for bulk simultaneous/case-preserving replacements and path renames.
+Use this for multiple operations/files, handle tables, or structural moves. For unique nodes, `edit --json` accepts `target: {"type":"symbol","name":"Class.method"}` or `{"type":"selector","kind":"function_definition","name":"process_*"}` without a separate handle lookup. It also accepts node `op: {"type":"scoped_regex","pattern":"old","replacement":"new"}`. Use `read --json` when preserving an earlier observation or disambiguating; `ast-grep` can help locate structures. Use `repren` for bulk simultaneous/case-preserving replacements and path renames.
 
 ```bash
 identedit read --kind function_definition example.py --json
@@ -151,6 +151,8 @@ Single-file request shape (copy identities and hashes from `read`; these values 
 ```
 
 For batches, replace `file` and `operations` with `files: [{"file": "...", "operations": [...]}]`. Use exactly one request shape. Never synthesize identities or precondition hashes. Use `jq --rawfile` to populate `op.new_text` from a file.
+
+`symbol`/`selector` queries must match exactly one node; copied guards are not refreshed. `patch --json` does not accept these targets. See the [intent contract](references/protocol.md#edit-json-intents).
 
 Structural moves can insert caller-specified `prefix` and `suffix` around the exact selected bytes. These strings do not reindent the body, repair the source block or infer trivia ownership; a Python suffix may include the following line's indentation. See [raw move text](references/protocol.md#raw-move-text) and the [move example](references/structural-pipeline.md#operations).
 
@@ -187,6 +189,8 @@ Allow at most one retry per target; a second failure means stop using identedit 
 Line repair shares the same retry budget. References are optional; use reported recovery details rather than blindly retrying a transaction error.
 
 Branch on `error.type` and `error.stage`, not message text or the presence of `suggestion`. A missing/unknown stage does not identify a source failure; provider initialization failures omit it.
+
+For `edit --json`, optional `error.request_pointers` identifies original input operations or file entries using JSON Pointers. A conflict can identify two operations, even after grouping files or expanding a move. Syntax/envelope failures may omit it; see [input locations](references/protocol.md#edit-request-locations).
 
 For `invalid_request` with `error.line_check`, inspect its mismatches and remap candidates, then refresh line anchors before the bounded retry. Do not parse diagnostics out of `message`. If apply received an edit request, compile it with `edit --json` first; apply accepts the resulting changeset.
 
