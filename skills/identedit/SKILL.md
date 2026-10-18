@@ -93,6 +93,7 @@ identedit patch config.toml --config-path database.enabled --delete
 - JSON `--set-value` preserves payload whitespace, including a trailing newline from `--text-file` or `--stdin-text`; omit that newline if unwanted.
 - `--create-missing` creates map or standard-table keys, not array/sequence elements. Delete and append reject it; append requires an existing array/sequence.
 - Multi-document YAML creation requires `--document-index <N>`.
+- For several config edits, use `edit --json` against original-source paths; overlapping writes are rejected. See the [batch rules](references/config-path-patching.md#batch-edit-intents).
 - Use line or direct editing for YAML anchors, merge keys, tags, sequence growth, TOML table arrays, or placement depending on local comment semantics.
 - Config plans require unchanged full-file source bytes; replan after changes rather than using repair. See [file source preconditions](references/protocol.md#file-source-preconditions).
 

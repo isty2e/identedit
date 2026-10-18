@@ -19,23 +19,21 @@ use super::{
     named_children, span_from_node,
 };
 
-struct TomlCandidate {
+struct TomlCandidate<'tree> {
     path: Vec<PathToken>,
     container_path: Vec<PathToken>,
-    container_span: Span,
-    container_kind: String,
-    set_span: Span,
-    set_kind: String,
+    container: Node<'tree>,
+    value: Node<'tree>,
     delete_entry_span: Span,
 }
 
-pub(in crate::patch::config_path) fn resolve_toml_path(
-    tree: &Tree,
+pub(in crate::patch::config_path) fn resolve_toml_path<'tree>(
+    tree: &'tree Tree,
     source: &[u8],
     path_tokens: &[PathToken],
     operation: &ConfigPathOperation,
     raw_path: &str,
-) -> Result<ResolvedContainerEdit, IdenteditError> {
+) -> Result<ResolvedContainerEdit<'tree>, IdenteditError> {
     let root = tree.root_node();
     let mut candidates = Vec::new();
     collect_toml_candidates(root, source, &mut candidates);
@@ -62,37 +60,27 @@ pub(in crate::patch::config_path) fn resolve_toml_path(
         }
     };
 
-    let (container_span, container_kind, replace_span) = match operation {
-        ConfigPathOperation::Set { .. } => (
-            selected.container_span,
-            selected.container_kind.clone(),
-            selected.set_span,
-        ),
+    let (container, replace_span) = match operation {
+        ConfigPathOperation::Set { .. } => (selected.container, span_from_node(selected.value)),
         ConfigPathOperation::Append { .. } => {
-            if selected.set_kind != "array" {
-                return Err(append_requires_array_error(raw_path, &selected.set_kind));
+            if selected.value.kind() != "array" {
+                return Err(append_requires_array_error(raw_path, selected.value.kind()));
             }
-            (
-                selected.set_span,
-                selected.set_kind.clone(),
-                selected.set_span,
-            )
+            (selected.value, span_from_node(selected.value))
         }
         ConfigPathOperation::Delete => (
-            selected.container_span,
-            selected.container_kind.clone(),
+            selected.container,
             adjusted_delete_span_for_container(
                 source,
-                selected.container_span,
-                &selected.container_kind,
+                span_from_node(selected.container),
+                selected.container.kind(),
                 selected.delete_entry_span,
             ),
         ),
     };
 
     Ok(ResolvedContainerEdit {
-        container_span,
-        container_kind,
+        container,
         replace_span,
     })
 }
@@ -153,7 +141,11 @@ pub(in crate::patch::config_path) fn rewrite_toml_with_comment_preserving_create
     insert_toml_entry_line(source_text, insertion, &entry)
 }
 
-fn collect_toml_candidates(root: Node<'_>, source: &[u8], out: &mut Vec<TomlCandidate>) {
+fn collect_toml_candidates<'tree>(
+    root: Node<'tree>,
+    source: &[u8],
+    out: &mut Vec<TomlCandidate<'tree>>,
+) {
     let mut array_table_counts: HashMap<String, usize> = HashMap::new();
     for child in named_children(root) {
         match child.kind() {
@@ -577,12 +569,12 @@ fn insert_toml_table_block(
     Ok(updated)
 }
 
-fn collect_toml_pair_candidates(
-    pair: Node<'_>,
+fn collect_toml_pair_candidates<'tree>(
+    pair: Node<'tree>,
     source: &[u8],
     prefix: Vec<PathToken>,
-    container: Node<'_>,
-    out: &mut Vec<TomlCandidate>,
+    container: Node<'tree>,
+    out: &mut Vec<TomlCandidate<'tree>>,
 ) {
     let Some((key_segments, value_node)) = toml_pair_key_and_value(pair, source) else {
         return;
@@ -595,21 +587,19 @@ fn collect_toml_pair_candidates(
     out.push(TomlCandidate {
         path: full_path.clone(),
         container_path: container_path.clone(),
-        container_span: span_from_node(container),
-        container_kind: container.kind().to_string(),
-        set_span: span_from_node(value_node),
-        set_kind: value_node.kind().to_string(),
+        container,
+        value: value_node,
         delete_entry_span: span_from_node(pair),
     });
 
     collect_toml_nested_value_candidates(value_node, source, full_path, out);
 }
 
-fn collect_toml_nested_value_candidates(
-    value: Node<'_>,
+fn collect_toml_nested_value_candidates<'tree>(
+    value: Node<'tree>,
     source: &[u8],
     prefix: Vec<PathToken>,
-    out: &mut Vec<TomlCandidate>,
+    out: &mut Vec<TomlCandidate<'tree>>,
 ) {
     match value.kind() {
         "inline_table" => {
@@ -628,10 +618,8 @@ fn collect_toml_nested_value_candidates(
                 out.push(TomlCandidate {
                     path: indexed_path.clone(),
                     container_path: prefix.clone(),
-                    container_span: span_from_node(value),
-                    container_kind: value.kind().to_string(),
-                    set_span: span_from_node(element),
-                    set_kind: element.kind().to_string(),
+                    container: value,
+                    value: element,
                     delete_entry_span: span_from_node(element),
                 });
 

@@ -27,13 +27,13 @@ pub(in crate::patch::config_path) fn validate_json_set_value(
         })
 }
 
-pub(in crate::patch::config_path) fn resolve_json_path(
-    tree: &Tree,
+pub(in crate::patch::config_path) fn resolve_json_path<'tree>(
+    tree: &'tree Tree,
     source: &[u8],
     path_tokens: &[PathToken],
     operation: &ConfigPathOperation,
     raw_path: &str,
-) -> Result<ResolvedContainerEdit, IdenteditError> {
+) -> Result<ResolvedContainerEdit<'tree>, IdenteditError> {
     let mut current =
         json_root_value(tree.root_node()).ok_or_else(|| IdenteditError::InvalidRequest {
             message: "JSON document has no root value".to_string(),
@@ -67,8 +67,7 @@ pub(in crate::patch::config_path) fn resolve_json_path(
                 if last {
                     return Ok(match operation {
                         ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
-                            container_span: span_from_node(current),
-                            container_kind: current.kind().to_string(),
+                            container: current,
                             replace_span: span_from_node(value_node),
                         },
                         ConfigPathOperation::Append { .. } => {
@@ -79,14 +78,12 @@ pub(in crate::patch::config_path) fn resolve_json_path(
                                 ));
                             }
                             ResolvedContainerEdit {
-                                container_span: span_from_node(value_node),
-                                container_kind: value_node.kind().to_string(),
+                                container: value_node,
                                 replace_span: span_from_node(value_node),
                             }
                         }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
-                            container_span: span_from_node(current),
-                            container_kind: current.kind().to_string(),
+                            container: current,
                             replace_span: adjusted_delete_span_for_container(
                                 source,
                                 span_from_node(current),
@@ -116,8 +113,7 @@ pub(in crate::patch::config_path) fn resolve_json_path(
                 if last {
                     return Ok(match operation {
                         ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
-                            container_span: span_from_node(current),
-                            container_kind: current.kind().to_string(),
+                            container: current,
                             replace_span: span_from_node(*entry),
                         },
                         ConfigPathOperation::Append { .. } => {
@@ -125,14 +121,12 @@ pub(in crate::patch::config_path) fn resolve_json_path(
                                 return Err(append_requires_array_error(raw_path, entry.kind()));
                             }
                             ResolvedContainerEdit {
-                                container_span: span_from_node(*entry),
-                                container_kind: entry.kind().to_string(),
+                                container: *entry,
                                 replace_span: span_from_node(*entry),
                             }
                         }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
-                            container_span: span_from_node(current),
-                            container_kind: current.kind().to_string(),
+                            container: current,
                             replace_span: adjusted_delete_span_for_container(
                                 source,
                                 span_from_node(current),

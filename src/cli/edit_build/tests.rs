@@ -85,3 +85,43 @@ fn selection_observation_keeps_diagnostic_source_and_handle_spans_together() {
         assert_eq!(hash_text(selected).to_string(), candidate.expected_old_hash);
     }
 }
+
+#[test]
+fn config_lowering_retains_the_source_condition_for_the_builders_actual_reread() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("settings.json");
+    let original = "{\"inside\":{\"a\":1,\"b\":2},\"outside\":0}";
+    let changed = "{\"inside\":{\"a\":1,\"b\":2},\"outside\":9}";
+    fs::write(&file, original).unwrap();
+    let context = ExecutionContext::new();
+    let request = serde_json::from_value(json!({"command":"edit","file":file,"operations":[
+        {"target":{"type":"config_path","path":"inside.a"},"op":{"type":"set","new_text":"10"}},
+        {"target":{"type":"config_path","path":"inside.b"},"op":{"type":"set","new_text":"20"}}
+    ]}))
+    .unwrap();
+    let entries = parse_stdin_edit_shape(request).unwrap();
+    let bucket = normalize_edit_file_requests(entries, &context)
+        .unwrap()
+        .remove(0);
+    assert_eq!(bucket.expected_file_hash, Some(hash_text(original)));
+    let instructions = bucket
+        .instructions
+        .into_iter()
+        .map(|item| item.operation)
+        .collect();
+
+    fs::write(&file, changed).unwrap();
+    let failure = build_changeset_with_context_indexed(
+        &file,
+        instructions,
+        bucket.expected_file_hash,
+        &context,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        failure.error,
+        IdenteditError::FilePreconditionFailed { .. }
+    ));
+    assert!(failure.operation_indices.is_empty());
+    assert_eq!(fs::read_to_string(&file).unwrap(), changed);
+}

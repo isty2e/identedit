@@ -25,9 +25,8 @@ pub(super) use yaml::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ResolvedContainerEdit {
-    pub(super) container_span: Span,
-    pub(super) container_kind: String,
+pub(super) struct ResolvedContainerEdit<'tree> {
+    pub(super) container: Node<'tree>,
     pub(super) replace_span: Span,
 }
 

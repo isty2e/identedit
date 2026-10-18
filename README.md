@@ -108,6 +108,8 @@ identedit patch src/example.py \
 
 ### Edit a nested config value
 
+For several settings in one plan, use [config intents in `edit --json`](skills/identedit/references/config-path-patching.md#batch-edit-intents). Paths address the original source; overlapping writes are rejected.
+
 ```bash
 identedit patch config.yaml --config-path server.port --set-value 8080
 identedit patch config.json --config-path items --append-value 4

@@ -66,6 +66,8 @@ fn assert_compact_preview_old_state(preview: &Value, expected_old_text: &str) {
 
 #[path = "edit_integration/boundary_conflicts.rs"]
 mod boundary_conflicts;
+#[path = "edit_integration/config_intents.rs"]
+mod config_intents;
 #[path = "edit_integration/flag_mode_and_resolution.rs"]
 mod flag_mode_and_resolution;
 #[path = "edit_integration/line_parity.rs"]
