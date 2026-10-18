@@ -1,11 +1,13 @@
 ---
 name: identedit
-description: "Precision code editing with precondition safety. USE WHEN: multi-file atomic edits, repeated target text, config-path edits, or a previous edit attempt failed or landed in the wrong place. NOT for: trivial one-line fixes, full-file rewrites, file-system renames."
+description: "Precision code editing with precondition safety. USE WHEN: multi-file atomic edits, repeated target text, config-path edits, or a previous edit attempt failed or landed in the wrong place. NOT for: trivial one-line fixes, full-file rewrites, pattern-wide structural rewrites (use ast-grep), file-system renames."
 ---
 
 # Identedit
 
-Use for repeated targets, context-mismatch recovery, config paths, precondition-checked file-boundary insertions, or multiple edits that must commit together. Prefer direct editing for trivial changes and full-file rewrites; use `repren` or `git mv` for bulk text/path renames.
+Use for repeated targets, context-mismatch recovery, config paths, precondition-checked file-boundary insertions, or multiple edits that must commit together.
+
+Use `ast-grep` for pattern-wide structural rewrites; its rewrite workflow is separate from Identedit's guarded transactions. Prefer direct editing for trivial changes and full-file rewrites; use `repren` or `git mv` for bulk text/path renames.
 
 ## Find the existing feature
 

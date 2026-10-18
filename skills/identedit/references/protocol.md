@@ -51,6 +51,8 @@ Operations do not consume earlier operations' proposed output. There is no singl
 
 Sequential virtual-document editing remains unsupported. `patch --json` still accepts guarded node targets, not symbol/selector targets; patch/edit flags support both selectors, and patch JSON retains guarded-node scoped regex. Revisit this deliberate JSON-target asymmetry only as a separately selected extension. No reindentation, all-match selection, external spans, DSL, runtime validation or new filesystem identity/transaction promise is added.
 
+Use [ast-grep](https://ast-grep.github.io/) for all-match structural rewrites; it runs outside identedit's guarded transaction.
+
 ## File source preconditions
 
 A compiled `files` entry may contain `expected_file_hash`, the 16-hex content hash of its complete original source bytes. Newly generated config-path plans always include it, including edit JSON intents, config flag edits and the internal plans used by patch flags/JSON. It protects the full source context read by config checks, not just the replaced container. A file containing both config and other operations retains this condition for the whole file; raw-only plans omit it unless explicitly supplied in a compiled plan.
