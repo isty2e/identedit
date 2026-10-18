@@ -6,6 +6,12 @@ use crate::handle::Span;
 
 use super::MatchedChange;
 
+#[derive(Debug)]
+pub(crate) struct ChangeConflict {
+    pub(crate) error: IdenteditError,
+    pub(crate) operation_indices: [usize; 2],
+}
+
 pub(crate) fn reject_move_operation(op: &OpKind, index: usize) -> Result<(), IdenteditError> {
     if let OpKind::Move { .. } = op {
         return Err(IdenteditError::InvalidRequest {
@@ -21,6 +27,12 @@ pub(crate) fn reject_move_operation(op: &OpKind, index: usize) -> Result<(), Ide
 pub(crate) fn validate_change_conflicts(
     matched_changes: &[MatchedChange],
 ) -> Result<(), IdenteditError> {
+    validate_change_conflicts_with_indices(matched_changes).map_err(|conflict| conflict.error)
+}
+
+pub(crate) fn validate_change_conflicts_with_indices(
+    matched_changes: &[MatchedChange],
+) -> Result<(), ChangeConflict> {
     let mut anchor_groups: BTreeMap<(String, usize, usize), Vec<&MatchedChange>> = BTreeMap::new();
     for matched in matched_changes {
         anchor_groups
@@ -34,7 +46,7 @@ pub(crate) fn validate_change_conflicts(
     }
 
     for group in anchor_groups.into_values() {
-        let has_anchor_rewrite = group.iter().any(|matched| {
+        let anchor_rewrite = group.iter().find(|matched| {
             matches!(
                 matched.op,
                 OpKind::Replace { .. }
@@ -47,7 +59,7 @@ pub(crate) fn validate_change_conflicts(
                     | OpKind::MoveAfter { .. }
             )
         });
-        let has_insert = group.iter().any(|matched| {
+        let insert = group.iter().find(|matched| {
             matches!(
                 matched.op,
                 OpKind::InsertBefore { .. }
@@ -56,13 +68,16 @@ pub(crate) fn validate_change_conflicts(
                     | OpKind::InsertAfterLine { .. }
             )
         });
-        if has_anchor_rewrite && has_insert {
+        if let (Some(rewrite), Some(insert)) = (anchor_rewrite, insert) {
             let anchor = group[0];
-            return Err(IdenteditError::InvalidRequest {
-                message: format!(
-                    "Conflicting operations on the same anchor are not supported: anchor '{}' [{}, {}) mixes rewrite and insert operations",
-                    anchor.anchor_kind, anchor.anchor_span.start, anchor.anchor_span.end
-                ),
+            return Err(ChangeConflict {
+                operation_indices: [rewrite.index, insert.index],
+                error: IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Conflicting operations on the same anchor are not supported: anchor '{}' [{}, {}) mixes rewrite and insert operations",
+                        anchor.anchor_kind, anchor.anchor_span.start, anchor.anchor_span.end
+                    ),
+                },
             });
         }
     }
@@ -95,11 +110,14 @@ pub(crate) fn validate_change_conflicts(
         if first.span.end > second.span.start
             || (first.span.end == second.span.start && (first_insert || second_insert))
         {
-            return Err(IdenteditError::InvalidRequest {
-                message: format!(
-                    "Overlapping operations are not supported: [{}, {}) conflicts with [{}, {})",
-                    first.span.start, first.span.end, second.span.start, second.span.end,
-                ),
+            return Err(ChangeConflict {
+                operation_indices: [first.operation_index, second.operation_index],
+                error: IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Overlapping operations are not supported: [{}, {}) conflicts with [{}, {})",
+                        first.span.start, first.span.end, second.span.start, second.span.end,
+                    ),
+                },
             });
         }
     }

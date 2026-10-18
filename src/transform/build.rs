@@ -10,11 +10,35 @@ use crate::handle::SelectionHandle;
 use crate::hash::hash_text;
 
 use super::MatchedChange;
-use super::conflict::{reject_move_operation, validate_change_conflicts};
+use super::conflict::{reject_move_operation, validate_change_conflicts_with_indices};
 #[cfg(test)]
 use super::parse::parse_handles_for_file_with_context;
 use super::parse::parse_handles_for_source_with_context;
 use super::resolve::{HandleIndex, ResolvedOperationView, resolve_operation_view};
+
+#[derive(Debug)]
+pub(crate) struct BuildChangesetError {
+    pub(crate) error: IdenteditError,
+    pub(crate) operation_indices: Vec<usize>,
+}
+
+impl BuildChangesetError {
+    fn operation(index: usize, error: IdenteditError) -> Self {
+        Self {
+            error,
+            operation_indices: vec![index],
+        }
+    }
+}
+
+impl From<IdenteditError> for BuildChangesetError {
+    fn from(error: IdenteditError) -> Self {
+        Self {
+            error,
+            operation_indices: vec![],
+        }
+    }
+}
 
 #[cfg(test)]
 pub(crate) fn build_replace_changeset(
@@ -59,6 +83,7 @@ fn build_single_identity_changeset(
     let source_text = context.read_file_utf8(file)?;
     let operation = EditOperation::try_new(target, op)?;
     build_changeset_with_handles(file, &source_text, &handles, vec![operation])
+        .map_err(|failure| failure.error)
 }
 
 #[cfg(test)]
@@ -100,6 +125,15 @@ pub(crate) fn build_changeset_with_context(
     instructions: Vec<EditOperation>,
     context: &ExecutionContext,
 ) -> Result<FileChange, IdenteditError> {
+    build_changeset_with_context_indexed(file, instructions, context)
+        .map_err(|failure| failure.error)
+}
+
+pub(crate) fn build_changeset_with_context_indexed(
+    file: &Path,
+    instructions: Vec<EditOperation>,
+    context: &ExecutionContext,
+) -> Result<FileChange, BuildChangesetError> {
     let source_text = context.read_file_utf8(file)?;
     let requires_structure_parse = instructions
         .iter()
@@ -120,14 +154,16 @@ fn build_changeset_with_handles(
     source_text: &str,
     handles: &[SelectionHandle],
     instructions: Vec<EditOperation>,
-) -> Result<FileChange, IdenteditError> {
+) -> Result<FileChange, BuildChangesetError> {
     let handle_index = HandleIndex::new(handles);
     let mut operations = Vec::new();
     let mut matched_changes = Vec::new();
 
     for (index, instruction) in instructions.into_iter().enumerate() {
-        reject_move_operation(instruction.op(), index)?;
-        let resolved = resolve_operation_view(file, source_text, &handle_index, &instruction)?;
+        reject_move_operation(instruction.op(), index)
+            .map_err(|error| BuildChangesetError::operation(index, error))?;
+        let resolved = resolve_operation_view(file, source_text, &handle_index, &instruction)
+            .map_err(|error| BuildChangesetError::operation(index, error))?;
         let canonical_target = canonicalize_operation_target(instruction.target(), &resolved);
         let op = instruction.op().clone();
         let effective_op = resolved.effective_op.clone().unwrap_or_else(|| op.clone());
@@ -143,7 +179,7 @@ fn build_changeset_with_handles(
             anchor_span: resolved.anchor_span,
         });
 
-        operations.push(ChangeOp::from_parts(
+        let change = ChangeOp::from_parts(
             canonical_target,
             op,
             ChangePreview::text(
@@ -153,10 +189,17 @@ fn build_changeset_with_handles(
                 preview_new_text,
                 resolved.matched_span,
             ),
-        )?);
+        )
+        .map_err(|error| BuildChangesetError::operation(index, error.into()))?;
+        operations.push(change);
     }
 
-    validate_change_conflicts(&matched_changes)?;
+    validate_change_conflicts_with_indices(&matched_changes).map_err(|conflict| {
+        BuildChangesetError {
+            error: conflict.error,
+            operation_indices: conflict.operation_indices.to_vec(),
+        }
+    })?;
 
     Ok(FileChange {
         file: file.to_path_buf(),

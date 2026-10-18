@@ -4,11 +4,13 @@ use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
 
+#[cfg(test)]
 pub(crate) fn parse_handles_for_file(file: &Path) -> Result<Vec<SelectionHandle>, IdenteditError> {
     let context = ExecutionContext::new();
     parse_handles_for_file_with_context(file, &context)
 }
 
+#[cfg(test)]
 pub(crate) fn parse_handles_for_file_with_context(
     file: &Path,
     context: &ExecutionContext,

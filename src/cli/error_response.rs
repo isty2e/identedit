@@ -27,6 +27,8 @@ struct CandidateSummary {
 struct ErrorBody {
     r#type: String,
     message: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    request_pointers: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stage: Option<ParseStage>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,6 +50,7 @@ impl ErrorBody {
         Self {
             r#type: error_type.into(),
             message: message.into(),
+            request_pointers: vec![],
             stage: None,
             suggestion,
             candidates: vec![],
@@ -69,6 +72,11 @@ pub fn render_error_response(error: &IdenteditError) -> String {
 
 fn error_response(error: &IdenteditError) -> ErrorResponse {
     match error {
+        IdenteditError::EditRequestContext { source, request_pointers } => {
+            let mut response = error_response(source);
+            response.error.request_pointers = request_pointers.clone();
+            response
+        },
         IdenteditError::EditRequestPassedToApply { .. } => ErrorResponse {
             error: ErrorBody::new("invalid_request", error.to_string(), Some(
                 "Build a changeset first: identedit edit --json < request.json | identedit apply. No files were changed.".to_string()

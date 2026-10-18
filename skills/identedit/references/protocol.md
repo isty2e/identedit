@@ -27,6 +27,26 @@ Run `identedit <command> --help` for the complete flag surface. Identedit does n
 
 Consumers should parse documented JSON output rather than grep its rendered text. Capture stderr separately when command construction itself may be invalid.
 
+## Edit JSON intents
+
+Both `edit --json` envelopes (`file` + `operations`, or `files`) accept strict resolve-now node targets:
+
+```json
+{"type":"symbol","name":"Service.run"}
+```
+
+```json
+{"type":"selector","kind":"function_definition","name":"load_*"}
+```
+
+A symbol uses the same local/qualified-name rules as the flag selector; a selector requires a kind and a glob over raw provider names. Exactly one node must match. Unknown fields and mixed guard fields, including flat null guard fields, are rejected. To preserve an earlier observation, use the existing node/flat/handle-ref form with its copied guards; edit never replaces a stale supplied hash with a fresh one.
+
+Node operations also accept `{"type":"scoped_regex","pattern":"old","replacement":"new"}`. It rewrites raw selected-node text, including strings/comments, with the existing regex capture semantics. Invalid patterns and zero matches fail. The result lowers to a literal guarded replacement, not an executable regex in the changeset. Existing node positions in structural moves also accept symbol/selector targets; same-file and cross-file destination-kind restrictions are unchanged.
+
+Operations do not consume earlier operations' proposed output. There is no single-read, atomic query-set or whole-request source-version guarantee: edit may cache observations and reread files before validating fixed guards/building previews. Unrelated changes or changed containing names can leave guards satisfied; queries are not rechecked by apply. Existing overlap checks still reject conflicting byte effects, and compilation failure returns no partial plan and writes no files.
+
+JSON config-path intents and sequential/container composition are out of scope for edit. `patch --json` still accepts guarded node targets, not symbol/selector targets; patch/edit flags support both selectors, and patch JSON retains guarded-node scoped regex. Revisit this deliberate JSON-target asymmetry only as a separately selected extension. No reindentation, all-match selection, external spans, DSL, runtime validation or new filesystem identity/transaction promise is added.
+
 ## Node-result parsing
 
 Before admitting a file with any node-target operation, `patch` and `apply` reparse its complete proposed text with the syntax-capable provider selected for the original file. This covers replacements, deletions, insertions, in-file moves, and lowered cross-file moves or scoped-regex edits. All operations in that file, including line and file-boundary edits, contribute to the final text being checked. Individual payloads need not parse in isolation. A rejected result returns `error.type: "parse_failure"` and `error.stage: "proposed_result"`, identifying the file and provider with recovery guidance; no file edits or moves in the transaction have started.
@@ -182,6 +202,14 @@ Errors use this shape:
 ```
 
 `suggestion` is optional. `ambiguous_target` may also include a `candidates` array with structured target context.
+
+### Edit request locations
+
+Attributable `edit --json` errors add optional `error.request_pointers`, an array of JSON Pointers into the original request. Single-file operations use `/operations/2`; batch operations use `/files/1/operations/2`. A file-level error may point to `/file`, a file entry, or the operation that introduced a move destination. Syntax/envelope failures and failures without known input provenance can omit the field.
+
+Conflict errors identify a sufficient pair of original operations, deduplicated and ordered by numeric input position. One input move can create two effects with the same origin and therefore one pointer. Pointers refer to input positions, not normalized file buckets, compiled operation indexes, filesystem paths or config paths.
+
+The underlying error type, stage, suggestions and candidate/line-check details remain authoritative. This additive metadata is not written to changesets and is not added to flag, patch or apply errors by edit compilation. Do not parse input positions out of `message` or assume an omitted pointer means the request is valid.
 
 ### Ambiguity candidate details
 
