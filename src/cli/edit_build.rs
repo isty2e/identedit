@@ -165,6 +165,12 @@ enum NodeQueryWire {
 }
 
 #[derive(Deserialize)]
+struct EditTargetFamilyWire {
+    #[serde(rename = "type")]
+    target_type: Option<String>,
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ConfigTargetWire {
     ConfigPath {
@@ -201,6 +207,13 @@ impl OperationOrigin {
         match self.file_index {
             Some(file) => format!("/files/{file}/operations/{}", self.operation_index),
             None => format!("/operations/{}", self.operation_index),
+        }
+    }
+
+    fn file_pointer(self) -> String {
+        match self.file_index {
+            Some(file) => format!("/files/{file}"),
+            None => "/file".to_string(),
         }
     }
 }
@@ -614,6 +627,10 @@ fn compile_file_bucket(
             }
         }
     }
+    let request_pointer = config_locations
+        .first()
+        .map(|(_, origin)| origin.file_pointer())
+        .unwrap_or(bucket.request_pointer);
 
     let expected_file_hash = if config_requests.is_empty() {
         None
@@ -621,7 +638,7 @@ fn compile_file_bucket(
         let compiled =
             resolve_config_path_operations(&bucket.file, &config_requests).map_err(|failure| {
                 let pointers = if failure.request_indices.is_empty() {
-                    vec![bucket.request_pointer.clone()]
+                    vec![request_pointer.clone()]
                 } else {
                     let mut origins = failure
                         .request_indices
@@ -656,7 +673,7 @@ fn compile_file_bucket(
             .map(|(_, instruction)| instruction)
             .collect(),
         expected_file_hash,
-        request_pointer: bucket.request_pointer,
+        request_pointer,
     })
 }
 
@@ -744,6 +761,19 @@ fn wrap_single_file(file_change: FileChange) -> MultiFileChangeset {
     }
 }
 
+fn parse_edit_target_family(
+    raw_target: Option<&RawValue>,
+) -> Result<Option<String>, IdenteditError> {
+    let Some(raw_target) = raw_target else {
+        return Ok(None);
+    };
+    let family: EditTargetFamilyWire =
+        serde_json::from_str(raw_target.get()).map_err(|error| IdenteditError::InvalidRequest {
+            message: format!("invalid operation target: {error}"),
+        })?;
+    Ok(family.target_type)
+}
+
 fn parse_edit_operation(
     raw_operation: &RawValue,
     handle_table: Option<&StdinHandleTableWire>,
@@ -754,11 +784,8 @@ fn parse_edit_operation(
         .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
     let raw_targets: RawEditOperationTargets<'_> = serde_json::from_str(raw_operation.get())
         .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
-    let query_target = operation
-        .target
-        .as_ref()
-        .and_then(|target| target.get("type"))
-        .and_then(Value::as_str);
+    let target_family = parse_edit_target_family(raw_targets.target)?;
+    let query_target = target_family.as_deref();
     if matches!(query_target, Some("symbol" | "selector" | "config_path")) {
         let fields: Value = serde_json::from_str(raw_operation.get())
             .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
@@ -885,8 +912,8 @@ fn parse_edit_target_from_wire(
     file: &Path,
     state: &mut NormalizeState<'_>,
 ) -> Result<TransformTarget, IdenteditError> {
-    let target_type = target_wire.get("type").and_then(Value::as_str);
-    if matches!(target_type, Some("symbol" | "selector")) {
+    let target_type = parse_edit_target_family(raw_target)?;
+    if matches!(target_type.as_deref(), Some("symbol" | "selector")) {
         let raw_target = raw_target.ok_or_else(|| IdenteditError::InvalidRequest {
             message: "node query target requires its original JSON input".to_string(),
         })?;
@@ -904,7 +931,7 @@ fn parse_edit_target_from_wire(
         };
         return state.resolve_query(file, query);
     }
-    if target_type == Some("handle_ref") {
+    if target_type.as_deref() == Some("handle_ref") {
         let handle_ref: HandleRefTargetWire =
             serde_json::from_value(target_wire).map_err(|error| {
                 IdenteditError::InvalidRequest {

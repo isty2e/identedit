@@ -125,3 +125,80 @@ fn config_lowering_retains_the_source_condition_for_the_builders_actual_reread()
     assert!(failure.operation_indices.is_empty());
     assert_eq!(fs::read_to_string(&file).unwrap(), changed);
 }
+
+#[test]
+fn config_context_replaces_an_inferred_origin_for_builder_file_failures() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("settings.json");
+    let original = "{\"inside\":{\"a\":1},\"outside\":0}";
+    let changed = "{\"inside\":{\"a\":1},\"outside\":9}";
+    fs::write(&file, original).unwrap();
+    let context = ExecutionContext::new();
+    let mut state = NormalizeState::new(&context);
+    let target = state
+        .resolve_query(
+            &file,
+            NodeTargetSelector::Selector {
+                kind: "number".to_string(),
+                name_pattern: "outside".to_string(),
+            },
+        )
+        .unwrap();
+    let source_move = OperationOrigin {
+        file_index: Some(0),
+        operation_index: 0,
+    };
+    let config_origin = OperationOrigin {
+        file_index: Some(1),
+        operation_index: 0,
+    };
+    let pending = PendingFileInstructions {
+        file: file.clone(),
+        instructions: vec![
+            PendingInstruction::Addressed(LocatedInstruction {
+                operation: EditOperation::try_new(
+                    target,
+                    OpKind::InsertBefore {
+                        new_text: String::new(),
+                    },
+                )
+                .unwrap(),
+                origin: source_move,
+            }),
+            PendingInstruction::Config {
+                request: ConfigPathRequest {
+                    path: "inside.a".to_string(),
+                    expected_file_hash: None,
+                    document_index: None,
+                    operation: ConfigPathOperation::Set {
+                        new_text: "10".to_string(),
+                        missing_path: MissingPathPolicy::Reject,
+                    },
+                },
+                origin: config_origin,
+            },
+        ],
+        request_pointer: source_move.pointer(),
+    };
+    let bucket = compile_file_bucket(pending).unwrap();
+    assert_eq!(bucket.request_pointer, "/files/1");
+    let instructions = bucket
+        .instructions
+        .into_iter()
+        .map(|item| item.operation)
+        .collect();
+    fs::write(&file, changed).unwrap();
+    let failure = build_changeset_with_context_indexed(
+        &file,
+        instructions,
+        bucket.expected_file_hash,
+        &context,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        failure.error,
+        IdenteditError::FilePreconditionFailed { .. }
+    ));
+    assert!(failure.operation_indices.is_empty());
+    assert_eq!(fs::read_to_string(&file).unwrap(), changed);
+}

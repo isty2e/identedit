@@ -45,6 +45,8 @@ Node operations also accept `{"type":"scoped_regex","pattern":"old","replacement
 
 Both envelopes also accept `config_path` targets with `set`, `append` or `delete`. Compatible original-source writes can be composed under their existing guard scopes, allowing several settings in one container to change together. They lower to fixed literal operations and a [full-file source condition](#file-source-preconditions), not saved paths to rerun. See [batch config intents](config-path-patching.md#batch-edit-intents) for request fields, composition limits and mixed-operation behavior.
 
+Edit JSON rejects duplicate target `type` fields before selecting a target family, including in structural-move destinations.
+
 Operations do not consume earlier operations' proposed output. There is no single-read, atomic query-set or whole-request source-version guarantee: edit may cache observations and reread files before validating fixed guards/building previews. Without a [file source precondition](#file-source-preconditions), unrelated changes or changed containing names can leave guards satisfied; queries are not rechecked by apply. Existing overlap checks still reject conflicting byte effects, and compilation failure returns no partial plan and writes no files.
 
 Sequential virtual-document editing remains unsupported. `patch --json` still accepts guarded node targets, not symbol/selector targets; patch/edit flags support both selectors, and patch JSON retains guarded-node scoped regex. Revisit this deliberate JSON-target asymmetry only as a separately selected extension. No reindentation, all-match selection, external spans, DSL, runtime validation or new filesystem identity/transaction promise is added.

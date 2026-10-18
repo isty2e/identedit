@@ -507,6 +507,100 @@ fn config_normalization_never_refreshes_a_co_resident_copied_node_guard() {
 }
 
 #[test]
+fn inferred_destination_config_errors_use_the_explicit_config_file_context() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("source.rs");
+    let destination = directory.path().join("destination.rs");
+    let source_before = "fn moved() {}\nfn stay() {}\n";
+    let destination_before = "fn target() {}\n";
+    fs::write(&source, source_before).unwrap();
+    fs::write(&destination, destination_before).unwrap();
+    let moved = select_first_handle(&source, "function_item", Some("moved"));
+    let target = select_first_handle(&destination, "function_item", Some("target"));
+    reject(
+        &json!({"command":"edit","files":[
+            {"file":source,"operations":[{"target":guarded(&moved),"op":{
+                "type":"move_to_before","destination_file":destination,"destination":guarded(&target)}}]},
+            {"file":destination,"operations":[set("unsupported","1")]}
+        ]}),
+        "invalid_request",
+        &["/files/1"],
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_before.as_bytes());
+    assert_eq!(
+        fs::read(&destination).unwrap(),
+        destination_before.as_bytes()
+    );
+}
+
+#[test]
+fn duplicate_target_discriminators_cannot_fall_back_to_guarded_nodes() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("source.json");
+    let destination = directory.path().join("destination.json");
+    let before = "{\"value\":1,\"other\":2}";
+    fs::write(&source, before).unwrap();
+    fs::write(&destination, before).unwrap();
+    let first = guarded(&select_first_handle(&source, "number", Some("value")));
+    let second = guarded(&select_first_handle(&source, "number", Some("other")));
+    let other_file = guarded(&select_first_handle(&destination, "number", Some("other")));
+
+    for first_type in ["config_path", "symbol", "selector"] {
+        for escaped_key in [false, true] {
+            let key = if escaped_key {
+                r#""ty\u0070e""#
+            } else {
+                r#""type""#
+            };
+            let duplicate = |node: &Value| {
+                let wire = node.to_string();
+                format!(
+                    "{{{key}:{}, {}}}",
+                    json!(first_type),
+                    &wire[1..wire.len() - 1]
+                )
+            };
+            let mut operations = vec![format!(
+                "{{\"target\":{},\"op\":{{\"type\":\"replace\",\"new_text\":\"10\"}}}}",
+                duplicate(&first)
+            )];
+            for kind in [
+                "move_before",
+                "move_after",
+                "move_to_before",
+                "move_to_after",
+            ] {
+                let (target, extra) = if kind.starts_with("move_to_") {
+                    (
+                        &other_file,
+                        format!(",\"destination_file\":{}", json!(destination)),
+                    )
+                } else {
+                    (&second, String::new())
+                };
+                operations.push(format!(
+                    "{{\"target\":{first},\"op\":{{\"type\":\"{kind}\",\"destination\":{}{extra}}}}}",
+                    duplicate(target)
+                ));
+            }
+            for operation in operations {
+                let input = format!(
+                    "{{\"command\":\"edit\",\"file\":{},\"operations\":[{operation}]}}",
+                    json!(source)
+                );
+                failure(
+                    run_identedit_with_stdin(&["edit", "--json"], &input),
+                    "invalid_request",
+                    &["/operations/0"],
+                );
+                assert_eq!(fs::read(&source).unwrap(), before.as_bytes());
+                assert_eq!(fs::read(&destination).unwrap(), before.as_bytes());
+            }
+        }
+    }
+}
+
+#[test]
 fn malformed_config_forms_fail_without_writing_any_batch_file() {
     let directory = tempdir().unwrap();
     let first = directory.path().join("first.json");
