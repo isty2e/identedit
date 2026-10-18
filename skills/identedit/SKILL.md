@@ -152,7 +152,7 @@ Single-file request shape (copy identities and hashes from `read`; these values 
 
 For batches, replace `file` and `operations` with `files: [{"file": "...", "operations": [...]}]`. Use exactly one request shape. Never synthesize identities or precondition hashes. Use `jq --rawfile` to populate `op.new_text` from a file.
 
-Queries resolve uniquely during `edit`; copied guards are not refreshed. Operations do not see earlier planned output, and source may be reread before guards are checked. `apply` receives fixed guards and literal text, not queries/regexes. Overlapping effects are rejected. JSON `config_path` intents remain unsupported by `edit`, and `patch --json` still requires guarded node targets rather than symbol/selector targets. See the [intent contract](references/protocol.md#edit-json-intents).
+`symbol`/`selector` queries must match exactly one node; copied guards are not refreshed. `patch --json` does not accept these targets. See the [intent contract](references/protocol.md#edit-json-intents).
 
 Structural moves can insert caller-specified `prefix` and `suffix` around the exact selected bytes. These strings do not reindent the body, repair the source block or infer trivia ownership; a Python suffix may include the following line's indentation. See [raw move text](references/protocol.md#raw-move-text) and the [move example](references/structural-pipeline.md#operations).
 
