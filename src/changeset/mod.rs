@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::handle::Span;
-use crate::hash::ContentHash;
+use crate::hash::{ContentHash, hash_bytes};
 use crate::hashline::LineAnchor;
 
 mod wire;
@@ -69,7 +69,45 @@ impl TransformTarget {
 #[serde(deny_unknown_fields)]
 pub struct FileChange {
     pub file: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_file_hash: Option<ContentHash>,
     pub operations: Vec<ChangeOp>,
+}
+
+impl FileChange {
+    pub(crate) fn verify_source(&self, source: &[u8]) -> Result<(), crate::error::IdenteditError> {
+        if let Some(expected_hash) = &self.expected_file_hash {
+            let actual_hash = hash_bytes(source);
+            if expected_hash != &actual_hash {
+                return Err(crate::error::IdenteditError::PreconditionFailed {
+                    expected_hash: expected_hash.to_string(),
+                    actual_hash: actual_hash.to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn conjoin_file_hash(
+        &self,
+        expected_hash: Option<ContentHash>,
+    ) -> Result<Option<ContentHash>, crate::error::IdenteditError> {
+        match (&self.expected_file_hash, expected_hash) {
+            (Some(current), Some(incoming)) if current != &incoming => {
+                Err(crate::error::IdenteditError::InvalidRequest {
+                    message: format!(
+                        "Conflicting file hash preconditions for '{}': {} and {}",
+                        self.file.display(),
+                        current,
+                        incoming,
+                    ),
+                })
+            }
+            (None, incoming) => Ok(incoming),
+            (Some(current), _) => Ok(Some(current.clone())),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -15,7 +15,7 @@ use crate::handle::SelectionHandle;
 use crate::handle::Span;
 use crate::hash::{ContentHash, hash_text};
 use crate::patch::scoped_regex::{compile_scoped_regex, rewrite_scoped_node_text};
-use crate::transform::build::{build_changeset, build_changeset_with_context_indexed};
+use crate::transform::build::build_changeset_with_context_indexed;
 use crate::transform::resolve::resolve_target_in_handles;
 
 use super::edit_intent::NodeTargetSelector;
@@ -380,9 +380,15 @@ impl<'a> NormalizeState<'a> {
 pub(crate) fn build_single_file_edit_plan(
     file: PathBuf,
     operation: EditOperation,
+    expected_file_hash: Option<crate::hash::ContentHash>,
     verbose: bool,
 ) -> Result<MultiFileChangeset, IdenteditError> {
-    let file_change = build_changeset(&file, vec![operation])?;
+    let file_change = crate::transform::build::build_changeset_with_context(
+        &file,
+        vec![operation],
+        expected_file_hash,
+        &ExecutionContext::new(),
+    )?;
     let mut changeset = wrap_single_file(file_change);
     apply_preview_mode(&mut changeset, verbose);
     Ok(changeset)
@@ -412,6 +418,7 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
     for bucket in normalized_buckets {
         if bucket.instructions.is_empty() {
             files.push(FileChange {
+                expected_file_hash: None,
                 file: bucket.file,
                 operations: Vec::new(),
             });
@@ -429,8 +436,8 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
             .map(|item| item.operation)
             .collect();
         let file_change =
-            build_changeset_with_context_indexed(&bucket.file, instructions, &context).map_err(
-                |failure| {
+            build_changeset_with_context_indexed(&bucket.file, instructions, None, &context)
+                .map_err(|failure| {
                     let pointers = if failure.operation_indices.is_empty() {
                         vec![bucket.request_pointer]
                     } else {
@@ -447,8 +454,7 @@ pub(crate) fn run_edit_json_mode(verbose: bool) -> Result<MultiFileChangeset, Id
                             .collect()
                     };
                     failure.error.with_request_pointers(pointers)
-                },
-            )?;
+                })?;
         files.push(file_change);
     }
 

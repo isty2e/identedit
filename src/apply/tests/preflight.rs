@@ -127,6 +127,7 @@ fn build_move_changeset_with_hash(
     expected_file_hash: ContentHash,
 ) -> FileChange {
     FileChange {
+        expected_file_hash: None,
         file: source.to_path_buf(),
         operations: vec![
             ChangeOp::from_parts(

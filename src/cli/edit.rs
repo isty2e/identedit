@@ -60,6 +60,7 @@ pub fn run_edit(args: EditArgs) -> Result<EditCommandOutput, IdenteditError> {
             crate::cli::edit_build::build_single_file_edit_plan(
                 resolved.file,
                 resolved.operation,
+                None,
                 args.verbose,
             )
         }
@@ -67,6 +68,7 @@ pub fn run_edit(args: EditArgs) -> Result<EditCommandOutput, IdenteditError> {
             crate::cli::edit_build::build_single_file_edit_plan(
                 intent.file,
                 intent.operation,
+                intent.expected_file_hash,
                 args.verbose,
             )
         }
@@ -75,6 +77,7 @@ pub fn run_edit(args: EditArgs) -> Result<EditCommandOutput, IdenteditError> {
             crate::cli::edit_build::build_single_file_edit_plan(
                 intent.file,
                 intent.operation,
+                intent.expected_file_hash,
                 args.verbose,
             )
         }

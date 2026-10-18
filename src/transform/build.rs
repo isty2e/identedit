@@ -6,6 +6,7 @@ use crate::changeset::{
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 use crate::handle::SelectionHandle;
+use crate::hash::ContentHash;
 #[cfg(test)]
 use crate::hash::hash_text;
 
@@ -82,7 +83,7 @@ fn build_single_identity_changeset(
 
     let source_text = context.read_file_utf8(file)?;
     let operation = EditOperation::try_new(target, op)?;
-    build_changeset_with_handles(file, &source_text, &handles, vec![operation])
+    build_changeset_with_handles(file, &source_text, &handles, vec![operation], None)
         .map_err(|failure| failure.error)
 }
 
@@ -112,26 +113,29 @@ fn resolve_unique_identity_handle<'a>(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn build_changeset(
     file: &Path,
     instructions: Vec<EditOperation>,
 ) -> Result<FileChange, IdenteditError> {
     let context = ExecutionContext::new();
-    build_changeset_with_context(file, instructions, &context)
+    build_changeset_with_context(file, instructions, None, &context)
 }
 
 pub(crate) fn build_changeset_with_context(
     file: &Path,
     instructions: Vec<EditOperation>,
+    expected_file_hash: Option<ContentHash>,
     context: &ExecutionContext,
 ) -> Result<FileChange, IdenteditError> {
-    build_changeset_with_context_indexed(file, instructions, context)
+    build_changeset_with_context_indexed(file, instructions, expected_file_hash, context)
         .map_err(|failure| failure.error)
 }
 
 pub(crate) fn build_changeset_with_context_indexed(
     file: &Path,
     instructions: Vec<EditOperation>,
+    expected_file_hash: Option<ContentHash>,
     context: &ExecutionContext,
 ) -> Result<FileChange, BuildChangesetError> {
     let source_text = context.read_file_utf8(file)?;
@@ -146,7 +150,13 @@ pub(crate) fn build_changeset_with_context_indexed(
     let handles = observation
         .as_ref()
         .map_or(&[][..], |source| source.handles());
-    build_changeset_with_handles(file, &source_text, handles, instructions)
+    build_changeset_with_handles(
+        file,
+        &source_text,
+        handles,
+        instructions,
+        expected_file_hash,
+    )
 }
 
 fn build_changeset_with_handles(
@@ -154,6 +164,7 @@ fn build_changeset_with_handles(
     source_text: &str,
     handles: &[SelectionHandle],
     instructions: Vec<EditOperation>,
+    expected_file_hash: Option<ContentHash>,
 ) -> Result<FileChange, BuildChangesetError> {
     let handle_index = HandleIndex::new(handles);
     let mut operations = Vec::new();
@@ -201,10 +212,13 @@ fn build_changeset_with_handles(
         }
     })?;
 
-    Ok(FileChange {
+    let changeset = FileChange {
         file: file.to_path_buf(),
+        expected_file_hash,
         operations,
-    })
+    };
+    changeset.verify_source(source_text.as_bytes())?;
+    Ok(changeset)
 }
 
 fn canonicalize_operation_target(
@@ -263,6 +277,7 @@ pub(crate) fn resolve_changeset_targets_in_handles(
     source_text: &str,
     handles: &[SelectionHandle],
 ) -> Result<Vec<MatchedChange>, IdenteditError> {
+    changeset.verify_source(source_text.as_bytes())?;
     let handle_index = HandleIndex::new(handles);
     let mut matched = Vec::new();
 
@@ -307,5 +322,42 @@ fn op_new_text(op: &OpKind) -> &str {
         OpKind::Insert { new_text } => new_text,
         OpKind::MoveBefore { .. } | OpKind::MoveAfter { .. } => "",
         OpKind::Move { .. } => "",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_changeset_with_handles;
+    use crate::error::IdenteditError;
+    use crate::hash::hash_text;
+    use std::path::Path;
+
+    #[test]
+    fn compilation_checks_the_buffer_used_for_previews_not_a_new_observation() {
+        let source = "{\"value\":1}\r\n";
+        let expected = hash_text(source);
+        let compiled = build_changeset_with_handles(
+            Path::new("not-read-from-disk.json"),
+            source,
+            &[],
+            vec![],
+            Some(expected.clone()),
+        )
+        .unwrap();
+        assert_eq!(compiled.expected_file_hash, Some(expected.clone()));
+
+        let changed = "{\"value\":1}\n";
+        let failure = build_changeset_with_handles(
+            Path::new("not-read-from-disk.json"),
+            changed,
+            &[],
+            vec![],
+            Some(expected),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            failure.error,
+            IdenteditError::PreconditionFailed { .. }
+        ));
     }
 }

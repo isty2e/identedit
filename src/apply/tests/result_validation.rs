@@ -110,7 +110,7 @@ fn prepared_target_replacement(
         },
     )
     .unwrap();
-    build_changeset_with_context(file, vec![operation], context).unwrap()
+    build_changeset_with_context(file, vec![operation], None, context).unwrap()
 }
 
 #[test]
@@ -282,7 +282,8 @@ fn optional_observation_failure_preserves_mutation_and_cannot_mask_result_reject
             },
         )
         .unwrap();
-        let changeset = build_changeset_with_context(&file, vec![operation], &context).unwrap();
+        let changeset =
+            build_changeset_with_context(&file, vec![operation], None, &context).unwrap();
 
         let result = super::super::apply_changesets_with_context(
             &[changeset],
@@ -354,6 +355,7 @@ fn node_file_is_parsed_once_before_and_once_after_all_edits_independent_of_provi
 
     let calls = Rc::new(Cell::new(0));
     let empty = crate::changeset::FileChange {
+        expected_file_hash: None,
         file,
         operations: vec![],
     };

@@ -94,6 +94,7 @@ identedit patch config.toml --config-path database.enabled --delete
 - `--create-missing` creates map or standard-table keys, not array/sequence elements. Delete and append reject it; append requires an existing array/sequence.
 - Multi-document YAML creation requires `--document-index <N>`.
 - Use line or direct editing for YAML anchors, merge keys, tags, sequence growth, TOML table arrays, or placement depending on local comment semantics.
+- Config plans require unchanged full-file source bytes; replan after changes rather than using repair. See [file source preconditions](references/protocol.md#file-source-preconditions).
 
 ## Text, preview, and verification
 

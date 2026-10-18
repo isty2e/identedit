@@ -142,6 +142,7 @@ fn repair_line_targets_in_changeset(
 
         let source = fs::read_to_string(&file_change.file)
             .map_err(|error| IdenteditError::io(&file_change.file, error))?;
+        file_change.verify_source(source.as_bytes())?;
         let anchors = target_refs
             .iter()
             .map(|(_, _, anchor)| anchor.clone())
@@ -236,6 +237,7 @@ fn refresh_line_operation_previews(file_change: &mut FileChange) -> Result<(), I
 
     let line_only_change = FileChange {
         file: file_change.file.clone(),
+        expected_file_hash: file_change.expected_file_hash.clone(),
         operations: line_operations,
     };
     let resolved = crate::transform::build::resolve_changeset_targets(&line_only_change)?;

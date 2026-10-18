@@ -19,27 +19,27 @@ pub fn run_merge_inputs(inputs: Vec<PathBuf>) -> Result<MultiFileChangeset, Iden
                 .entry(file_key)
                 .or_insert_with(|| FileChange {
                     file: file_change.file.clone(),
+                    expected_file_hash: None,
                     operations: Vec::new(),
                 });
+            entry.expected_file_hash = entry.conjoin_file_hash(file_change.expected_file_hash)?;
             entry.operations.extend(file_change.operations);
         }
     }
 
     let mut files = Vec::with_capacity(merged_by_file.len());
-    for mut file_change in merged_by_file.into_values() {
+    for file_change in merged_by_file.into_values() {
         validate_file_merge_constraints(&file_change.file, &file_change.operations)?;
-        if file_change.operations.is_empty() {
+        if file_change.operations.is_empty() && file_change.expected_file_hash.is_none() {
             continue;
         }
-        files.push(FileChange {
-            file: file_change.file.clone(),
-            operations: std::mem::take(&mut file_change.operations),
-        });
+        files.push(file_change);
     }
 
     if files.is_empty() {
         return Err(IdenteditError::InvalidRequest {
-            message: "Merged changeset must contain at least one operation".to_string(),
+            message: "Merged changeset must contain at least one operation or file precondition"
+                .to_string(),
         });
     }
 

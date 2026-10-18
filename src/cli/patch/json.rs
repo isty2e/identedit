@@ -374,5 +374,11 @@ fn run_patch_json_config(
         )?,
     };
 
-    run_patch_edit_operation_json(file, canonical, dry_run, verbose)
+    run_patch_edit_operation_json(
+        file,
+        canonical.operation,
+        Some(canonical.expected_file_hash),
+        dry_run,
+        verbose,
+    )
 }

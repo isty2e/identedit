@@ -65,13 +65,18 @@ struct CreateMissingSetRequest<'a> {
     document_index: Option<usize>,
 }
 
+pub struct ResolvedConfigPathOperation {
+    pub operation: EditOperation,
+    pub expected_file_hash: ContentHash,
+}
+
 pub fn resolve_config_path_operation(
     file: &Path,
     raw_path: &str,
     expected_file_hash: Option<&ContentHash>,
     document_index: Option<usize>,
     operation: ConfigPathOperation,
-) -> Result<EditOperation, IdenteditError> {
+) -> Result<ResolvedConfigPathOperation, IdenteditError> {
     let source = std::fs::read(file).map_err(|error| IdenteditError::io(file, error))?;
     let source_text = std::str::from_utf8(&source).map_err(|_| IdenteditError::InvalidRequest {
         message: format!(
@@ -80,16 +85,32 @@ pub fn resolve_config_path_operation(
         ),
     })?;
 
-    if let Some(expected_hash) = expected_file_hash {
-        let actual_hash = hash_bytes(&source);
-        if &actual_hash != expected_hash {
-            return Err(IdenteditError::PreconditionFailed {
-                expected_hash: expected_hash.to_string(),
-                actual_hash: actual_hash.to_string(),
-            });
-        }
+    let actual_hash = hash_bytes(&source);
+    if let Some(expected_hash) = expected_file_hash
+        && &actual_hash != expected_hash
+    {
+        return Err(IdenteditError::PreconditionFailed {
+            expected_hash: expected_hash.to_string(),
+            actual_hash: actual_hash.to_string(),
+        });
     }
 
+    let operation =
+        resolve_config_path_in_source(file, raw_path, document_index, operation, source_text)?;
+    Ok(ResolvedConfigPathOperation {
+        operation,
+        expected_file_hash: actual_hash,
+    })
+}
+
+fn resolve_config_path_in_source(
+    file: &Path,
+    raw_path: &str,
+    document_index: Option<usize>,
+    operation: ConfigPathOperation,
+    source_text: &str,
+) -> Result<EditOperation, IdenteditError> {
+    let source = source_text.as_bytes();
     let format = detect_config_format(file)?;
     if document_index.is_some() && !matches!(format, ConfigFormat::Yaml) {
         return Err(IdenteditError::InvalidRequest {
@@ -115,11 +136,11 @@ pub fn resolve_config_path_operation(
         validate_rendered_config_document(&format, "", &updated)?;
         let target = if source.is_empty() {
             TransformTarget::FileStart {
-                expected_file_hash: hash_bytes(&source),
+                expected_file_hash: hash_bytes(source),
             }
         } else {
             TransformTarget::FileEnd {
-                expected_file_hash: hash_bytes(&source),
+                expected_file_hash: hash_bytes(source),
             }
         };
         return Ok(EditOperation::try_new(
@@ -152,11 +173,11 @@ pub fn resolve_config_path_operation(
         )?;
         let target = if source.is_empty() {
             TransformTarget::FileStart {
-                expected_file_hash: hash_bytes(&source),
+                expected_file_hash: hash_bytes(source),
             }
         } else {
             TransformTarget::FileEnd {
-                expected_file_hash: hash_bytes(&source),
+                expected_file_hash: hash_bytes(source),
             }
         };
         return Ok(EditOperation::try_new(
@@ -165,7 +186,7 @@ pub fn resolve_config_path_operation(
         )?);
     }
 
-    let tree = parse_tree_for_format(&format, &source)?;
+    let tree = parse_tree_for_format(&format, source)?;
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
@@ -177,18 +198,18 @@ pub fn resolve_config_path_operation(
         };
         let strict_resolved = match format {
             ConfigFormat::Json => {
-                resolve_json_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
+                resolve_json_path(&tree, source, &path_tokens, &strict_probe, raw_path)
             }
             ConfigFormat::Yaml => resolve_yaml_path(
                 &tree,
-                &source,
+                source,
                 &path_tokens,
                 &strict_probe,
                 raw_path,
                 document_index,
             ),
             ConfigFormat::Toml => {
-                resolve_toml_path(&tree, &source, &path_tokens, &strict_probe, raw_path)
+                resolve_toml_path(&tree, source, &path_tokens, &strict_probe, raw_path)
             }
         };
         match strict_resolved {
@@ -212,7 +233,7 @@ pub fn resolve_config_path_operation(
                 return build_resolved_patch_from_container_edit(
                     &format,
                     file,
-                    &source,
+                    source,
                     source_text,
                     resolved,
                     &replacement,
@@ -228,7 +249,7 @@ pub fn resolve_config_path_operation(
             CreateMissingSetRequest {
                 format: &format,
                 tree: &tree,
-                source: &source,
+                source,
                 source_text,
                 path_tokens: &path_tokens,
                 raw_path,
@@ -239,20 +260,16 @@ pub fn resolve_config_path_operation(
     }
 
     let resolved = match format {
-        ConfigFormat::Json => {
-            resolve_json_path(&tree, &source, &path_tokens, &operation, raw_path)?
-        }
+        ConfigFormat::Json => resolve_json_path(&tree, source, &path_tokens, &operation, raw_path)?,
         ConfigFormat::Yaml => resolve_yaml_path(
             &tree,
-            &source,
+            source,
             &path_tokens,
             &operation,
             raw_path,
             document_index,
         )?,
-        ConfigFormat::Toml => {
-            resolve_toml_path(&tree, &source, &path_tokens, &operation, raw_path)?
-        }
+        ConfigFormat::Toml => resolve_toml_path(&tree, source, &path_tokens, &operation, raw_path)?,
     };
     if matches!(format, ConfigFormat::Yaml) {
         validate_yaml_config_path_reference_safety(
@@ -284,7 +301,7 @@ pub fn resolve_config_path_operation(
     build_resolved_patch_from_container_edit(
         &format,
         file,
-        &source,
+        source,
         source_text,
         resolved,
         &replacement,

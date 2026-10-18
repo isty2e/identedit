@@ -41,6 +41,33 @@ fn matched_change(
 }
 
 #[test]
+fn file_precondition_checks_the_supplied_resolution_buffer_even_without_operations() {
+    let original = "first\r\nsecond\r\n";
+    let changeset = FileChange {
+        file: PathBuf::from("not-read-from-disk.txt"),
+        expected_file_hash: Some(hash_text(original)),
+        operations: vec![],
+    };
+    assert!(
+        resolve_changeset_targets_in_handles(&changeset, original, &[])
+            .unwrap()
+            .is_empty()
+    );
+
+    let observed = "first\nsecond\n";
+    let error = resolve_changeset_targets_in_handles(&changeset, observed, &[]).unwrap_err();
+    let IdenteditError::PreconditionFailed {
+        expected_hash,
+        actual_hash,
+    } = error
+    else {
+        panic!("expected a source precondition failure");
+    };
+    assert_eq!(expected_hash, hash_text(original).to_string());
+    assert_eq!(actual_hash, hash_text(observed).to_string());
+}
+
+#[test]
 fn zero_width_operations_resolve_empty_old_text() {
     let source = "def process_data():\n    pass\n";
     let node = handle(
@@ -62,6 +89,7 @@ fn zero_width_operations_resolve_empty_old_text() {
         .expect("line anchor should be valid");
 
     let changeset = FileChange {
+        expected_file_hash: None,
         file: PathBuf::from("fixture.py"),
         operations: vec![
             ChangeOp::from_parts(
