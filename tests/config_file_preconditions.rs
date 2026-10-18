@@ -326,6 +326,114 @@ fn merge_conjoins_file_guards_and_retains_guarded_empty_entries() {
 }
 
 #[test]
+fn merge_rejects_conflicting_move_and_file_conditions() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("source.json");
+    let destination = directory.path().join("moved.json");
+    let source = "{\"value\":1}\n";
+    std::fs::write(&file, source).unwrap();
+    let hash = common::hash_text(source);
+    let conflicting = common::hash_text("different source");
+    let movement = json!({"files":[{
+        "file":file,
+        "operations":[{
+            "target":{"type":"file","expected_file_hash":hash},
+            "op":{"type":"move","to":destination},
+            "preview":{"move":{"from":file,"to":destination}}
+        }]
+    }]});
+    let mut combined = movement.clone();
+    combined["files"][0]["expected_file_hash"] = json!(conflicting);
+
+    for plans in [
+        vec![empty_plan(&file, Some(&conflicting)), movement.clone()],
+        vec![movement.clone(), empty_plan(&file, Some(&conflicting))],
+        vec![combined],
+    ] {
+        let output = merge(directory.path(), &plans);
+        assert!(
+            !output.status.success(),
+            "merge must reject contradictory guards"
+        );
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["type"], "invalid_request");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        assert!(!destination.exists());
+    }
+
+    for expected in [None, Some(hash.as_str())] {
+        for plans in [
+            vec![empty_plan(&file, expected), movement.clone()],
+            vec![movement.clone(), empty_plan(&file, expected)],
+        ] {
+            let merged = successful_json(merge(directory.path(), &plans));
+            assert_eq!(
+                merged["files"][0]["operations"],
+                movement["files"][0]["operations"]
+            );
+            assert_eq!(merged["files"][0]["expected_file_hash"], json!(expected));
+            successful_json(apply(&merged, &["--dry-run"]));
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+            assert!(!destination.exists());
+        }
+    }
+
+    let mut stale_movement = movement;
+    stale_movement["files"][0]["operations"][0]["target"]["expected_file_hash"] =
+        json!(conflicting);
+    let stale_merged = successful_json(merge(
+        directory.path(),
+        &[empty_plan(&file, Some(&conflicting)), stale_movement],
+    ));
+    assert_eq!(stale_merged["files"][0]["expected_file_hash"], conflicting);
+    assert_precondition_failure(apply(&stale_merged, &["--dry-run"]));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    assert!(!destination.exists());
+}
+
+#[test]
+fn merge_checks_file_conditions_against_file_boundary_targets() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let source = "{\"value\":1}\n";
+    std::fs::write(&file, source).unwrap();
+    let hash = common::hash_text(source);
+    let conflicting = common::hash_text("different source");
+
+    for boundary in ["file-start", "file-end"] {
+        let boundary_plan = successful_json(common::run_identedit(&[
+            "edit",
+            file.to_str().unwrap(),
+            "--at",
+            boundary,
+            "--insert",
+            "\n",
+        ]));
+        for plans in [
+            vec![empty_plan(&file, Some(&conflicting)), boundary_plan.clone()],
+            vec![boundary_plan.clone(), empty_plan(&file, Some(&conflicting))],
+        ] {
+            let output = merge(directory.path(), &plans);
+            assert!(
+                !output.status.success(),
+                "merge must reject contradictory guards"
+            );
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["error"]["type"], "invalid_request");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        }
+
+        let merged = successful_json(merge(
+            directory.path(),
+            &[empty_plan(&file, Some(&hash)), boundary_plan],
+        ));
+        assert_eq!(merged["files"][0]["expected_file_hash"], hash);
+        successful_json(apply(&merged, &["--dry-run"]));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    }
+}
+
+#[test]
 fn guarded_empty_entries_check_arbitrary_bytes_without_parsing_or_writing() {
     use std::fs::FileTimes;
     use std::time::{Duration, UNIX_EPOCH};
