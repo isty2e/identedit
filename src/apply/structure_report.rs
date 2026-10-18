@@ -199,7 +199,13 @@ impl StructureChanges {
         Self::from_observations(
             plans
                 .iter()
-                .map(|plan| (plan.file.as_path(), &plan.structure))
+                .map(|plan| {
+                    (
+                        plan.file(),
+                        plan.text_update()
+                            .map_or(&out_of_scope, |plan| &plan.structure),
+                    )
+                })
                 .chain(
                     moves
                         .iter()

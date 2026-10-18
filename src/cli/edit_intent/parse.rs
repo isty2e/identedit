@@ -218,6 +218,7 @@ fn parse_file_flag_edit_intent(
                 new_text: insert_text,
             },
         )?,
+        expected_file_hash: None,
     }))
 }
 
@@ -380,6 +381,7 @@ fn parse_config_flag_edit_intent(
 
     Ok(PreparedEditIntent::Canonical(CanonicalEditIntent {
         file,
-        operation: canonical,
+        operation: canonical.operation,
+        expected_file_hash: Some(canonical.expected_file_hash),
     }))
 }

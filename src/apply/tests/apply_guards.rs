@@ -108,7 +108,7 @@ fn apply_detects_alias_write_race_without_inode_swap() {
     let error = apply_changeset_with_hook(&changeset, &mut before_write)
         .expect_err("alias mutation should be detected as stale content");
     match error {
-        IdenteditError::PreconditionFailed { .. } => {}
+        IdenteditError::FilePreconditionFailed { .. } => {}
         other => panic!("unexpected error variant: {other}"),
     }
 
@@ -177,7 +177,7 @@ fn apply_detects_symlinked_ancestor_alias_write_race_without_inode_swap() {
     let error = apply_changeset_with_hook(&changeset, &mut before_write)
         .expect_err("symlink alias mutation should be detected as stale content");
     match error {
-        IdenteditError::PreconditionFailed { .. } => {}
+        IdenteditError::FilePreconditionFailed { .. } => {}
         other => panic!("unexpected error variant: {other}"),
     }
 
@@ -235,7 +235,7 @@ fn apply_detects_post_verify_mutation_before_atomic_write() {
     let error = apply_changeset_with_hooks(&changeset, || Ok(()), &mut after_verify)
         .expect_err("post-verify mutation should be detected");
     match error {
-        IdenteditError::PreconditionFailed { .. } => {}
+        IdenteditError::FilePreconditionFailed { .. } => {}
         other => panic!("unexpected error variant: {other}"),
     }
 
@@ -499,10 +499,12 @@ fn apply_guard_uses_hash_when_mtime_and_size_collide() {
     let error = verify_apply_guard_state(&file_path, &expected)
         .expect_err("hash guard should catch stale content under fingerprint collision");
     match error {
-        IdenteditError::PreconditionFailed {
+        IdenteditError::FilePreconditionFailed {
             expected_hash,
             actual_hash,
+            path,
         } => {
+            assert_eq!(path, file_path.display().to_string());
             assert_eq!(
                 expected_hash,
                 crate::hash::hash_text(original_text).to_string()

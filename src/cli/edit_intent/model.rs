@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::changeset::{EditOperation, OpKind, TransformTarget};
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
+use crate::hash::ContentHash;
 use crate::hashline::HashlineEdit;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
 
@@ -19,6 +20,7 @@ pub(crate) struct NodeEditIntent {
 pub(crate) struct CanonicalEditIntent {
     pub(crate) file: PathBuf,
     pub(crate) operation: EditOperation,
+    pub(crate) expected_file_hash: Option<ContentHash>,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +145,7 @@ impl LineEditIntent {
         Ok(CanonicalEditIntent {
             file: self.file,
             operation: EditOperation::try_new(target, op)?,
+            expected_file_hash: None,
         })
     }
 }

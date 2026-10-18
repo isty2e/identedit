@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::handle::Span;
-use crate::hash::ContentHash;
+use crate::hash::{ContentHash, hash_bytes};
 use crate::hashline::LineAnchor;
 
 mod wire;
@@ -54,6 +54,15 @@ impl TransformTarget {
         matches!(self, Self::Node { .. })
     }
 
+    fn file_hash_condition(&self) -> Option<&ContentHash> {
+        match self {
+            Self::FileStart { expected_file_hash }
+            | Self::FileEnd { expected_file_hash }
+            | Self::File { expected_file_hash } => Some(expected_file_hash),
+            Self::Node { .. } | Self::Line { .. } => None,
+        }
+    }
+
     pub(crate) fn kind_name(&self) -> &'static str {
         match self {
             Self::Node { .. } => "node",
@@ -69,7 +78,75 @@ impl TransformTarget {
 #[serde(deny_unknown_fields)]
 pub struct FileChange {
     pub file: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_file_hash: Option<ContentHash>,
     pub operations: Vec<ChangeOp>,
+}
+
+impl FileChange {
+    pub(crate) fn is_file_guard_only(&self) -> bool {
+        self.operations.is_empty() && self.expected_file_hash.is_some()
+    }
+
+    pub(crate) fn verify_source(&self, source: &[u8]) -> Result<(), crate::error::IdenteditError> {
+        if self.expected_file_hash.is_some() {
+            self.verify_source_hash(&hash_bytes(source))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn verify_source_hash(
+        &self,
+        actual_hash: &ContentHash,
+    ) -> Result<(), crate::error::IdenteditError> {
+        if let Some(expected_hash) = &self.expected_file_hash
+            && expected_hash != actual_hash
+        {
+            return Err(crate::error::IdenteditError::FilePreconditionFailed {
+                path: self.file.display().to_string(),
+                expected_hash: expected_hash.to_string(),
+                actual_hash: actual_hash.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn conjoin_file_hash(
+        &self,
+        expected_hashes: impl IntoIterator<Item = ContentHash>,
+    ) -> Result<Option<ContentHash>, crate::error::IdenteditError> {
+        let mut conjoined = self.expected_file_hash.clone();
+        for incoming in expected_hashes {
+            match &conjoined {
+                Some(current) if current != &incoming => {
+                    return Err(crate::error::IdenteditError::InvalidRequest {
+                        message: format!(
+                            "Conflicting file hash preconditions for '{}': {} and {}",
+                            self.file.display(),
+                            current,
+                            incoming,
+                        ),
+                    });
+                }
+                None => conjoined = Some(incoming),
+                Some(_) => {}
+            }
+        }
+
+        Ok(conjoined)
+    }
+
+    pub(crate) fn validate_file_hash_conjunction(
+        &self,
+    ) -> Result<(), crate::error::IdenteditError> {
+        let conditions = self
+            .operations
+            .iter()
+            .flat_map(|operation| operation.operation().file_hash_conditions())
+            .cloned();
+        self.conjoin_file_hash(conditions).map(|_| ())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +348,30 @@ impl EditOperation {
 
     pub(crate) fn op(&self) -> &OpKind {
         &self.op
+    }
+
+    fn file_hash_conditions(&self) -> impl Iterator<Item = &ContentHash> {
+        let destination = match &self.op {
+            OpKind::MoveBefore { destination, .. } | OpKind::MoveAfter { destination, .. } => {
+                destination.file_hash_condition()
+            }
+            OpKind::Replace { .. }
+            | OpKind::SetLine { .. }
+            | OpKind::ReplaceLines { .. }
+            | OpKind::BlankLines
+            | OpKind::DeleteLines
+            | OpKind::Delete
+            | OpKind::InsertBefore { .. }
+            | OpKind::InsertAfter { .. }
+            | OpKind::InsertAfterLine { .. }
+            | OpKind::Insert { .. }
+            | OpKind::Move { .. } => None,
+        };
+
+        self.target
+            .file_hash_condition()
+            .into_iter()
+            .chain(destination)
     }
 }
 
@@ -507,6 +608,61 @@ mod tests {
     };
     use crate::handle::Span;
     use crate::hash::{ContentHash, HASH_HEX_LEN, hash_text};
+
+    #[test]
+    fn file_hash_conjunction_checks_late_conditions_without_changing_the_file_condition() {
+        let expected = hash_text("same source");
+        let conflicting = hash_text("other source");
+        for condition in [None, Some(expected.clone())] {
+            let change = super::FileChange {
+                file: PathBuf::from("not-read-from-disk.txt"),
+                expected_file_hash: condition.clone(),
+                operations: vec![],
+            };
+            assert_eq!(change.conjoin_file_hash([]).unwrap(), condition);
+            assert_eq!(
+                change
+                    .conjoin_file_hash([expected.clone(), expected.clone()])
+                    .unwrap(),
+                Some(expected.clone())
+            );
+
+            let error = change
+                .conjoin_file_hash([expected.clone(), expected.clone(), conflicting.clone()])
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                crate::error::IdenteditError::InvalidRequest { .. }
+            ));
+            assert_eq!(change.expected_file_hash, condition);
+        }
+    }
+
+    #[test]
+    fn complete_file_conditions_include_move_boundaries_but_exclude_node_and_line_guards() {
+        for operation in ["move_before", "move_after"] {
+            for destination in ["file_start", "file_end", "node", "line"] {
+                let mut wire = wire_change_op("node", operation);
+                wire["op"]["destination"] = wire_target(destination);
+                let change = super::FileChange {
+                    file: PathBuf::from("not-read-from-disk.py"),
+                    expected_file_hash: Some(hash_text("whole file source")),
+                    operations: vec![serde_json::from_value(wire).unwrap()],
+                };
+                let before = change.clone();
+                let result = change.validate_file_hash_conjunction();
+                if matches!(destination, "file_start" | "file_end") {
+                    assert!(matches!(
+                        result,
+                        Err(crate::error::IdenteditError::InvalidRequest { .. })
+                    ));
+                } else {
+                    result.unwrap();
+                }
+                assert_eq!(change, before);
+            }
+        }
+    }
 
     #[test]
     fn multi_file_changeset_defaults_transaction_mode_to_all_or_nothing() {

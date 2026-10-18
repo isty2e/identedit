@@ -149,7 +149,8 @@ pub(super) fn verify_apply_guard_state(
     let current_bytes = fs::read(path).map_err(|error| IdenteditError::io(path, error))?;
     let current_hash = hash_bytes(&current_bytes);
     if current_hash != expected.source_hash {
-        return Err(IdenteditError::PreconditionFailed {
+        return Err(IdenteditError::FilePreconditionFailed {
+            path: path.display().to_string(),
             expected_hash: expected.source_hash.to_string(),
             actual_hash: current_hash.to_string(),
         });

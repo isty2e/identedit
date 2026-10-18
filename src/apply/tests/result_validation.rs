@@ -110,7 +110,7 @@ fn prepared_target_replacement(
         },
     )
     .unwrap();
-    build_changeset_with_context(file, vec![operation], context).unwrap()
+    build_changeset_with_context(file, vec![operation], None, context).unwrap()
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn build_to_locked_preflight_changes_are_reparsed_without_a_whole_file_stale_rul
         } else {
             let plans = result.unwrap();
             assert_eq!(
-                plans[0].updated_text,
+                plans[0].text_update().unwrap().updated_text,
                 changed.replace("return 1", "return 2")
             );
             assert_eq!(
@@ -282,7 +282,8 @@ fn optional_observation_failure_preserves_mutation_and_cannot_mask_result_reject
             },
         )
         .unwrap();
-        let changeset = build_changeset_with_context(&file, vec![operation], &context).unwrap();
+        let changeset =
+            build_changeset_with_context(&file, vec![operation], None, &context).unwrap();
 
         let result = super::super::apply_changesets_with_context(
             &[changeset],
@@ -354,6 +355,7 @@ fn node_file_is_parsed_once_before_and_once_after_all_edits_independent_of_provi
 
     let calls = Rc::new(Cell::new(0));
     let empty = crate::changeset::FileChange {
+        expected_file_hash: None,
         file,
         operations: vec![],
     };
@@ -393,7 +395,13 @@ fn unsupported_result_validation_does_not_perform_a_second_parse() {
     let calls = Rc::new(Cell::new(0));
     let plans = preflight_changesets_in_order(&[changeset], &context(&calls, false, true)).unwrap();
     assert_eq!(calls.get(), 1);
-    assert!(plans[0].updated_text.contains("def invalid("));
+    assert!(
+        plans[0]
+            .text_update()
+            .unwrap()
+            .updated_text
+            .contains("def invalid(")
+    );
 }
 
 #[test]

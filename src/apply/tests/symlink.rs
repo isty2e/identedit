@@ -19,6 +19,7 @@ fn apply_rejects_symbolic_link_target() {
     symlink(&real_target, &symlink_path).expect("symlink should be created");
 
     let changeset = crate::changeset::FileChange {
+        expected_file_hash: None,
         file: symlink_path.clone(),
         operations: vec![],
     };
@@ -92,6 +93,7 @@ fn apply_multi_file_rejects_symlink_target_without_mutating_regular_siblings() {
     let symlink_path = directory.path().join("target-link.py");
     symlink(&symlink_target, &symlink_path).expect("symlink should be created");
     let symlink_changeset = crate::changeset::FileChange {
+        expected_file_hash: None,
         file: symlink_path,
         operations: vec![],
     };

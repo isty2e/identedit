@@ -87,6 +87,7 @@ EOF
 - `delete` and `append` reject `create_missing`.
 - Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 - Config path edits are validated against the target format before writing.
+- New config plans also retain a [full-file source precondition](protocol.md#file-source-preconditions). If any source bytes change after planning, recompile the plan; `apply --repair` does not refresh this condition.
 - JSON `set` requires one complete JSON value. Value text is preserved as supplied, including numeric spellings, escapes, duplicate members, and surrounding JSON whitespace; it is not parsed into a numeric/object value and reserialized. The resulting document must also be accepted by the bundled JSON parser.
 - For JSON `set`, a trailing newline from `--text-file` or `--stdin-text` is inserted too, before the container's comma or closing delimiter. Omit it from the input if that extra line break is unwanted.
 - JSON `--create-missing` inserts after the last member of the deepest existing object. Unrelated bytes, member order, numeric spellings, duplicate members, and outer whitespace stay unchanged. Duplicate keys on the selected path, including escaped aliases of the same key, are ambiguous and rejected.

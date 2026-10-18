@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-use crate::changeset::{ChangeOp, FileChange, MultiFileChangeset, OpKind};
+use crate::changeset::{FileChange, MultiFileChangeset, OpKind};
 use crate::error::IdenteditError;
 
 pub fn run_merge_inputs(inputs: Vec<PathBuf>) -> Result<MultiFileChangeset, IdenteditError> {
@@ -19,27 +19,27 @@ pub fn run_merge_inputs(inputs: Vec<PathBuf>) -> Result<MultiFileChangeset, Iden
                 .entry(file_key)
                 .or_insert_with(|| FileChange {
                     file: file_change.file.clone(),
+                    expected_file_hash: None,
                     operations: Vec::new(),
                 });
+            entry.expected_file_hash = entry.conjoin_file_hash(file_change.expected_file_hash)?;
             entry.operations.extend(file_change.operations);
         }
     }
 
     let mut files = Vec::with_capacity(merged_by_file.len());
-    for mut file_change in merged_by_file.into_values() {
-        validate_file_merge_constraints(&file_change.file, &file_change.operations)?;
-        if file_change.operations.is_empty() {
+    for file_change in merged_by_file.into_values() {
+        validate_file_merge_constraints(&file_change)?;
+        if file_change.operations.is_empty() && file_change.expected_file_hash.is_none() {
             continue;
         }
-        files.push(FileChange {
-            file: file_change.file.clone(),
-            operations: std::mem::take(&mut file_change.operations),
-        });
+        files.push(file_change);
     }
 
     if files.is_empty() {
         return Err(IdenteditError::InvalidRequest {
-            message: "Merged changeset must contain at least one operation".to_string(),
+            message: "Merged changeset must contain at least one operation or file precondition"
+                .to_string(),
         });
     }
 
@@ -57,10 +57,9 @@ struct SpanOp {
     is_insert: bool,
 }
 
-fn validate_file_merge_constraints(
-    file: &Path,
-    operations: &[ChangeOp],
-) -> Result<(), IdenteditError> {
+fn validate_file_merge_constraints(changeset: &FileChange) -> Result<(), IdenteditError> {
+    let file = &changeset.file;
+    let operations = &changeset.operations;
     let move_count = operations
         .iter()
         .filter(|operation| matches!(operation.op(), OpKind::Move { .. }))
@@ -86,6 +85,8 @@ fn validate_file_merge_constraints(
             ),
         });
     }
+
+    changeset.validate_file_hash_conjunction()?;
 
     let mut spans = Vec::<SpanOp>::new();
     for (index, operation) in operations.iter().enumerate() {
@@ -194,7 +195,7 @@ fn normalize_lexical_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::validate_file_merge_constraints;
-    use crate::changeset::{ChangeOp, ChangePreview, OpKind, TransformTarget};
+    use crate::changeset::{ChangeOp, ChangePreview, FileChange, OpKind, TransformTarget};
     use crate::error::IdenteditError;
     use crate::handle::Span;
     use crate::hash::hash_text;
@@ -242,8 +243,12 @@ mod tests {
             ),
         ];
 
-        validate_file_merge_constraints(Path::new("file.py"), &operations)
-            .expect("adjacent non-insert ranges should be mergeable");
+        validate_file_merge_constraints(&FileChange {
+            file: Path::new("file.py").to_path_buf(),
+            expected_file_hash: None,
+            operations,
+        })
+        .expect("adjacent non-insert ranges should be mergeable");
     }
 
     #[test]
@@ -258,8 +263,12 @@ mod tests {
             op(OpKind::Delete, Span { start: 10, end: 20 }),
         ];
 
-        let error = validate_file_merge_constraints(Path::new("file.py"), &operations)
-            .expect_err("insert+replace boundary touch should be rejected");
+        let error = validate_file_merge_constraints(&FileChange {
+            file: Path::new("file.py").to_path_buf(),
+            expected_file_hash: None,
+            operations,
+        })
+        .expect_err("insert+replace boundary touch should be rejected");
         match error {
             IdenteditError::InvalidRequest { message } => {
                 assert!(message.contains("conflicting operations"));
@@ -272,8 +281,12 @@ mod tests {
     fn strict_merge_rejects_move_plus_edit() {
         let operations = vec![file_move(), op(OpKind::Delete, Span { start: 0, end: 10 })];
 
-        let error = validate_file_merge_constraints(Path::new("file.py"), &operations)
-            .expect_err("move+edit should be rejected");
+        let error = validate_file_merge_constraints(&FileChange {
+            file: Path::new("file.py").to_path_buf(),
+            expected_file_hash: None,
+            operations,
+        })
+        .expect_err("move+edit should be rejected");
         match error {
             IdenteditError::InvalidRequest { message } => {
                 assert!(message.contains("move cannot be merged"));

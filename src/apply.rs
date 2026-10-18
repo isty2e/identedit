@@ -249,12 +249,14 @@ pub(crate) fn preview_multi_file_changeset_with_context(
     let mut files = Vec::with_capacity(preflight_plans.len());
     for plan in preflight_plans {
         applied.push(ApplyFileResult {
-            file: plan.file.display().to_string(),
-            operations_applied: plan.operations_total,
-            operations_total: plan.operations_total,
+            file: plan.file().display().to_string(),
+            operations_applied: plan.operations_total(),
+            operations_total: plan.operations_total(),
             status: ApplyFileStatus::Applied,
         });
-        files.push(plan.into_text_preview());
+        if let Some(preview) = plan.into_text_preview() {
+            files.push(preview);
+        }
     }
     for plan in move_plans {
         applied.push(ApplyFileResult {
@@ -406,6 +408,7 @@ where
             applied: Vec::new(),
             rollback_snapshots: Vec::new(),
             committed_files: Vec::new(),
+            guard_plans: Vec::new(),
         }
     } else {
         commit_preflight_batch(commit_batch, &mut before_write_hook, &mut after_verify_hook)?
@@ -414,6 +417,8 @@ where
         mut applied,
         rollback_snapshots: edit_rollback_snapshots,
         committed_files: committed_edit_files,
+        // Retain guard-only locks through moves without making them rollback targets.
+        guard_plans: _guard_plans,
     } = committed_edits;
 
     if !move_plans.is_empty() {

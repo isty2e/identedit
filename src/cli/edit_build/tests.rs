@@ -35,7 +35,7 @@ fn builder_reread_revalidates_the_guard_after_query_and_regex_lowering() {
 
         fs::write(&file, changed).unwrap();
         let failure =
-            build_changeset_with_context_indexed(&file, instructions, &context).unwrap_err();
+            build_changeset_with_context_indexed(&file, instructions, None, &context).unwrap_err();
         assert!(matches!(
             failure.error,
             IdenteditError::PreconditionFailed { .. }

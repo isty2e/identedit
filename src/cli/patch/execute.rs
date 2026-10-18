@@ -110,6 +110,7 @@ pub(super) fn execute_flag_patch_request(
         PreparedEditIntent::Canonical(intent) => run_patch_edit_operation(
             intent.file,
             intent.operation,
+            intent.expected_file_hash,
             execution.apply_backed,
             None,
             &ExecutionContext::new(),
@@ -148,6 +149,7 @@ fn execute_node_flag_patch_request(
     run_patch_edit_operation(
         resolved.file,
         resolved.operation,
+        None,
         execution,
         resolved.regex_replacements,
         context,
@@ -163,19 +165,28 @@ pub(super) fn run_patch_node_operation(
     context: &ExecutionContext,
 ) -> Result<PatchCommandOutput, IdenteditError> {
     let operation = EditOperation::try_new(target, op)?;
-    run_patch_edit_operation(file, operation, execution, regex_replacements, context)
+    run_patch_edit_operation(
+        file,
+        operation,
+        None,
+        execution,
+        regex_replacements,
+        context,
+    )
 }
 
 fn run_patch_edit_operation(
     file: PathBuf,
     operation: EditOperation,
+    expected_file_hash: Option<crate::hash::ContentHash>,
     execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
     context: &ExecutionContext,
 ) -> Result<PatchCommandOutput, IdenteditError> {
     run_resolve_verify_apply(
         || {
-            let file_change = build_changeset_with_context(&file, vec![operation], context)?;
+            let file_change =
+                build_changeset_with_context(&file, vec![operation], expected_file_hash, context)?;
             Ok(wrap_single_file(file_change))
         },
         verify_prepared_changeset,
@@ -207,12 +218,14 @@ fn run_patch_edit_operation(
 pub(super) fn run_patch_edit_operation_json(
     file: PathBuf,
     operation: EditOperation,
+    expected_file_hash: Option<crate::hash::ContentHash>,
     dry_run: bool,
     verbose: bool,
 ) -> Result<Value, IdenteditError> {
     let output = run_patch_edit_operation(
         file,
         operation,
+        expected_file_hash,
         ApplyBackedExecution::json(dry_run, verbose),
         None,
         &ExecutionContext::new(),

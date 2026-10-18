@@ -182,6 +182,7 @@ fn target_to_build_changes_reparse_instead_of_applying_a_stale_observation() {
         let result = run_patch_edit_operation(
             resolved.file,
             resolved.operation,
+            None,
             ApplyBackedExecution::json(false, false),
             None,
             &context,
@@ -223,6 +224,7 @@ fn target_to_build_invalid_source_does_not_hide_behind_a_successful_observation(
         let result = run_patch_edit_operation(
             resolved.file,
             resolved.operation,
+            None,
             ApplyBackedExecution::json(false, false),
             None,
             &context,

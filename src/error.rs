@@ -129,6 +129,15 @@ pub enum IdenteditError {
         actual_hash: String,
     },
 
+    #[error(
+        "File '{path}' does not match the expected source hash. Expected hash '{expected_hash}', got '{actual_hash}'"
+    )]
+    FilePreconditionFailed {
+        path: String,
+        expected_hash: String,
+        actual_hash: String,
+    },
+
     #[error("Commit failed and rollback did not fully succeed: {message}")]
     RollbackFailed { message: String },
 
