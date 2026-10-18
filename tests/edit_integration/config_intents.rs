@@ -331,6 +331,32 @@ fn conflicting_writes_keep_noops_delimiters_points_and_opaque_creates() {
 }
 
 #[test]
+fn config_conflict_messages_keep_original_path_spellings() {
+    let directory = tempdir().unwrap();
+    for (extension, before) in [
+        ("json", "{\"a\":1,\"b\":2}"),
+        ("toml", "a = 1\nb = 2\n"),
+        ("yaml", "a: 1\nb: 2\n"),
+    ] {
+        let file = directory.path().join(format!("settings.{extension}"));
+        fs::write(&file, before).unwrap();
+        for paths in [["a", "[\"a\"]"], ["[\"a\"]", "a"]] {
+            let response = reject(
+                &json!({"command":"edit","file":file,"operations":[
+                    set(paths[0],"10"),set("b","20"),set(paths[1],"30")]}),
+                "invalid_request",
+                &["/operations/0", "/operations/2"],
+            );
+            let message = response["error"]["message"].as_str().unwrap();
+            for path in paths {
+                assert!(message.contains(&format!("'{path}'")), "{response}");
+            }
+            assert_eq!(fs::read(&file).unwrap(), before.as_bytes());
+        }
+    }
+}
+
+#[test]
 fn create_missing_on_existing_paths_uses_precise_existing_value_writes() {
     let directory = tempdir().unwrap();
     for (extension, before, after) in [
@@ -392,7 +418,7 @@ fn repeated_file_entries_compose_and_preserve_original_error_pointers() {
         {"file":file,"operations":[set("b","20")]}]}));
     assert_eq!(plan["files"].as_array().unwrap().len(), 1);
     assert_eq!(plan["files"][0]["operations"].as_array().unwrap().len(), 1);
-    reject(
+    let response = reject(
         &json!({"command":"edit","files":[
         {"file":file,"operations":[]},
         {"file":file,"operations":[set("a","10")]},
@@ -400,6 +426,10 @@ fn repeated_file_entries_compose_and_preserve_original_error_pointers() {
         "invalid_request",
         &["/files/1/operations/0", "/files/2/operations/0"],
     );
+    let message = response["error"]["message"].as_str().unwrap();
+    for path in ["a", "[\"a\"]"] {
+        assert!(message.contains(&format!("'{path}'")), "{response}");
+    }
     replay(&file, before, "{\"a\":10,\"b\":20}", &plan);
 }
 

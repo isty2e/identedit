@@ -26,14 +26,7 @@ identedit patch src/example.py --symbol process_data \
 identedit patch config.yaml --config-path server.port --set-value 8080
 ```
 
-Use `read` -> `edit` -> `apply` for multiple operations, moves, or multi-file transactions:
-
-```bash
-identedit read --kind function_definition src/example.py --json
-identedit edit --json < request.json > changeset.json
-identedit apply --dry-run changeset.json
-identedit apply changeset.json
-```
+Use `edit` -> `apply` for multiple operations, moves, or multi-file transactions; see the [mixed code/config batch](#build-an-atomic-multi-file-edit) below.
 
 Use line anchors when structural targeting is too coarse:
 
@@ -126,6 +119,31 @@ identedit patch config.yaml \
 ### Build an atomic multi-file edit
 
 `edit` only builds a changeset. `apply --dry-run` validates it without writing. If a later commit fails, `apply` attempts guarded rollback and reports any incomplete recovery.
+
+Save this as `request.json` to rewrite `timeout=` in the raw text of two unique methods in `src/client.py` and update two existing keys in `config.toml`:
+
+```json
+{
+  "command": "edit",
+  "files": [
+    {"file": "src/client.py", "operations": [
+      {"target": {"type": "symbol", "name": "Client.fetch"},
+       "op": {"type": "scoped_regex", "pattern": "timeout=", "replacement": "deadline="}},
+      {"target": {"type": "symbol", "name": "Client.stream"},
+       "op": {"type": "scoped_regex", "pattern": "timeout=", "replacement": "deadline="}}
+    ]},
+    {"file": "config.toml", "operations": [
+      {"target": {"type": "config_path", "path": "client.retries"},
+       "op": {"type": "set", "new_text": "5"}},
+      {"target": {"type": "config_path", "path": "client.backoff"},
+       "op": {"type": "set", "new_text": "\"exponential\""}}
+    ]}
+  ]
+}
+```
+
+Use `read` when a name is ambiguous or an earlier observation must still match.
+For every match of a structural pattern, use `ast-grep`.
 
 ```bash
 identedit edit --json < request.json > changeset.json

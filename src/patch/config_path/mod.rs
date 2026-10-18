@@ -190,7 +190,18 @@ pub(crate) fn resolve_config_path_operations(
             .map_err(|error| ConfigPathBatchError::for_request(error, index))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let composed = compose_config_effects(&format, source_text, effects)?;
+    let composed =
+        compose_config_effects(&format, source_text, effects).map_err(|mut failure| {
+            if let [first, second] = failure.request_indices.as_slice()
+                && let IdenteditError::InvalidRequest { message } = &mut failure.error
+            {
+                *message = format!(
+                    "Config paths '{}' and '{}': {message}",
+                    requests[*first].path, requests[*second].path,
+                );
+            }
+            failure
+        })?;
     let handles = if composed
         .iter()
         .any(|effect| matches!(effect.guard, ConfigGuard::Syntax { .. }))
