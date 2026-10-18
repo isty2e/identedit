@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use crate::changeset::FileChange;
 use crate::error::IdenteditError;
 use crate::handle::SelectionHandle;
 use crate::provider::ProviderRegistry;
@@ -95,6 +96,19 @@ impl ExecutionContext {
 
     pub(crate) fn read_file_utf8(&self, file: &Path) -> Result<String, IdenteditError> {
         let source = self.read_file_bytes(file)?;
+        Self::decode_file_utf8(file, source)
+    }
+
+    pub(crate) fn read_changeset_text(
+        &self,
+        changeset: &FileChange,
+    ) -> Result<String, IdenteditError> {
+        let source = self.read_file_bytes(&changeset.file)?;
+        changeset.verify_source(&source)?;
+        Self::decode_file_utf8(&changeset.file, source)
+    }
+
+    fn decode_file_utf8(file: &Path, source: Vec<u8>) -> Result<String, IdenteditError> {
         String::from_utf8(source).map_err(|error| {
             IdenteditError::io(
                 file,

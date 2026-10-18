@@ -140,9 +140,8 @@ fn repair_line_targets_in_changeset(
             continue;
         }
 
-        let source = fs::read_to_string(&file_change.file)
-            .map_err(|error| IdenteditError::io(&file_change.file, error))?;
-        file_change.verify_source(source.as_bytes())?;
+        let source =
+            crate::execution_context::ExecutionContext::new().read_changeset_text(file_change)?;
         let anchors = target_refs
             .iter()
             .map(|(_, _, anchor)| anchor.clone())

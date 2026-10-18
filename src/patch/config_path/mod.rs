@@ -78,13 +78,6 @@ pub fn resolve_config_path_operation(
     operation: ConfigPathOperation,
 ) -> Result<ResolvedConfigPathOperation, IdenteditError> {
     let source = std::fs::read(file).map_err(|error| IdenteditError::io(file, error))?;
-    let source_text = std::str::from_utf8(&source).map_err(|_| IdenteditError::InvalidRequest {
-        message: format!(
-            "Config path operations require UTF-8 source; file '{}' is not UTF-8",
-            file.display()
-        ),
-    })?;
-
     let actual_hash = hash_bytes(&source);
     if let Some(expected_hash) = expected_file_hash
         && &actual_hash != expected_hash
@@ -95,6 +88,13 @@ pub fn resolve_config_path_operation(
             actual_hash: actual_hash.to_string(),
         });
     }
+
+    let source_text = std::str::from_utf8(&source).map_err(|_| IdenteditError::InvalidRequest {
+        message: format!(
+            "Config path operations require UTF-8 source; file '{}' is not UTF-8",
+            file.display()
+        ),
+    })?;
 
     let operation =
         resolve_config_path_in_source(file, raw_path, document_index, operation, source_text)?;

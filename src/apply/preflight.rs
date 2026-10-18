@@ -25,7 +25,20 @@ use super::structure_report::FileObservation;
 use super::{ApplyFileResult, ApplyFileStatus, EditLocations};
 
 #[derive(Debug)]
-pub(super) struct PreflightFilePlan {
+pub(super) enum PreflightFilePlan {
+    Text(Box<PreflightTextPlan>),
+    GuardOnly(PreflightGuardPlan),
+}
+
+#[derive(Debug)]
+pub(super) struct PreflightGuardPlan {
+    file: PathBuf,
+    guard_state: ApplyGuardState,
+    _lock_guard: ApplyFileLock,
+}
+
+#[derive(Debug)]
+pub(super) struct PreflightTextPlan {
     pub(super) file: PathBuf,
     pub(super) operations_total: usize,
     pub(super) locations: EditLocations,
@@ -38,11 +51,32 @@ pub(super) struct PreflightFilePlan {
 }
 
 impl PreflightFilePlan {
-    pub(super) fn into_text_preview(self) -> super::TextPreview {
-        super::TextPreview {
-            file: self.file,
-            before: self.original_text,
-            after: self.updated_text,
+    pub(super) fn file(&self) -> &Path {
+        match self {
+            Self::Text(plan) => &plan.file,
+            Self::GuardOnly(plan) => &plan.file,
+        }
+    }
+
+    pub(super) fn text_update(&self) -> Option<&PreflightTextPlan> {
+        match self {
+            Self::Text(plan) => Some(plan),
+            Self::GuardOnly(_) => None,
+        }
+    }
+
+    pub(super) fn operations_total(&self) -> usize {
+        self.text_update().map_or(0, |plan| plan.operations_total)
+    }
+
+    pub(super) fn into_text_preview(self) -> Option<super::TextPreview> {
+        match self {
+            Self::Text(plan) => Some(super::TextPreview {
+                file: plan.file,
+                before: plan.original_text,
+                after: plan.updated_text,
+            }),
+            Self::GuardOnly(_) => None,
         }
     }
 }
@@ -75,19 +109,20 @@ pub(super) fn preflight_resolved_text_update(
 ) -> Result<PreflightFilePlan, IdenteditError> {
     let lock_guard = acquire_apply_lock(file)?;
     let guard_state = capture_apply_guard_state(file)?;
-    let source_text = fs::read_to_string(file).map_err(|error| IdenteditError::io(file, error))?;
-    if source_text != expected_source {
+    let source_bytes = fs::read(file).map_err(|error| IdenteditError::io(file, error))?;
+    if source_bytes != expected_source.as_bytes() {
         return Err(IdenteditError::FilePreconditionFailed {
             path: file.display().to_string(),
             expected_hash: hash_bytes(expected_source.as_bytes()).to_string(),
-            actual_hash: hash_bytes(source_text.as_bytes()).to_string(),
+            actual_hash: hash_bytes(&source_bytes).to_string(),
         });
     }
+    let source_text = expected_source.to_owned();
     let original_permissions = fs::metadata(file)
         .map_err(|error| IdenteditError::io(file, error))?
         .permissions();
 
-    Ok(PreflightFilePlan {
+    Ok(PreflightFilePlan::Text(Box::new(PreflightTextPlan {
         file: file.to_path_buf(),
         operations_total,
         locations: EditLocations::default(),
@@ -97,7 +132,7 @@ pub(super) fn preflight_resolved_text_update(
         updated_text,
         guard_state,
         _lock_guard: lock_guard,
-    })
+    })))
 }
 
 #[derive(Debug)]
@@ -180,7 +215,16 @@ fn preflight_changeset(
 ) -> Result<PreflightFilePlan, IdenteditError> {
     let lock_guard = acquire_apply_lock(&changeset.file)?;
     let guard_state = capture_apply_guard_state(&changeset.file)?;
-    let source_text = context.read_file_utf8(&changeset.file)?;
+    if changeset.is_file_guard_only() {
+        changeset.verify_source_hash(&guard_state.source_hash)?;
+        return Ok(PreflightFilePlan::GuardOnly(PreflightGuardPlan {
+            file: changeset.file.clone(),
+            guard_state,
+            _lock_guard: lock_guard,
+        }));
+    }
+
+    let source_text = context.read_changeset_text(changeset)?;
     let original_permissions = fs::metadata(&changeset.file)
         .map_err(|error| IdenteditError::io(&changeset.file, error))?
         .permissions();
@@ -240,7 +284,7 @@ fn preflight_changeset(
         FileObservation::unsupported()
     };
 
-    Ok(PreflightFilePlan {
+    Ok(PreflightFilePlan::Text(Box::new(PreflightTextPlan {
         file: changeset.file.clone(),
         operations_total: changeset.operations.len(),
         locations,
@@ -250,7 +294,7 @@ fn preflight_changeset(
         updated_text,
         guard_state,
         _lock_guard: lock_guard,
-    })
+    })))
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +315,7 @@ pub(super) struct CommittedEditBatch {
     pub(super) applied: Vec<ApplyFileResult>,
     pub(super) rollback_snapshots: Vec<FileRollbackSnapshot>,
     pub(super) committed_files: Vec<CommittedFileRollback>,
+    pub(super) guard_plans: Vec<PreflightGuardPlan>,
 }
 
 #[derive(Debug, Clone)]
@@ -282,6 +327,7 @@ pub(super) struct CommittedFileRollback {
 pub(super) fn prepare_commit_batch(preflight_plans: Vec<PreflightFilePlan>) -> CommitBatch {
     let rollback_snapshots = preflight_plans
         .iter()
+        .filter_map(PreflightFilePlan::text_update)
         .map(|plan| FileRollbackSnapshot {
             file: plan.file.clone(),
             original_text: plan.original_text.clone(),
@@ -296,7 +342,13 @@ pub(super) fn prepare_commit_batch(preflight_plans: Vec<PreflightFilePlan>) -> C
 }
 
 fn validate_commit_batch_invariants(batch: &CommitBatch) -> Result<(), IdenteditError> {
-    if batch.preflight_plans.len() != batch.rollback_snapshots.len() {
+    if batch
+        .preflight_plans
+        .iter()
+        .filter_map(PreflightFilePlan::text_update)
+        .count()
+        != batch.rollback_snapshots.len()
+    {
         return Err(IdenteditError::InvalidRequest {
             message: "Internal commit planning error: rollback snapshot count mismatch".to_string(),
         });
@@ -305,6 +357,7 @@ fn validate_commit_batch_invariants(batch: &CommitBatch) -> Result<(), Identedit
     for (index, (plan, snapshot)) in batch
         .preflight_plans
         .iter()
+        .filter_map(PreflightFilePlan::text_update)
         .zip(batch.rollback_snapshots.iter())
         .enumerate()
     {
@@ -379,7 +432,7 @@ fn commit_preflight_batch_with_writer<Before, After, Write>(
 where
     Before: FnMut() -> Result<(), IdenteditError>,
     After: FnMut() -> Result<(), IdenteditError>,
-    Write: FnMut(&PreflightFilePlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
+    Write: FnMut(&PreflightTextPlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
 {
     validate_commit_batch_invariants(&batch)?;
     before_write_hook()?;
@@ -387,8 +440,32 @@ where
     let rollback_snapshots = batch.rollback_snapshots;
     let mut applied = Vec::with_capacity(batch.preflight_plans.len());
     let mut committed_files = Vec::with_capacity(batch.preflight_plans.len());
-    for (index, plan) in batch.preflight_plans.into_iter().enumerate() {
-        match commit_preflight_plan(plan, &mut after_verify_hook, &mut write_plan) {
+    let mut guard_plans = Vec::new();
+    let mut snapshot_index = 0;
+    for plan in batch.preflight_plans {
+        let index = snapshot_index;
+        let committed = match plan {
+            PreflightFilePlan::GuardOnly(plan) => {
+                match verify_apply_guard_state(&plan.file, &plan.guard_state) {
+                    Ok(()) => {
+                        applied.push(ApplyFileResult {
+                            file: plan.file.display().to_string(),
+                            operations_applied: 0,
+                            operations_total: 0,
+                            status: ApplyFileStatus::Applied,
+                        });
+                        guard_plans.push(plan);
+                        continue;
+                    }
+                    Err(error) => Err(AtomicWriteFailure::from(error)),
+                }
+            }
+            PreflightFilePlan::Text(plan) => {
+                snapshot_index += 1;
+                commit_preflight_plan(*plan, &mut after_verify_hook, &mut write_plan)
+            }
+        };
+        match committed {
             Ok((applied_result, expected_guard)) => {
                 applied.push(applied_result);
                 committed_files.push(CommittedFileRollback {
@@ -425,6 +502,7 @@ where
         applied,
         rollback_snapshots,
         committed_files,
+        guard_plans,
     })
 }
 
@@ -466,13 +544,13 @@ pub(super) fn rollback_committed_files(
 }
 
 fn commit_preflight_plan<After, Write>(
-    plan: PreflightFilePlan,
+    plan: PreflightTextPlan,
     mut after_verify_hook: After,
     mut write_plan: Write,
 ) -> Result<(ApplyFileResult, ApplyGuardState), AtomicWriteFailure>
 where
     After: FnMut() -> Result<(), IdenteditError>,
-    Write: FnMut(&PreflightFilePlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
+    Write: FnMut(&PreflightTextPlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
 {
     verify_apply_guard_state(&plan.file, &plan.guard_state).map_err(AtomicWriteFailure::from)?;
     after_verify_hook().map_err(AtomicWriteFailure::from)?;

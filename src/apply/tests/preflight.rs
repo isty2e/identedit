@@ -34,6 +34,169 @@ fn process_identity_for(file_path: &std::path::Path) -> String {
 }
 
 #[test]
+fn guard_only_entries_do_not_consume_writes_or_rollback_snapshots() {
+    let directory = tempdir().unwrap();
+    let guard_a = directory.path().join("a_guard.bin");
+    let guard_m = directory.path().join("m_guard.bin");
+    let guards = [&guard_a, &guard_m];
+    let guard_bytes = b"\xff\0guard\r\n";
+    let modified = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(60);
+    let mut changesets = Vec::new();
+    for file in guards {
+        std::fs::write(file, guard_bytes).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(modified))
+            .unwrap();
+        changesets.push(FileChange {
+            file: file.to_path_buf(),
+            expected_file_hash: Some(hash_bytes(guard_bytes)),
+            operations: vec![],
+        });
+    }
+
+    let edits = [
+        directory.path().join("b_edit.py"),
+        directory.path().join("z_edit.py"),
+    ];
+    let original = "def process_data(value):\n    return value\n";
+    for file in &edits {
+        std::fs::write(file, original).unwrap();
+        changesets.push(
+            build_replace_changeset(
+                file,
+                &process_identity_for(file),
+                "def process_data(value):\n    return value * 2".to_string(),
+            )
+            .unwrap(),
+        );
+    }
+
+    let mut writes = 0;
+    let error = apply_changesets_with_hooks(
+        &changesets,
+        || Ok(()),
+        || {
+            writes += 1;
+            if writes == 2 {
+                assert!(
+                    std::fs::read_to_string(&edits[0])
+                        .unwrap()
+                        .contains("return value * 2")
+                );
+                return Err(IdenteditError::InvalidRequest {
+                    message: "injected second text write failure".to_string(),
+                });
+            }
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(error, IdenteditError::InvalidRequest { .. }));
+    assert_eq!(writes, 2);
+    for file in &edits {
+        assert_eq!(std::fs::read_to_string(file).unwrap(), original);
+    }
+    for file in guards {
+        assert_eq!(std::fs::read(file).unwrap(), guard_bytes);
+        assert_eq!(
+            std::fs::metadata(file).unwrap().modified().unwrap(),
+            modified
+        );
+    }
+}
+
+#[test]
+fn stale_guard_only_entry_rolls_back_text_but_preserves_external_bytes() {
+    let directory = tempdir().unwrap();
+    let edit_file = create_python_target(directory.path());
+    let original = std::fs::read(&edit_file).unwrap();
+    let guard_file = directory.path().join("z_guard.txt");
+    let guard_bytes = b"stable\n";
+    let changed = b"drift!\n";
+    std::fs::write(&guard_file, guard_bytes).unwrap();
+    let modified = std::fs::metadata(&guard_file).unwrap().modified().unwrap();
+    let changesets = [
+        build_replace_changeset(
+            &edit_file,
+            &process_identity_for(&edit_file),
+            "def process_data(value):\n    return value * 2".to_string(),
+        )
+        .unwrap(),
+        FileChange {
+            file: guard_file.clone(),
+            expected_file_hash: Some(hash_bytes(guard_bytes)),
+            operations: vec![],
+        },
+    ];
+
+    let error = apply_changesets_with_hooks(
+        &changesets,
+        || Ok(()),
+        || {
+            std::fs::write(&guard_file, changed).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&guard_file)
+                .unwrap()
+                .set_times(FileTimes::new().set_modified(modified))
+                .unwrap();
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        IdenteditError::FilePreconditionFailed { .. }
+    ));
+    assert_eq!(std::fs::read(&edit_file).unwrap(), original);
+    assert_eq!(std::fs::read(&guard_file).unwrap(), changed);
+}
+
+#[test]
+fn guard_only_locks_survive_until_whole_file_moves_finish() {
+    let directory = tempdir().unwrap();
+    let guard_file = directory.path().join("guard.bin");
+    let guard_bytes = b"\xff\0guard\r\n";
+    std::fs::write(&guard_file, guard_bytes).unwrap();
+    let source = directory.path().join("source.bin");
+    let destination = directory.path().join("destination.bin");
+    let move_bytes = b"\x80\0moving";
+    std::fs::write(&source, move_bytes).unwrap();
+    let changesets = [
+        FileChange {
+            file: guard_file.clone(),
+            expected_file_hash: Some(hash_bytes(guard_bytes)),
+            operations: vec![],
+        },
+        build_move_changeset(&source, &destination),
+    ];
+
+    let mut writes = 0;
+    let response = apply_changesets_with_hooks(
+        &changesets,
+        || Ok(()),
+        || {
+            writes += 1;
+            assert!(matches!(
+                acquire_apply_lock(&guard_file),
+                Err(IdenteditError::ResourceBusy { .. })
+            ));
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(writes, 1);
+    assert_eq!(response.summary.operations_applied, 1);
+    assert_eq!(std::fs::read(&guard_file).unwrap(), guard_bytes);
+    assert_eq!(std::fs::read(&destination).unwrap(), move_bytes);
+    assert!(!source.exists());
+    acquire_apply_lock(&guard_file).expect("completed apply must release the guard-only lock");
+}
+
+#[test]
 fn dry_run_projects_owned_exact_snapshots_without_retaining_file_locks() {
     use crate::apply::{dry_run_multi_file_changeset, preview_multi_file_changeset};
     use crate::changeset::MultiFileChangeset;
@@ -234,14 +397,22 @@ fn preflight_builds_file_plans_without_mutating_sources() {
         .expect("preflight should succeed for both files");
 
     assert_eq!(plans.len(), 2);
-    assert_eq!(plans[0].file, file_a);
-    assert_eq!(plans[1].file, file_b);
+    assert_eq!(plans[0].file(), file_a);
+    assert_eq!(plans[1].file(), file_b);
     assert!(
-        plans[0].updated_text.contains("return value * 10"),
+        plans[0]
+            .text_update()
+            .unwrap()
+            .updated_text
+            .contains("return value * 10"),
         "first preflight plan should include replacement"
     );
     assert!(
-        plans[1].updated_text.contains("return value * 11"),
+        plans[1]
+            .text_update()
+            .unwrap()
+            .updated_text
+            .contains("return value * 11"),
         "second preflight plan should include replacement"
     );
 
@@ -364,10 +535,11 @@ fn preflight_orders_plans_by_canonical_path_not_input_order() {
         .expect("preflight should succeed");
     assert_eq!(plans.len(), 2);
     assert_eq!(
-        plans[0].file, file_a,
+        plans[0].file(),
+        file_a,
         "preflight plans should be ordered by canonical path, not input order"
     );
-    assert_eq!(plans[1].file, file_b);
+    assert_eq!(plans[1].file(), file_b);
 }
 
 #[test]
@@ -772,9 +944,9 @@ fn preflight_allows_three_distinct_files_with_identical_contents() {
         .expect("distinct files should be accepted");
 
     assert_eq!(plans.len(), 3);
-    assert_eq!(plans[0].file, file_a);
-    assert_eq!(plans[1].file, file_m);
-    assert_eq!(plans[2].file, file_z);
+    assert_eq!(plans[0].file(), file_a);
+    assert_eq!(plans[1].file(), file_m);
+    assert_eq!(plans[2].file(), file_z);
 }
 
 #[test]

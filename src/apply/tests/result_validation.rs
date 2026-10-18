@@ -159,7 +159,7 @@ fn build_to_locked_preflight_changes_are_reparsed_without_a_whole_file_stale_rul
         } else {
             let plans = result.unwrap();
             assert_eq!(
-                plans[0].updated_text,
+                plans[0].text_update().unwrap().updated_text,
                 changed.replace("return 1", "return 2")
             );
             assert_eq!(
@@ -395,7 +395,13 @@ fn unsupported_result_validation_does_not_perform_a_second_parse() {
     let calls = Rc::new(Cell::new(0));
     let plans = preflight_changesets_in_order(&[changeset], &context(&calls, false, true)).unwrap();
     assert_eq!(calls.get(), 1);
-    assert!(plans[0].updated_text.contains("def invalid("));
+    assert!(
+        plans[0]
+            .text_update()
+            .unwrap()
+            .updated_text
+            .contains("def invalid(")
+    );
 }
 
 #[test]

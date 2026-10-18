@@ -95,7 +95,7 @@ impl EditLocations {
 
     pub(super) fn from_plans(edits: &[PreflightFilePlan], moves: &[MovePreflightPlan]) -> Self {
         let mut result = Self::default();
-        for plan in edits {
+        for plan in edits.iter().filter_map(PreflightFilePlan::text_update) {
             result.total += plan.locations.total;
             let remaining = LOCATION_LIMIT - result.entries.len();
             result

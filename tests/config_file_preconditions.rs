@@ -326,6 +326,108 @@ fn merge_conjoins_file_guards_and_retains_guarded_empty_entries() {
 }
 
 #[test]
+fn guarded_empty_entries_check_arbitrary_bytes_without_parsing_or_writing() {
+    use std::fs::FileTimes;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let directory = TempDir::new().unwrap();
+    for (name, source) in [
+        ("valid.json", b"{\"value\":1}\n".as_slice()),
+        ("invalid.py", b"def incomplete(:\n".as_slice()),
+        ("binary.bin", b"\xff\0raw\r\n".as_slice()),
+    ] {
+        let file = directory.path().join(name);
+        std::fs::write(&file, source).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000)))
+            .unwrap();
+        let before = std::fs::metadata(&file).unwrap();
+        let plan = empty_plan(&file, Some(&common::hash_bytes(source)));
+
+        for options in [vec!["--dry-run"], vec![], vec!["--repair"]] {
+            let response = successful_json(apply(&plan, &options));
+            assert_eq!(response["summary"]["files_modified"], 0);
+            assert_eq!(response["summary"]["operations_applied"], 0);
+            assert_eq!(std::fs::read(&file).unwrap(), source);
+            assert_eq!(
+                std::fs::metadata(&file).unwrap().modified().unwrap(),
+                before.modified().unwrap()
+            );
+        }
+
+        std::fs::write(&file, b"changed").unwrap();
+        assert_precondition_failure(apply(&plan, &[]));
+        assert_eq!(std::fs::read(file).unwrap(), b"changed");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn guarded_empty_entries_preserve_hardlink_identity() {
+    use std::os::unix::fs::MetadataExt;
+
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let alias = directory.path().join("alias.json");
+    let source = b"{\"value\":1}\n";
+    std::fs::write(&file, source).unwrap();
+    std::fs::hard_link(&file, &alias).unwrap();
+    let before = std::fs::metadata(&file).unwrap();
+    let plan = empty_plan(&file, Some(&common::hash_bytes(source)));
+
+    successful_json(apply(&plan, &[]));
+    assert_eq!(std::fs::metadata(&file).unwrap().ino(), before.ino());
+    assert_eq!(std::fs::metadata(&file).unwrap().nlink(), 2);
+    std::fs::write(&alias, b"still linked").unwrap();
+    assert_eq!(std::fs::read(file).unwrap(), b"still linked");
+}
+
+#[test]
+fn file_guards_reject_changed_bytes_before_decoding_or_parsing() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let source = "{\"inside\":{\"value\":1}}\n";
+    std::fs::write(&file, source).unwrap();
+    let plan = config_plan(&file, "inside.value", &["--set-value", "2"]);
+    let anchor = format!("1:{}", common::compute_line_hash(source.trim_end()));
+    let mut line_plan = successful_json(common::run_identedit(&[
+        "edit",
+        file.to_str().unwrap(),
+        "--at",
+        &anchor,
+        "--replace",
+        "{}",
+    ]));
+    line_plan["files"][0]["expected_file_hash"] = json!(common::hash_text(source));
+    let patch = json!({
+        "command":"patch", "file":file,
+        "target":{
+            "type":"config_path", "path":"inside.value",
+            "expected_file_hash":common::hash_text(source)
+        },
+        "op":{"type":"set","new_text":"2"}
+    });
+
+    for changed in [b"{\"inside\":".as_slice(), b"\xff\0changed".as_slice()] {
+        std::fs::write(&file, changed).unwrap();
+        for plan in [&plan, &line_plan] {
+            for options in [vec![], vec!["--dry-run"], vec!["--repair"]] {
+                assert_precondition_failure(apply(plan, &options));
+                assert_eq!(std::fs::read(&file).unwrap(), changed);
+            }
+        }
+        assert_precondition_failure(common::run_identedit_with_stdin(
+            &["patch", "--json"],
+            &patch.to_string(),
+        ));
+        assert_eq!(std::fs::read(&file).unwrap(), changed);
+    }
+}
+
+#[test]
 fn line_repair_cannot_refresh_a_file_precondition() {
     let directory = TempDir::new().unwrap();
     let file = directory.path().join("settings.txt");

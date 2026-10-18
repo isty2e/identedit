@@ -75,16 +75,29 @@ pub struct FileChange {
 }
 
 impl FileChange {
+    pub(crate) fn is_file_guard_only(&self) -> bool {
+        self.operations.is_empty() && self.expected_file_hash.is_some()
+    }
+
     pub(crate) fn verify_source(&self, source: &[u8]) -> Result<(), crate::error::IdenteditError> {
-        if let Some(expected_hash) = &self.expected_file_hash {
-            let actual_hash = hash_bytes(source);
-            if expected_hash != &actual_hash {
-                return Err(crate::error::IdenteditError::FilePreconditionFailed {
-                    path: self.file.display().to_string(),
-                    expected_hash: expected_hash.to_string(),
-                    actual_hash: actual_hash.to_string(),
-                });
-            }
+        if self.expected_file_hash.is_some() {
+            self.verify_source_hash(&hash_bytes(source))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn verify_source_hash(
+        &self,
+        actual_hash: &ContentHash,
+    ) -> Result<(), crate::error::IdenteditError> {
+        if let Some(expected_hash) = &self.expected_file_hash
+            && expected_hash != actual_hash
+        {
+            return Err(crate::error::IdenteditError::FilePreconditionFailed {
+                path: self.file.display().to_string(),
+                expected_hash: expected_hash.to_string(),
+                actual_hash: actual_hash.to_string(),
+            });
         }
 
         Ok(())
