@@ -357,7 +357,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             failure.error,
-            IdenteditError::PreconditionFailed { .. }
+            IdenteditError::FilePreconditionFailed { .. }
         ));
     }
 }

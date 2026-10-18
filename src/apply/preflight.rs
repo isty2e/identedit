@@ -77,7 +77,8 @@ pub(super) fn preflight_resolved_text_update(
     let guard_state = capture_apply_guard_state(file)?;
     let source_text = fs::read_to_string(file).map_err(|error| IdenteditError::io(file, error))?;
     if source_text != expected_source {
-        return Err(IdenteditError::PreconditionFailed {
+        return Err(IdenteditError::FilePreconditionFailed {
+            path: file.display().to_string(),
             expected_hash: hash_bytes(expected_source.as_bytes()).to_string(),
             actual_hash: hash_bytes(source_text.as_bytes()).to_string(),
         });

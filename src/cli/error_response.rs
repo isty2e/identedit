@@ -202,6 +202,13 @@ fn error_response(error: &IdenteditError) -> ErrorResponse {
                 },
             }
         },
+        IdenteditError::FilePreconditionFailed { .. } => ErrorResponse {
+            error: ErrorBody::new(
+                "precondition_failed",
+                error.to_string(),
+                Some("Re-read the file and recompile the plan (rerun edit/patch); repair cannot refresh this file condition".to_string()),
+            ),
+        },
         IdenteditError::PreconditionFailed { .. } => ErrorResponse {
             error: ErrorBody::new(
                 "precondition_failed",
@@ -428,6 +435,27 @@ mod tests {
             },
             "precondition_failed",
             Some("identedit read"),
+        );
+    }
+
+    #[test]
+    fn file_hash_failure_keeps_the_type_but_uses_file_recovery() {
+        let response: serde_json::Value = serde_json::from_str(&super::render_error_response(
+            &IdenteditError::FilePreconditionFailed {
+                path: "settings.yaml".to_string(),
+                expected_hash: "old".to_string(),
+                actual_hash: "new".to_string(),
+            },
+        ))
+        .unwrap();
+        assert_eq!(response["error"]["type"], "precondition_failed");
+        assert_eq!(
+            response["error"]["message"],
+            "File 'settings.yaml' does not match the expected source hash. Expected hash 'old', got 'new'"
+        );
+        assert_eq!(
+            response["error"]["suggestion"],
+            "Re-read the file and recompile the plan (rerun edit/patch); repair cannot refresh this file condition"
         );
     }
 

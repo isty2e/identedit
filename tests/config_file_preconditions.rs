@@ -148,6 +148,105 @@ fn yaml_alias_context_cannot_change_after_config_compilation() {
 }
 
 #[test]
+fn file_hash_failures_name_the_file_and_require_recompilation() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let destination = directory.path().join("moved.json");
+    let source = "{\"inside\":{\"value\":1},\"outside\":0}\n";
+    let changed = source.replace("outside\":0", "outside\":9");
+    std::fs::write(&file, source).unwrap();
+    let file = std::fs::canonicalize(file).unwrap();
+    let config = config_plan(&file, "inside.value", &["--set-value", "2"]);
+    let boundary = successful_json(common::run_identedit(&[
+        "edit",
+        file.to_str().unwrap(),
+        "--at",
+        "file-end",
+        "--insert",
+        "\n",
+    ]));
+    let expected_hash = common::hash_text(source);
+    let actual_hash = common::hash_text(&changed);
+    let movement = json!({"files":[{
+        "file":file,
+        "operations":[{
+            "target":{"type":"file","expected_file_hash":expected_hash},
+            "op":{"type":"move","to":destination},
+            "preview":{"move":{"from":file,"to":destination}}
+        }]
+    }]});
+    std::fs::write(&file, &changed).unwrap();
+    let patch = json!({
+        "command":"patch", "file":file,
+        "target":{"type":"config_path","path":"inside.value","expected_file_hash":expected_hash},
+        "op":{"type":"set","new_text":"2"}
+    });
+
+    for output in [
+        apply(&config, &["--dry-run"]),
+        apply(&boundary, &["--dry-run"]),
+        apply(&movement, &["--dry-run"]),
+        common::run_identedit_with_stdin(&["patch", "--json"], &patch.to_string()),
+    ] {
+        assert!(!output.status.success());
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["type"], "precondition_failed");
+        assert_eq!(
+            response["error"]["message"],
+            format!(
+                "File '{}' does not match the expected source hash. Expected hash '{}', got '{}'",
+                file.display(),
+                expected_hash,
+                actual_hash,
+            )
+        );
+        assert_eq!(
+            response["error"]["suggestion"],
+            "Re-read the file and recompile the plan (rerun edit/patch); repair cannot refresh this file condition"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+        assert!(!destination.exists());
+    }
+}
+
+#[test]
+fn legacy_node_hash_failure_keeps_node_handle_recovery() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let source = "{\"inside\":{\"value\":1},\"outside\":0}\n";
+    std::fs::write(&file, source).unwrap();
+    let mut plan = config_plan(&file, "inside.value", &["--set-value", "2"]);
+    let expected = plan["files"][0]["operations"][0]["target"]["expected_old_hash"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    plan["files"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("expected_file_hash");
+    let changed = source.replace("value\":1", "value\":9");
+    std::fs::write(&file, &changed).unwrap();
+
+    let output = apply(&plan, &["--dry-run"]);
+    assert!(!output.status.success());
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["type"], "precondition_failed");
+    assert_eq!(
+        response["error"]["message"],
+        format!(
+            "Target node has changed since selection. Expected hash '{}', got '{}'",
+            expected,
+            common::hash_text("{\"value\":9}"),
+        )
+    );
+    assert_eq!(
+        response["error"]["suggestion"],
+        "Re-run 'identedit read' to get updated handles"
+    );
+    assert_eq!(std::fs::read_to_string(file).unwrap(), changed);
+}
+
+#[test]
 fn config_boundary_creation_keeps_a_hash_of_bom_and_whitespace_bytes() {
     let directory = TempDir::new().unwrap();
     let source = "\u{feff} \r\n";

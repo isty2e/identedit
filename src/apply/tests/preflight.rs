@@ -163,9 +163,10 @@ fn move_preflight_rejects_stale_expected_file_hash() {
     let error = preflight_move_plans(&execution_order)
         .expect_err("move preflight must reject a stale whole-file hash");
     match error {
-        IdenteditError::PreconditionFailed {
+        IdenteditError::FilePreconditionFailed {
             expected_hash,
             actual_hash,
+            ..
         } => {
             assert_eq!(expected_hash, "0000000000000000");
             assert_ne!(actual_hash, expected_hash);
@@ -1084,7 +1085,7 @@ fn commit_batch_precondition_failure_rolls_back_already_written_files() {
     .expect_err("second-file stale content should abort commit batch");
 
     match error {
-        IdenteditError::PreconditionFailed { .. } => {}
+        IdenteditError::FilePreconditionFailed { .. } => {}
         other => panic!("unexpected error variant: {other}"),
     }
 

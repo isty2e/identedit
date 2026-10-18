@@ -395,7 +395,8 @@ pub(super) fn preflight_move_plans(
         let lock_guard = acquire_apply_lock(&edge.source)?;
         let guard_state = capture_apply_guard_state(&edge.source)?;
         if guard_state.source_hash != edge.expected_file_hash {
-            return Err(IdenteditError::PreconditionFailed {
+            return Err(IdenteditError::FilePreconditionFailed {
+                path: edge.source.display().to_string(),
                 expected_hash: edge.expected_file_hash.to_string(),
                 actual_hash: guard_state.source_hash.to_string(),
             });

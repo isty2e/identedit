@@ -89,7 +89,8 @@ pub fn resolve_config_path_operation(
     if let Some(expected_hash) = expected_file_hash
         && &actual_hash != expected_hash
     {
-        return Err(IdenteditError::PreconditionFailed {
+        return Err(IdenteditError::FilePreconditionFailed {
+            path: file.display().to_string(),
             expected_hash: expected_hash.to_string(),
             actual_hash: actual_hash.to_string(),
         });

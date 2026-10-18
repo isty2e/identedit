@@ -79,7 +79,8 @@ impl FileChange {
         if let Some(expected_hash) = &self.expected_file_hash {
             let actual_hash = hash_bytes(source);
             if expected_hash != &actual_hash {
-                return Err(crate::error::IdenteditError::PreconditionFailed {
+                return Err(crate::error::IdenteditError::FilePreconditionFailed {
+                    path: self.file.display().to_string(),
                     expected_hash: expected_hash.to_string(),
                     actual_hash: actual_hash.to_string(),
                 });

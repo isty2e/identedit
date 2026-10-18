@@ -132,7 +132,7 @@ pub(super) fn resolve_operation_view(
             })
         }
         TransformTarget::FileStart { expected_file_hash } => {
-            verify_file_target_precondition(source_text, expected_file_hash)?;
+            verify_file_target_precondition(file, source_text, expected_file_hash)?;
             let start = file_content_start_offset(source_text);
             Ok(ResolvedOperationView {
                 old_text: String::new(),
@@ -145,7 +145,7 @@ pub(super) fn resolve_operation_view(
             })
         }
         TransformTarget::FileEnd { expected_file_hash } => {
-            verify_file_target_precondition(source_text, expected_file_hash)?;
+            verify_file_target_precondition(file, source_text, expected_file_hash)?;
             let end = source_text.len();
             Ok(ResolvedOperationView {
                 old_text: String::new(),
@@ -438,11 +438,11 @@ fn resolve_destination_offset(
             })
         }
         TransformTarget::FileStart { expected_file_hash } => {
-            verify_file_target_precondition(source_text, expected_file_hash)?;
+            verify_file_target_precondition(file, source_text, expected_file_hash)?;
             Ok(file_content_start_offset(source_text))
         }
         TransformTarget::FileEnd { expected_file_hash } => {
-            verify_file_target_precondition(source_text, expected_file_hash)?;
+            verify_file_target_precondition(file, source_text, expected_file_hash)?;
             Ok(source_text.len())
         }
         TransformTarget::File { .. } => {
@@ -500,12 +500,14 @@ fn edit_view_for_node_operation(op: &OpKind, anchor: &SelectionHandle) -> (Strin
 }
 
 fn verify_file_target_precondition(
+    file: &Path,
     source_text: &str,
     expected_file_hash: &ContentHash,
 ) -> Result<(), IdenteditError> {
     let actual_hash = hash_text(source_text);
     if &actual_hash != expected_file_hash {
-        return Err(IdenteditError::PreconditionFailed {
+        return Err(IdenteditError::FilePreconditionFailed {
+            path: file.display().to_string(),
             expected_hash: expected_file_hash.to_string(),
             actual_hash: actual_hash.to_string(),
         });

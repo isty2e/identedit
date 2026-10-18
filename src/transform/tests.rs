@@ -56,15 +56,17 @@ fn file_precondition_checks_the_supplied_resolution_buffer_even_without_operatio
 
     let observed = "first\nsecond\n";
     let error = resolve_changeset_targets_in_handles(&changeset, observed, &[]).unwrap_err();
-    let IdenteditError::PreconditionFailed {
+    let IdenteditError::FilePreconditionFailed {
         expected_hash,
         actual_hash,
+        path,
     } = error
     else {
         panic!("expected a source precondition failure");
     };
     assert_eq!(expected_hash, hash_text(original).to_string());
     assert_eq!(actual_hash, hash_text(observed).to_string());
+    assert_eq!(path, "not-read-from-disk.txt");
 }
 
 #[test]
