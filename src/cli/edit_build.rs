@@ -119,6 +119,20 @@ struct StdinEditOperationWire {
     op: StdinEditOp,
 }
 
+#[derive(Deserialize)]
+struct RawEditOperationTargets<'a> {
+    #[serde(borrow)]
+    target: Option<&'a RawValue>,
+    #[serde(borrow)]
+    op: RawEditMoveDestination<'a>,
+}
+
+#[derive(Deserialize)]
+struct RawEditMoveDestination<'a> {
+    #[serde(borrow)]
+    destination: Option<&'a RawValue>,
+}
+
 type StdinHandleTableWire = BTreeMap<String, StdinHandleTableEntryWire>;
 
 #[derive(Debug, Deserialize)]
@@ -593,6 +607,8 @@ fn parse_edit_operation(
 ) -> Result<ParsedEditInstruction, IdenteditError> {
     let operation: StdinEditOperationWire = serde_json::from_str(raw_operation.get())
         .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
+    let raw_targets: RawEditOperationTargets<'_> = serde_json::from_str(raw_operation.get())
+        .map_err(|source| IdenteditError::InvalidJsonRequest { source })?;
     let query_target = operation
         .target
         .as_ref()
@@ -621,8 +637,21 @@ fn parse_edit_operation(
                 message: "operation.target cannot be combined with top-level identity/kind/span_hint/expected_old_hash fields".to_string(),
             });
         }
-        let target = parse_edit_target_from_wire(target_wire, handle_table, file, state)?;
-        let op = parse_stdin_operation_kind(operation.op, &target, handle_table, file, state)?;
+        let target = parse_edit_target_from_wire(
+            target_wire,
+            raw_targets.target,
+            handle_table,
+            file,
+            state,
+        )?;
+        let op = parse_stdin_operation_kind(
+            operation.op,
+            raw_targets.op.destination,
+            &target,
+            handle_table,
+            file,
+            state,
+        )?;
         return Ok(ParsedEditInstruction { target, op });
     }
 
@@ -643,19 +672,30 @@ fn parse_edit_operation(
                 message: "missing field `expected_old_hash`".to_string(),
             })?;
     let target = TransformTarget::node(identity, kind, operation.span_hint, expected_old_hash);
-    let op = parse_stdin_operation_kind(operation.op, &target, handle_table, file, state)?;
+    let op = parse_stdin_operation_kind(
+        operation.op,
+        raw_targets.op.destination,
+        &target,
+        handle_table,
+        file,
+        state,
+    )?;
     Ok(ParsedEditInstruction { target, op })
 }
 
 fn parse_edit_target_from_wire(
     target_wire: Value,
+    raw_target: Option<&RawValue>,
     handle_table: Option<&StdinHandleTableWire>,
     file: &Path,
     state: &mut NormalizeState<'_>,
 ) -> Result<TransformTarget, IdenteditError> {
     let target_type = target_wire.get("type").and_then(Value::as_str);
     if matches!(target_type, Some("symbol" | "selector")) {
-        let query: NodeQueryWire = serde_json::from_value(target_wire).map_err(|error| {
+        let raw_target = raw_target.ok_or_else(|| IdenteditError::InvalidRequest {
+            message: "node query target requires its original JSON input".to_string(),
+        })?;
+        let query: NodeQueryWire = serde_json::from_str(raw_target.get()).map_err(|error| {
             IdenteditError::InvalidRequest {
                 message: format!("invalid node query target: {error}"),
             }
@@ -714,6 +754,7 @@ fn parse_edit_target_from_wire(
 
 fn parse_stdin_operation_kind(
     operation: StdinEditOp,
+    raw_destination: Option<&RawValue>,
     target: &TransformTarget,
     handle_table: Option<&StdinHandleTableWire>,
     file: &Path,
@@ -769,6 +810,7 @@ fn parse_stdin_operation_kind(
         } => ParsedOperationKind::Canonical(OpKind::MoveBefore {
             destination: Box::new(parse_edit_target_from_wire(
                 destination,
+                raw_destination,
                 handle_table,
                 file,
                 state,
@@ -783,6 +825,7 @@ fn parse_stdin_operation_kind(
         } => ParsedOperationKind::Canonical(OpKind::MoveAfter {
             destination: Box::new(parse_edit_target_from_wire(
                 destination,
+                raw_destination,
                 handle_table,
                 file,
                 state,
@@ -796,8 +839,13 @@ fn parse_stdin_operation_kind(
             prefix,
             suffix,
         } => {
-            let destination =
-                parse_edit_target_from_wire(destination, handle_table, &destination_file, state)?;
+            let destination = parse_edit_target_from_wire(
+                destination,
+                raw_destination,
+                handle_table,
+                &destination_file,
+                state,
+            )?;
             ParsedOperationKind::CrossFileMove(CrossFileMove {
                 destination_file,
                 destination,
@@ -812,8 +860,13 @@ fn parse_stdin_operation_kind(
             prefix,
             suffix,
         } => {
-            let destination =
-                parse_edit_target_from_wire(destination, handle_table, &destination_file, state)?;
+            let destination = parse_edit_target_from_wire(
+                destination,
+                raw_destination,
+                handle_table,
+                &destination_file,
+                state,
+            )?;
             ParsedOperationKind::CrossFileMove(CrossFileMove {
                 destination_file,
                 destination,

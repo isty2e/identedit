@@ -539,3 +539,73 @@ fn per_operation_decoding_preserves_duplicate_field_rejection() {
         assert_eq!(fs::read_to_string(&file).unwrap(), before);
     }
 }
+
+#[test]
+fn duplicate_query_fields_are_rejected_before_lowering_at_every_node_position() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("source.py");
+    let destination_file = root.path().join("destination.py");
+    let before = "def first():\n    return 1\n\ndef second():\n    return 2\n";
+    fs::write(&file, before).unwrap();
+    fs::write(&destination_file, before).unwrap();
+    let duplicates = [
+        r#"{"type":"symbol","name":"first","name":"second"}"#,
+        r#"{"type":"selector","kind":"function_definition","name":"first","name":"second"}"#,
+        r#"{"type":"selector","kind":"class_definition","kind":"function_definition","name":"second"}"#,
+        r#"{"type":"symbol","type":"symbol","name":"second"}"#,
+        r#"{"type":"symbol","type":"selector","kind":"function_definition","name":"second"}"#,
+        r#"{"type":"selector","type":"symbol","name":"second"}"#,
+        r#"{"type":"symbol","name":"first","na\u006de":"second"}"#,
+        r#"{"name":"first","name":"second","type":"symbol"}"#,
+    ];
+
+    for target in duplicates {
+        let mut operations = vec![format!(
+            "{{\"target\":{target},\"op\":{{\"type\":\"delete\"}}}}"
+        )];
+        for kind in [
+            "move_before",
+            "move_after",
+            "move_to_before",
+            "move_to_after",
+        ] {
+            let cross_file = if kind.starts_with("move_to_") {
+                format!(",\"destination_file\":{}", json!(destination_file))
+            } else {
+                String::new()
+            };
+            operations.push(format!(
+                "{{\"target\":{{\"type\":\"symbol\",\"name\":\"first\"}},\"op\":{{\"type\":\"{kind}\",\"destination\":{target}{cross_file}}}}}"
+            ));
+        }
+
+        for operation in operations {
+            for batch in [false, true] {
+                let entry = format!("{{\"file\":{},\"operations\":[{operation}]}}", json!(file));
+                let request = if batch {
+                    format!("{{\"command\":\"edit\",\"files\":[{entry}]}}")
+                } else {
+                    format!(
+                        "{{\"command\":\"edit\",\"file\":{},\"operations\":[{operation}]}}",
+                        json!(file)
+                    )
+                };
+                let output = run_identedit_with_stdin(&["edit", "--json"], &request);
+                let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert!(
+                    !output.status.success(),
+                    "query with duplicate fields compiled: {operation}: {response}"
+                );
+                assert_eq!(response["error"]["type"], "invalid_request");
+                let pointer = if batch {
+                    "/files/0/operations/0"
+                } else {
+                    "/operations/0"
+                };
+                assert_eq!(response["error"]["request_pointers"], json!([pointer]));
+                assert_eq!(fs::read_to_string(&file).unwrap(), before);
+                assert_eq!(fs::read_to_string(&destination_file).unwrap(), before);
+            }
+        }
+    }
+}
