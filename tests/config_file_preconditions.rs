@@ -60,6 +60,43 @@ fn merge(directory: &Path, plans: &[Value]) -> Output {
     common::run_identedit(&arguments)
 }
 
+const MOVE_SOURCE: &str =
+    "def first():\n    return 1\n\ndef moved():\n    return 2\n\ndef last():\n    return 3\n";
+
+fn boundary_move_plan(file: &Path, name: &str, operation: &str, boundary: &str) -> Value {
+    let read = successful_json(common::run_identedit(&[
+        "read",
+        file.to_str().unwrap(),
+        "--symbol",
+        name,
+        "--json",
+        "--verbose",
+    ]));
+    assert_eq!(read["summary"]["matches"], 1);
+    let handle = &read["handles"][0];
+    let request = json!({
+        "command":"edit", "file":file,
+        "operations":[{
+            "target":{
+                "type":"node", "identity":handle["identity"], "kind":handle["kind"],
+                "span_hint":handle["span"], "expected_old_hash":handle["expected_old_hash"]
+            },
+            "op":{
+                "type":operation,
+                "destination":{
+                    "type":boundary,
+                    "expected_file_hash":common::hash_bytes(&std::fs::read(file).unwrap())
+                },
+                "suffix":"\n\n"
+            }
+        }]
+    });
+    successful_json(common::run_identedit_with_stdin(
+        &["edit", "--json"],
+        &request.to_string(),
+    ))
+}
+
 #[test]
 fn config_producers_persist_the_original_full_file_hash_for_every_verb() {
     let directory = TempDir::new().unwrap();
@@ -525,6 +562,133 @@ fn merge_preserves_consistent_raw_boundary_plans_without_promoting_file_conditio
         std::fs::read_to_string(&file).unwrap(),
         format!("\n{source}\n")
     );
+}
+
+#[test]
+fn merge_rejects_file_conditions_conflicting_with_nested_move_destinations() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("source.py");
+    std::fs::write(&file, MOVE_SOURCE).unwrap();
+    let different = common::hash_text("another source revision");
+
+    for operation in ["move_before", "move_after"] {
+        for boundary in ["file_start", "file_end"] {
+            let plan = boundary_move_plan(&file, "moved", operation, boundary);
+            let mut combined = plan.clone();
+            combined["files"][0]["expected_file_hash"] = json!(different);
+            for plans in [
+                vec![empty_plan(&file, Some(&different)), plan.clone()],
+                vec![plan, empty_plan(&file, Some(&different))],
+                vec![combined],
+            ] {
+                let output = merge(directory.path(), &plans);
+                assert!(
+                    !output.status.success(),
+                    "nested destination must agree with the file condition"
+                );
+                let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(response["error"]["type"], "invalid_request");
+                assert_eq!(std::fs::read_to_string(&file).unwrap(), MOVE_SOURCE);
+            }
+        }
+    }
+}
+
+#[test]
+fn merge_conjoins_nested_destination_hashes_with_root_and_other_nested_targets() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("source.py");
+    let changed = format!("{MOVE_SOURCE}# outside change\n");
+
+    for operation in ["move_before", "move_after"] {
+        for boundary in ["file_start", "file_end"] {
+            std::fs::write(&file, MOVE_SOURCE).unwrap();
+            let movement = boundary_move_plan(&file, "moved", operation, boundary);
+            std::fs::write(&file, &changed).unwrap();
+            let (other_boundary, flag_boundary) = if boundary == "file_start" {
+                ("file_end", "file-end")
+            } else {
+                ("file_start", "file-start")
+            };
+            let root = successful_json(common::run_identedit(&[
+                "edit",
+                file.to_str().unwrap(),
+                "--at",
+                flag_boundary,
+                "--insert",
+                "\n",
+            ]));
+            let nested = boundary_move_plan(&file, "last", operation, other_boundary);
+
+            for other in [root, nested] {
+                let mut combined = movement.clone();
+                combined["files"][0]["operations"]
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(other["files"][0]["operations"].as_array().unwrap().clone());
+                for plans in [
+                    vec![movement.clone(), other.clone()],
+                    vec![other, movement.clone()],
+                    vec![combined],
+                ] {
+                    let output = merge(directory.path(), &plans);
+                    assert!(
+                        !output.status.success(),
+                        "all root and nested file conditions must agree"
+                    );
+                    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+                    assert_eq!(response["error"]["type"], "invalid_request");
+                    assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn merge_preserves_matching_nested_guards_and_raw_move_effects() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("source.py");
+    let hash = common::hash_text(MOVE_SOURCE);
+    let changed = format!("{MOVE_SOURCE}# outside change\n");
+
+    for operation in ["move_before", "move_after"] {
+        for boundary in ["file_start", "file_end"] {
+            for condition in [None, Some(hash.as_str())] {
+                std::fs::write(&file, MOVE_SOURCE).unwrap();
+                let mut plan = boundary_move_plan(&file, "moved", operation, boundary);
+                if let Some(condition) = condition {
+                    plan["files"][0]["expected_file_hash"] = json!(condition);
+                }
+                let merged = successful_json(merge(directory.path(), &[plan.clone()]));
+                assert_eq!(merged["files"][0], plan["files"][0]);
+                successful_json(apply(&merged, &["--dry-run"]));
+                assert_eq!(std::fs::read_to_string(&file).unwrap(), MOVE_SOURCE);
+
+                std::fs::write(&file, &changed).unwrap();
+                let stale = successful_json(merge(directory.path(), &[plan]));
+                for options in [vec![], vec!["--repair", "--dry-run"]] {
+                    assert_precondition_failure(apply(&stale, &options));
+                    assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+                }
+
+                std::fs::write(&file, MOVE_SOURCE).unwrap();
+                let span = &stale["files"][0]["operations"][0]["preview"]["matched_span"];
+                let start = span["start"].as_u64().unwrap() as usize;
+                let end = span["end"].as_u64().unwrap() as usize;
+                let payload = format!("{}\n\n", &MOVE_SOURCE[start..end]);
+                let mut expected = MOVE_SOURCE.to_string();
+                expected.replace_range(start..end, "");
+                if boundary == "file_start" {
+                    expected.insert_str(0, &payload);
+                } else {
+                    expected.push_str(&payload);
+                }
+                successful_json(apply(&stale, &[]));
+                assert_eq!(std::fs::read_to_string(&file).unwrap(), expected);
+            }
+        }
+    }
 }
 
 #[test]

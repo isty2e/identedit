@@ -96,7 +96,7 @@ fn validate_file_move_operation_constraints(
     )?;
 
     // The mandatory move guard entails an equal optional file precondition.
-    changeset.conjoin_file_hash(Some(move_operation.expected_file_hash.clone()))?;
+    changeset.validate_file_hash_conjunction()?;
 
     Ok(Some(MoveEdge {
         source: changeset.file.clone(),

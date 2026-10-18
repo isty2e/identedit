@@ -54,6 +54,15 @@ impl TransformTarget {
         matches!(self, Self::Node { .. })
     }
 
+    fn file_hash_condition(&self) -> Option<&ContentHash> {
+        match self {
+            Self::FileStart { expected_file_hash }
+            | Self::FileEnd { expected_file_hash }
+            | Self::File { expected_file_hash } => Some(expected_file_hash),
+            Self::Node { .. } | Self::Line { .. } => None,
+        }
+    }
+
     pub(crate) fn kind_name(&self) -> &'static str {
         match self {
             Self::Node { .. } => "node",
@@ -126,6 +135,17 @@ impl FileChange {
         }
 
         Ok(conjoined)
+    }
+
+    pub(crate) fn validate_file_hash_conjunction(
+        &self,
+    ) -> Result<(), crate::error::IdenteditError> {
+        let conditions = self
+            .operations
+            .iter()
+            .flat_map(|operation| operation.operation().file_hash_conditions())
+            .cloned();
+        self.conjoin_file_hash(conditions).map(|_| ())
     }
 }
 
@@ -328,6 +348,30 @@ impl EditOperation {
 
     pub(crate) fn op(&self) -> &OpKind {
         &self.op
+    }
+
+    fn file_hash_conditions(&self) -> impl Iterator<Item = &ContentHash> {
+        let destination = match &self.op {
+            OpKind::MoveBefore { destination, .. } | OpKind::MoveAfter { destination, .. } => {
+                destination.file_hash_condition()
+            }
+            OpKind::Replace { .. }
+            | OpKind::SetLine { .. }
+            | OpKind::ReplaceLines { .. }
+            | OpKind::BlankLines
+            | OpKind::DeleteLines
+            | OpKind::Delete
+            | OpKind::InsertBefore { .. }
+            | OpKind::InsertAfter { .. }
+            | OpKind::InsertAfterLine { .. }
+            | OpKind::Insert { .. }
+            | OpKind::Move { .. } => None,
+        };
+
+        self.target
+            .file_hash_condition()
+            .into_iter()
+            .chain(destination)
     }
 }
 
@@ -591,6 +635,32 @@ mod tests {
                 crate::error::IdenteditError::InvalidRequest { .. }
             ));
             assert_eq!(change.expected_file_hash, condition);
+        }
+    }
+
+    #[test]
+    fn complete_file_conditions_include_move_boundaries_but_exclude_node_and_line_guards() {
+        for operation in ["move_before", "move_after"] {
+            for destination in ["file_start", "file_end", "node", "line"] {
+                let mut wire = wire_change_op("node", operation);
+                wire["op"]["destination"] = wire_target(destination);
+                let change = super::FileChange {
+                    file: PathBuf::from("not-read-from-disk.py"),
+                    expected_file_hash: Some(hash_text("whole file source")),
+                    operations: vec![serde_json::from_value(wire).unwrap()],
+                };
+                let before = change.clone();
+                let result = change.validate_file_hash_conjunction();
+                if matches!(destination, "file_start" | "file_end") {
+                    assert!(matches!(
+                        result,
+                        Err(crate::error::IdenteditError::InvalidRequest { .. })
+                    ));
+                } else {
+                    result.unwrap();
+                }
+                assert_eq!(change, before);
+            }
         }
     }
 

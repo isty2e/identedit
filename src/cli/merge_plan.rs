@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransformTarget};
+use crate::changeset::{FileChange, MultiFileChangeset, OpKind};
 use crate::error::IdenteditError;
 
 pub fn run_merge_inputs(inputs: Vec<PathBuf>) -> Result<MultiFileChangeset, IdenteditError> {
@@ -86,15 +86,7 @@ fn validate_file_merge_constraints(changeset: &FileChange) -> Result<(), Idented
         });
     }
 
-    let file_hashes = operations
-        .iter()
-        .filter_map(|operation| match operation.target() {
-            TransformTarget::File { expected_file_hash }
-            | TransformTarget::FileStart { expected_file_hash }
-            | TransformTarget::FileEnd { expected_file_hash } => Some(expected_file_hash.clone()),
-            TransformTarget::Node { .. } | TransformTarget::Line { .. } => None,
-        });
-    changeset.conjoin_file_hash(file_hashes)?;
+    changeset.validate_file_hash_conjunction()?;
 
     let mut spans = Vec::<SpanOp>::new();
     for (index, operation) in operations.iter().enumerate() {
