@@ -7,12 +7,14 @@ use crate::error::IdenteditError;
 use crate::hash::{ContentHash, hash_bytes};
 use crate::transform::parse::parse_handles_for_source;
 
+mod composition;
 mod render;
 mod resolve;
 mod safety;
 mod syntax;
 
-use render::render_append_array_replacement;
+use composition::{ConfigBoundary, ConfigEffect, ConfigGuard, ConfigWrite, compose_config_effects};
+use render::render_append_array_write;
 use resolve::{
     ResolvedContainerEdit, find_handle_for_span, json_root_value,
     reject_yaml_implicit_null_single_line_value, render_missing_json_object,
@@ -70,6 +72,49 @@ pub struct ResolvedConfigPathOperation {
     pub expected_file_hash: ContentHash,
 }
 
+#[derive(Debug)]
+pub(crate) struct ConfigPathRequest {
+    pub(crate) path: String,
+    pub(crate) expected_file_hash: Option<ContentHash>,
+    pub(crate) document_index: Option<usize>,
+    pub(crate) operation: ConfigPathOperation,
+}
+
+pub(crate) struct CompiledConfigPathOperation {
+    pub(crate) operation: EditOperation,
+    pub(crate) first_request_index: usize,
+    pub(crate) guard_request_index: usize,
+}
+
+pub(crate) struct ResolvedConfigPathBatch {
+    pub(crate) operations: Vec<CompiledConfigPathOperation>,
+    pub(crate) expected_file_hash: ContentHash,
+}
+
+#[derive(Debug)]
+pub(crate) struct ConfigPathBatchError {
+    pub(crate) error: IdenteditError,
+    pub(crate) request_indices: Vec<usize>,
+}
+
+impl ConfigPathBatchError {
+    fn for_request(error: IdenteditError, index: usize) -> Self {
+        Self {
+            error,
+            request_indices: vec![index],
+        }
+    }
+}
+
+impl From<IdenteditError> for ConfigPathBatchError {
+    fn from(error: IdenteditError) -> Self {
+        Self {
+            error,
+            request_indices: Vec::new(),
+        }
+    }
+}
+
 pub fn resolve_config_path_operation(
     file: &Path,
     raw_path: &str,
@@ -77,16 +122,50 @@ pub fn resolve_config_path_operation(
     document_index: Option<usize>,
     operation: ConfigPathOperation,
 ) -> Result<ResolvedConfigPathOperation, IdenteditError> {
+    let request = ConfigPathRequest {
+        path: raw_path.to_string(),
+        expected_file_hash: expected_file_hash.cloned(),
+        document_index,
+        operation,
+    };
+    let batch =
+        resolve_config_path_operations(file, &[request]).map_err(|failure| failure.error)?;
+    let compiled = batch
+        .operations
+        .into_iter()
+        .next()
+        .expect("a config request produces one operation");
+    Ok(ResolvedConfigPathOperation {
+        operation: compiled.operation,
+        expected_file_hash: batch.expected_file_hash,
+    })
+}
+
+pub(crate) fn resolve_config_path_operations(
+    file: &Path,
+    requests: &[ConfigPathRequest],
+) -> Result<ResolvedConfigPathBatch, ConfigPathBatchError> {
+    if requests.is_empty() {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Config path compilation requires at least one request".to_string(),
+        }
+        .into());
+    }
     let source = std::fs::read(file).map_err(|error| IdenteditError::io(file, error))?;
     let actual_hash = hash_bytes(&source);
-    if let Some(expected_hash) = expected_file_hash
-        && &actual_hash != expected_hash
-    {
-        return Err(IdenteditError::FilePreconditionFailed {
-            path: file.display().to_string(),
-            expected_hash: expected_hash.to_string(),
-            actual_hash: actual_hash.to_string(),
-        });
+    for (index, request) in requests.iter().enumerate() {
+        if let Some(expected_hash) = &request.expected_file_hash
+            && &actual_hash != expected_hash
+        {
+            return Err(ConfigPathBatchError::for_request(
+                IdenteditError::FilePreconditionFailed {
+                    path: file.display().to_string(),
+                    expected_hash: expected_hash.to_string(),
+                    actual_hash: actual_hash.to_string(),
+                },
+                index,
+            ));
+        }
     }
 
     let source_text = std::str::from_utf8(&source).map_err(|_| IdenteditError::InvalidRequest {
@@ -96,23 +175,90 @@ pub fn resolve_config_path_operation(
         ),
     })?;
 
-    let operation =
-        resolve_config_path_in_source(file, raw_path, document_index, operation, source_text)?;
-    Ok(ResolvedConfigPathOperation {
-        operation,
+    let format = detect_config_format(file)?;
+    let effects = requests
+        .iter()
+        .enumerate()
+        .map(|(index, request)| {
+            resolve_config_path_in_source(
+                &format,
+                &request.path,
+                request.document_index,
+                &request.operation,
+                source_text,
+            )
+            .map_err(|error| ConfigPathBatchError::for_request(error, index))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let composed = compose_config_effects(&format, source_text, effects)?;
+    let handles = if composed
+        .iter()
+        .any(|effect| matches!(effect.guard, ConfigGuard::Syntax { .. }))
+    {
+        parse_handles_for_source(file, &source)?
+    } else {
+        Vec::new()
+    };
+    let mut operations = Vec::with_capacity(composed.len());
+    for effect in composed {
+        let (target, op) = match effect.guard {
+            ConfigGuard::Syntax { span, kind, .. } => {
+                let handle =
+                    find_handle_for_span(file, &handles, span, &kind).map_err(|error| {
+                        ConfigPathBatchError::for_request(error, effect.guard_request_index)
+                    })?;
+                (
+                    TransformTarget::node(
+                        handle.identity,
+                        handle.kind,
+                        Some(handle.span),
+                        handle.expected_old_hash,
+                    ),
+                    OpKind::Replace {
+                        new_text: effect.new_text,
+                    },
+                )
+            }
+            ConfigGuard::Boundary { side, .. } => {
+                let target = match side {
+                    ConfigBoundary::Start => TransformTarget::FileStart {
+                        expected_file_hash: actual_hash.clone(),
+                    },
+                    ConfigBoundary::End => TransformTarget::FileEnd {
+                        expected_file_hash: actual_hash.clone(),
+                    },
+                };
+                (
+                    target,
+                    OpKind::Insert {
+                        new_text: effect.new_text,
+                    },
+                )
+            }
+        };
+        let operation = EditOperation::try_new(target, op).map_err(|error| {
+            ConfigPathBatchError::for_request(error.into(), effect.guard_request_index)
+        })?;
+        operations.push(CompiledConfigPathOperation {
+            operation,
+            first_request_index: effect.first_request_index,
+            guard_request_index: effect.guard_request_index,
+        });
+    }
+    Ok(ResolvedConfigPathBatch {
+        operations,
         expected_file_hash: actual_hash,
     })
 }
 
 fn resolve_config_path_in_source(
-    file: &Path,
+    format: &ConfigFormat,
     raw_path: &str,
     document_index: Option<usize>,
-    operation: ConfigPathOperation,
+    operation: &ConfigPathOperation,
     source_text: &str,
-) -> Result<EditOperation, IdenteditError> {
+) -> Result<ConfigEffect, IdenteditError> {
     let source = source_text.as_bytes();
-    let format = detect_config_format(file)?;
     if document_index.is_some() && !matches!(format, ConfigFormat::Yaml) {
         return Err(IdenteditError::InvalidRequest {
             message: "Config path document_index is supported only for YAML files".to_string(),
@@ -120,7 +266,7 @@ fn resolve_config_path_in_source(
     }
     let path_tokens = parse_config_path(raw_path)?;
 
-    if let ConfigPathOperation::Set { new_text, .. } = &operation
+    if let ConfigPathOperation::Set { new_text, .. } = operation
         && matches!(format, ConfigFormat::Json)
     {
         validate_json_set_value(new_text)?;
@@ -129,31 +275,24 @@ fn resolve_config_path_in_source(
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
-    } = &operation
+    } = operation
         && matches!(format, ConfigFormat::Json)
         && json_effectively_empty_source(source_text)
     {
         let updated = render_missing_json_object(&path_tokens, raw_path, new_text)?;
-        validate_rendered_config_document(&format, "", &updated)?;
-        let target = if source.is_empty() {
-            TransformTarget::FileStart {
-                expected_file_hash: hash_bytes(source),
-            }
+        validate_rendered_config_document(format, "", &updated)?;
+        let side = if source.is_empty() {
+            ConfigBoundary::Start
         } else {
-            TransformTarget::FileEnd {
-                expected_file_hash: hash_bytes(source),
-            }
+            ConfigBoundary::End
         };
-        return Ok(EditOperation::try_new(
-            target,
-            OpKind::Insert { new_text: updated },
-        )?);
+        return Ok(ConfigEffect::boundary(side, source.len(), updated));
     }
 
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
-    } = &operation
+    } = operation
         && matches!(format, ConfigFormat::Yaml)
     {
         reject_yaml_create_missing_value_text(new_text, raw_path)?;
@@ -162,7 +301,7 @@ fn resolve_config_path_in_source(
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
-    } = &operation
+    } = operation
         && matches!(format, ConfigFormat::Yaml)
         && yaml_effectively_empty_source(source_text)
     {
@@ -172,26 +311,19 @@ fn resolve_config_path_in_source(
             raw_path,
             new_text,
         )?;
-        let target = if source.is_empty() {
-            TransformTarget::FileStart {
-                expected_file_hash: hash_bytes(source),
-            }
+        let side = if source.is_empty() {
+            ConfigBoundary::Start
         } else {
-            TransformTarget::FileEnd {
-                expected_file_hash: hash_bytes(source),
-            }
+            ConfigBoundary::End
         };
-        return Ok(EditOperation::try_new(
-            target,
-            OpKind::Insert { new_text: updated },
-        )?);
+        return Ok(ConfigEffect::boundary(side, source.len(), updated));
     }
 
-    let tree = parse_tree_for_format(&format, source)?;
+    let tree = parse_tree_for_format(format, source)?;
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
-    } = &operation
+    } = operation
     {
         let strict_probe = ConfigPathOperation::Set {
             new_text: String::new(),
@@ -224,20 +356,11 @@ fn resolve_config_path_in_source(
                         raw_path,
                     )?;
                 }
-                let replacement = set_replacement_text(
-                    &format,
-                    source_text,
-                    resolved.replace_span,
-                    new_text,
-                    raw_path,
-                )?;
-                return build_resolved_patch_from_container_edit(
-                    &format,
-                    file,
-                    source,
+                return prepare_container_effect(
+                    format,
                     source_text,
                     resolved,
-                    &replacement,
+                    operation,
                     raw_path,
                 );
             }
@@ -245,32 +368,29 @@ fn resolve_config_path_in_source(
             Err(_) => {}
         }
 
-        return resolve_config_path_set_with_create_missing(
-            file,
-            CreateMissingSetRequest {
-                format: &format,
-                tree: &tree,
-                source,
-                source_text,
-                path_tokens: &path_tokens,
-                raw_path,
-                new_text,
-                document_index,
-            },
-        );
+        return resolve_config_path_set_with_create_missing(CreateMissingSetRequest {
+            format,
+            tree: &tree,
+            source,
+            source_text,
+            path_tokens: &path_tokens,
+            raw_path,
+            new_text,
+            document_index,
+        });
     }
 
     let resolved = match format {
-        ConfigFormat::Json => resolve_json_path(&tree, source, &path_tokens, &operation, raw_path)?,
+        ConfigFormat::Json => resolve_json_path(&tree, source, &path_tokens, operation, raw_path)?,
         ConfigFormat::Yaml => resolve_yaml_path(
             &tree,
             source,
             &path_tokens,
-            &operation,
+            operation,
             raw_path,
             document_index,
         )?,
-        ConfigFormat::Toml => resolve_toml_path(&tree, source, &path_tokens, &operation, raw_path)?,
+        ConfigFormat::Toml => resolve_toml_path(&tree, source, &path_tokens, operation, raw_path)?,
     };
     if matches!(format, ConfigFormat::Yaml) {
         validate_yaml_config_path_reference_safety(
@@ -282,32 +402,7 @@ fn resolve_config_path_in_source(
         )?;
     }
 
-    let replacement = match &operation {
-        ConfigPathOperation::Set { new_text, .. } => set_replacement_text(
-            &format,
-            source_text,
-            resolved.replace_span,
-            new_text,
-            raw_path,
-        )?,
-        ConfigPathOperation::Append { new_text } => render_append_array_replacement(
-            source_text,
-            resolved.container_span,
-            &resolved.container_kind,
-            new_text,
-            raw_path,
-        )?,
-        ConfigPathOperation::Delete => String::new(),
-    };
-    build_resolved_patch_from_container_edit(
-        &format,
-        file,
-        source,
-        source_text,
-        resolved,
-        &replacement,
-        raw_path,
-    )
+    prepare_container_effect(format, source_text, resolved, operation, raw_path)
 }
 
 fn reject_yaml_create_missing_value_text(
@@ -339,56 +434,59 @@ fn set_replacement_text(
     }
 }
 
-fn build_resolved_patch_from_container_edit(
+fn prepare_container_effect(
     format: &ConfigFormat,
-    file: &Path,
-    source: &[u8],
     source_text: &str,
-    resolved: ResolvedContainerEdit,
-    replacement: &str,
+    resolved: ResolvedContainerEdit<'_>,
+    operation: &ConfigPathOperation,
     raw_path: &str,
-) -> Result<EditOperation, IdenteditError> {
-    let handles = parse_handles_for_source(file, source)?;
-    let container_handle = find_handle_for_span(
-        file,
-        &handles,
-        resolved.container_span,
-        &resolved.container_kind,
-    )?;
+) -> Result<ConfigEffect, IdenteditError> {
+    let container_span = span_from_node(resolved.container);
+    let container_kind = resolved.container.kind();
+    let append_write = if let ConfigPathOperation::Append { new_text } = operation {
+        Some(render_append_array_write(
+            source_text,
+            container_span,
+            container_kind,
+            new_text,
+            raw_path,
+        )?)
+    } else {
+        None
+    };
+    let replacement = match operation {
+        ConfigPathOperation::Set { new_text, .. } => set_replacement_text(
+            format,
+            source_text,
+            resolved.replace_span,
+            new_text,
+            raw_path,
+        )?,
+        ConfigPathOperation::Append { .. } => {
+            let write = append_write.as_ref().expect("append has a rendered write");
+            rewrite_container_text(source_text, container_span, write.span, &write.new_text)?
+        }
+        ConfigPathOperation::Delete => String::new(),
+    };
     let replace_span = set_replace_span(
         format,
         source_text,
         resolved.replace_span,
-        replacement,
+        &replacement,
         raw_path,
     )?;
-    validate_replacement_for_container(format, &resolved.container_kind, replacement, raw_path)?;
-    let updated_container_text = rewrite_container_text(
-        source_text,
-        resolved.container_span,
-        replace_span,
-        replacement,
-    )?;
-    let updated_source = rewrite_full_source_text(
-        source_text,
-        resolved.container_span,
-        &updated_container_text,
-    )?;
+    validate_replacement_for_container(format, container_kind, &replacement, raw_path)?;
+    let updated_container_text =
+        rewrite_container_text(source_text, container_span, replace_span, &replacement)?;
+    let updated_source =
+        rewrite_full_source_text(source_text, container_span, &updated_container_text)?;
     validate_rendered_config_document(format, source_text, &updated_source)?;
 
-    let target = TransformTarget::node(
-        container_handle.identity,
-        container_handle.kind,
-        Some(container_handle.span),
-        container_handle.expected_old_hash,
-    );
-
-    Ok(EditOperation::try_new(
-        target,
-        OpKind::Replace {
-            new_text: updated_container_text,
-        },
-    )?)
+    let write = append_write.unwrap_or(ConfigWrite {
+        span: replace_span,
+        new_text: replacement,
+    });
+    Ok(ConfigEffect::syntax(resolved.container, write))
 }
 
 fn set_replace_span(
@@ -447,9 +545,8 @@ fn contains_yaml_plain_mapping_indicator(text: &str) -> bool {
 }
 
 fn resolve_config_path_set_with_create_missing(
-    file: &Path,
     request: CreateMissingSetRequest<'_>,
-) -> Result<EditOperation, IdenteditError> {
+) -> Result<ConfigEffect, IdenteditError> {
     if matches!(request.format, ConfigFormat::Yaml) {
         validate_yaml_create_missing_safety(
             request.tree,
@@ -465,12 +562,11 @@ fn resolve_config_path_set_with_create_missing(
                 request.raw_path,
                 request.new_text,
             )?;
-            return Ok(EditOperation::try_new(
-                TransformTarget::FileEnd {
-                    expected_file_hash: hash_bytes(request.source),
-                },
-                OpKind::Insert { new_text },
-            )?);
+            return Ok(ConfigEffect::boundary(
+                ConfigBoundary::End,
+                request.source.len(),
+                new_text,
+            ));
         }
     }
     let updated_root_text = match request.format {
@@ -522,17 +618,11 @@ fn resolve_config_path_set_with_create_missing(
     if matches!(request.format, ConfigFormat::Toml)
         && toml_effectively_empty_source(request.source_text)
     {
-        return Ok(EditOperation::try_new(
-            TransformTarget::FileEnd {
-                expected_file_hash: hash_bytes(request.source),
-            },
-            OpKind::Insert {
-                new_text: insertion_text_after_existing_empty_source(
-                    request.source_text,
-                    updated_root_text,
-                ),
-            },
-        )?);
+        return Ok(ConfigEffect::boundary(
+            ConfigBoundary::End,
+            request.source.len(),
+            insertion_text_after_existing_empty_source(request.source_text, updated_root_text),
+        ));
     }
 
     let root_node = match request.format {
@@ -556,39 +646,27 @@ fn resolve_config_path_set_with_create_missing(
     };
 
     let root_span = span_from_node(root_node);
-    let root_kind = root_node.kind().to_string();
     if matches!(request.format, ConfigFormat::Toml) && root_span.start == root_span.end {
-        return Ok(EditOperation::try_new(
-            TransformTarget::FileEnd {
-                expected_file_hash: hash_bytes(request.source),
-            },
-            OpKind::Insert {
-                new_text: updated_root_text,
-            },
-        )?);
+        return Ok(ConfigEffect::boundary(
+            ConfigBoundary::End,
+            request.source.len(),
+            updated_root_text,
+        ));
     }
 
-    let handles = parse_handles_for_source(file, request.source)?;
-    let container_handle = find_handle_for_span(file, &handles, root_span, &root_kind)?;
     let replacement_text = replacement_text_for_root_span(
         request.format,
         request.source_text,
         root_span,
         updated_root_text,
     )?;
-    let target = TransformTarget::node(
-        container_handle.identity,
-        container_handle.kind,
-        Some(container_handle.span),
-        container_handle.expected_old_hash,
-    );
-
-    Ok(EditOperation::try_new(
-        target,
-        OpKind::Replace {
+    Ok(ConfigEffect::syntax(
+        root_node,
+        ConfigWrite {
+            span: root_span,
             new_text: replacement_text,
         },
-    )?)
+    ))
 }
 
 fn insertion_text_after_existing_empty_source(

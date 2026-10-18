@@ -104,12 +104,7 @@ pub(crate) fn validate_change_conflicts_with_indices(
     for window in effects.windows(2) {
         let first = &window[0];
         let second = &window[1];
-        let first_insert = first.span.start == first.span.end;
-        let second_insert = second.span.start == second.span.end;
-
-        if first.span.end > second.span.start
-            || (first.span.end == second.span.start && (first_insert || second_insert))
-        {
+        if write_spans_conflict(first.span, second.span) {
             return Err(ChangeConflict {
                 operation_indices: [first.operation_index, second.operation_index],
                 error: IdenteditError::InvalidRequest {
@@ -125,8 +120,49 @@ pub(crate) fn validate_change_conflicts_with_indices(
     Ok(())
 }
 
+pub(crate) fn write_spans_conflict(first: Span, second: Span) -> bool {
+    let (first, second) = if (first.start, first.end) <= (second.start, second.end) {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let first_insert = first.start == first.end;
+    let second_insert = second.start == second.end;
+
+    first.end > second.start || (first.end == second.start && (first_insert || second_insert))
+}
+
 #[derive(Debug, Clone, Copy)]
 struct EffectSpan {
     operation_index: usize,
     span: Span,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_conflicts_preserve_point_and_endpoint_semantics_in_both_orders() {
+        for (first, second, conflict) in [
+            ((0, 2), (2, 4), false),
+            ((0, 2), (1, 4), true),
+            ((0, 2), (0, 0), true),
+            ((0, 2), (1, 1), true),
+            ((0, 2), (2, 2), true),
+            ((0, 2), (3, 3), false),
+            ((2, 2), (2, 2), true),
+        ] {
+            let first = Span {
+                start: first.0,
+                end: first.1,
+            };
+            let second = Span {
+                start: second.0,
+                end: second.1,
+            };
+            assert_eq!(write_spans_conflict(first, second), conflict);
+            assert_eq!(write_spans_conflict(second, first), conflict);
+        }
+    }
 }

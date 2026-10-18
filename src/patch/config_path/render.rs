@@ -1,6 +1,8 @@
 use crate::error::IdenteditError;
 use crate::handle::Span;
 
+use super::composition::ConfigWrite;
+
 pub(super) fn parse_toml_value_fragment(fragment: &str) -> Result<toml::Value, IdenteditError> {
     let wrapped = format!("__identedit_tmp__ = {fragment}");
     let mut table: toml::Table =
@@ -34,13 +36,13 @@ pub(super) fn array_index_out_of_bounds_error(
     }
 }
 
-pub(super) fn render_append_array_replacement(
+pub(super) fn render_append_array_write(
     source_text: &str,
     container_span: Span,
     container_kind: &str,
     new_text: &str,
     raw_path: &str,
-) -> Result<String, IdenteditError> {
+) -> Result<ConfigWrite, IdenteditError> {
     let array_text = source_text
         .get(container_span.start..container_span.end)
         .ok_or_else(|| IdenteditError::InvalidRequest {
@@ -51,14 +53,18 @@ pub(super) fn render_append_array_replacement(
         })?;
 
     match container_kind {
-        "array" | "flow_sequence" => {
-            append_to_comma_delimited_array_text(array_text, new_text, raw_path)
-        }
+        "array" | "flow_sequence" => append_to_comma_delimited_array_text(
+            array_text,
+            container_span.start,
+            new_text,
+            raw_path,
+        ),
         "block_sequence" => append_to_block_sequence_text(
             array_text,
             new_text,
             raw_path,
             &indentation_before_offset(source_text, container_span.start),
+            container_span.end,
         ),
         _ => Err(append_requires_array_error(raw_path, container_kind)),
     }
@@ -74,9 +80,10 @@ pub(super) fn append_requires_array_error(raw_path: &str, actual_kind: &str) -> 
 
 fn append_to_comma_delimited_array_text(
     array_text: &str,
+    offset: usize,
     new_text: &str,
     raw_path: &str,
-) -> Result<String, IdenteditError> {
+) -> Result<ConfigWrite, IdenteditError> {
     let open = array_text
         .find('[')
         .ok_or_else(|| append_requires_array_error(raw_path, "unknown"))?;
@@ -88,16 +95,19 @@ fn append_to_comma_delimited_array_text(
     }
 
     let inner = &array_text[open + 1..close];
-    let mut result = array_text.to_string();
-
     if inner.trim().is_empty() {
-        result.replace_range(open + 1..close, new_text);
-        return Ok(result);
+        return Ok(ConfigWrite {
+            span: Span {
+                start: offset + open + 1,
+                end: offset + close,
+            },
+            new_text: new_text.to_string(),
+        });
     }
 
     let mut insert_at = close;
     while insert_at > open + 1 {
-        let byte = result.as_bytes()[insert_at - 1];
+        let byte = array_text.as_bytes()[insert_at - 1];
         if byte == b' ' || byte == b'\t' || byte == b'\n' || byte == b'\r' {
             insert_at -= 1;
         } else {
@@ -112,8 +122,13 @@ fn append_to_comma_delimited_array_text(
     } else {
         format!(", {new_text}")
     };
-    result.insert_str(insert_at, &insertion);
-    Ok(result)
+    Ok(ConfigWrite {
+        span: Span {
+            start: offset + insert_at,
+            end: offset + insert_at,
+        },
+        new_text: insertion,
+    })
 }
 
 fn append_to_block_sequence_text(
@@ -121,7 +136,8 @@ fn append_to_block_sequence_text(
     new_text: &str,
     raw_path: &str,
     base_indent: &str,
-) -> Result<String, IdenteditError> {
+    offset: usize,
+) -> Result<ConfigWrite, IdenteditError> {
     let indent = first_block_sequence_item_indent(sequence_text)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| base_indent.to_string());
@@ -133,7 +149,13 @@ fn append_to_block_sequence_text(
     } else {
         line_ending_literal(sequence_text)
     };
-    Ok(format!("{sequence_text}{separator}{indent}- {new_text}"))
+    Ok(ConfigWrite {
+        span: Span {
+            start: offset,
+            end: offset,
+        },
+        new_text: format!("{separator}{indent}- {new_text}"),
+    })
 }
 
 fn first_block_sequence_item_indent(sequence_text: &str) -> Option<String> {

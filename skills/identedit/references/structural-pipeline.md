@@ -145,7 +145,7 @@ For example, one operation can compile a raw regex replacement without copying a
 }
 ```
 
-It must select exactly one node and match at least once. Edit compiles ordinary guards and replacement text; apply never re-runs the selector or regex. These query targets are not accepted by `patch --json`. See [edit JSON intents](protocol.md#edit-json-intents) for reread/non-sequential semantics, unsupported config-path input and errors with original request pointers.
+It must select exactly one node and match at least once. Edit compiles ordinary guards and replacement text; apply never re-runs the selector or regex. These query targets are not accepted by `patch --json`. See [edit JSON intents](protocol.md#edit-json-intents) for reread/non-sequential semantics and errors with original request pointers, and [config intents](config-path-patching.md#batch-edit-intents) for batching settings.
 
 ## Handle Ref Mode
 

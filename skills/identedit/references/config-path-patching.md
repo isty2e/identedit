@@ -50,6 +50,38 @@ Append:
 }
 ```
 
+## Batch Edit Intents
+
+Use `edit --json` to plan several config edits without writing:
+
+```json
+{
+  "command": "edit",
+  "file": "example.json",
+  "operations": [
+    {
+      "target": {"type": "config_path", "path": "config.retries"},
+      "op": {"type": "set", "new_text": "10"}
+    },
+    {
+      "target": {"type": "config_path", "path": "config.timeout"},
+      "op": {"type": "set", "new_text": "30"}
+    }
+  ]
+}
+```
+
+The same target and operation forms work in the `files` envelope and may be mixed with ordinary node or line operations. Config targets accept `path`, optional `expected_file_hash` and YAML `document_index`; `set` accepts optional `create_missing`. Unknown or duplicate fields and mixed node guard fields, including nulls, are rejected. Config paths are not structural-move destinations.
+
+- Every path and array index addresses the original config source, not earlier proposed output. Deleting an earlier element does not renumber later requests. A path created by one request cannot be selected by another in the same batch.
+- Disjoint writes within overlapping guard scopes are combined under the outermost original contributing syntax scope. Existing guard coverage is not reduced; several sibling settings can therefore share one compiled replacement.
+- Overlapping writes are rejected, including repeated sets of the same path, overlapping no-ops, shared deletion commas and shared insertion points. Two appends to one array conflict. An append can also conflict with a value edit ending at its insertion point.
+- Missing-path creation retains the existing opaque root rewrite. Two creates, or a create and another edit under that root, generally conflict even when their logical paths differ. Separate YAML document roots can remain disjoint. Use separate edit/apply cycles, recompiling each plan, when later requests need earlier results.
+- Individual format checks still apply, and a composed config result is checked again. Co-resident raw operations keep their existing rules and may conflict with the entire lowered config container, even if their smaller writes would be disjoint. No general configuration-validity guarantee is added for raw edits.
+- Compilation returns a whole plan or an error without writing. Compiled-operation and apply-receipt counts can be smaller than the input request count. Errors refer to original request positions; a final combined-format failure may identify the file rather than invent a conflicting pair.
+
+Pass the resulting changeset, not the edit request, to `apply --dry-run` and then `apply`. Each config file retains its [original full-file condition](protocol.md#file-source-preconditions), including mixed-operation files; supplied hashes are checked, never refreshed.
+
 ## Path Syntax
 
 - Bare key segments are dot-separated: `service.retries`.

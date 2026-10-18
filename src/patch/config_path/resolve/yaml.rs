@@ -18,14 +18,14 @@ use super::{
     first_non_comment_named_child, named_children, span_from_node, unique_match,
 };
 
-pub(in crate::patch::config_path) fn resolve_yaml_path(
-    tree: &Tree,
+pub(in crate::patch::config_path) fn resolve_yaml_path<'tree>(
+    tree: &'tree Tree,
     source: &[u8],
     path_tokens: &[PathToken],
     operation: &ConfigPathOperation,
     raw_path: &str,
     document_index: Option<usize>,
-) -> Result<ResolvedContainerEdit, IdenteditError> {
+) -> Result<ResolvedContainerEdit<'tree>, IdenteditError> {
     if let Some(index) = document_index {
         let root = yaml_document_root_value_at(tree.root_node(), index)?;
         return resolve_yaml_path_from_root(root, source, path_tokens, operation, raw_path);
@@ -55,13 +55,13 @@ pub(in crate::patch::config_path) fn resolve_yaml_path(
     }
 }
 
-fn resolve_yaml_path_from_root(
-    mut current: Node<'_>,
+fn resolve_yaml_path_from_root<'tree>(
+    mut current: Node<'tree>,
     source: &[u8],
     path_tokens: &[PathToken],
     operation: &ConfigPathOperation,
     raw_path: &str,
-) -> Result<ResolvedContainerEdit, IdenteditError> {
+) -> Result<ResolvedContainerEdit<'tree>, IdenteditError> {
     for (index, token) in path_tokens.iter().enumerate() {
         let last = index + 1 == path_tokens.len();
         match token {
@@ -107,8 +107,7 @@ fn resolve_yaml_path_from_root(
                 if last {
                     return Ok(match operation {
                         ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
-                            container_span: span_from_node(current),
-                            container_kind: current.kind().to_string(),
+                            container: current,
                             replace_span: span_from_node(value_node),
                         },
                         ConfigPathOperation::Append { .. } => {
@@ -121,14 +120,12 @@ fn resolve_yaml_path_from_root(
                                 ));
                             }
                             ResolvedContainerEdit {
-                                container_span: span_from_node(value_node),
-                                container_kind: value_node.kind().to_string(),
+                                container: value_node,
                                 replace_span: span_from_node(value_node),
                             }
                         }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
-                            container_span: span_from_node(current),
-                            container_kind: current.kind().to_string(),
+                            container: current,
                             replace_span: adjusted_delete_span_for_container(
                                 source,
                                 span_from_node(current),
@@ -155,8 +152,7 @@ fn resolve_yaml_path_from_root(
                     if last {
                         return Ok(match operation {
                             ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
-                                container_span: span_from_node(current),
-                                container_kind: current.kind().to_string(),
+                                container: current,
                                 replace_span: span_from_node(value_node),
                             },
                             ConfigPathOperation::Append { .. } => {
@@ -169,14 +165,12 @@ fn resolve_yaml_path_from_root(
                                     ));
                                 }
                                 ResolvedContainerEdit {
-                                    container_span: span_from_node(value_node),
-                                    container_kind: value_node.kind().to_string(),
+                                    container: value_node,
                                     replace_span: span_from_node(value_node),
                                 }
                             }
                             ConfigPathOperation::Delete => ResolvedContainerEdit {
-                                container_span: span_from_node(current),
-                                container_kind: current.kind().to_string(),
+                                container: current,
                                 replace_span: adjusted_delete_span_for_container(
                                     source,
                                     span_from_node(current),
@@ -197,8 +191,7 @@ fn resolve_yaml_path_from_root(
                     if last {
                         return Ok(match operation {
                             ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
-                                container_span: span_from_node(current),
-                                container_kind: current.kind().to_string(),
+                                container: current,
                                 replace_span: span_from_node(next),
                             },
                             ConfigPathOperation::Append { .. } => {
@@ -207,14 +200,12 @@ fn resolve_yaml_path_from_root(
                                     return Err(append_requires_array_error(raw_path, next.kind()));
                                 }
                                 ResolvedContainerEdit {
-                                    container_span: span_from_node(next),
-                                    container_kind: next.kind().to_string(),
+                                    container: next,
                                     replace_span: span_from_node(next),
                                 }
                             }
                             ConfigPathOperation::Delete => ResolvedContainerEdit {
-                                container_span: span_from_node(current),
-                                container_kind: current.kind().to_string(),
+                                container: current,
                                 replace_span: adjusted_delete_span_for_container(
                                     source,
                                     span_from_node(current),
