@@ -86,15 +86,18 @@ fn validate_file_merge_constraints(changeset: &FileChange) -> Result<(), Idented
         });
     }
 
+    let file_hashes = operations
+        .iter()
+        .filter_map(|operation| match operation.target() {
+            TransformTarget::File { expected_file_hash }
+            | TransformTarget::FileStart { expected_file_hash }
+            | TransformTarget::FileEnd { expected_file_hash } => Some(expected_file_hash.clone()),
+            TransformTarget::Node { .. } | TransformTarget::Line { .. } => None,
+        });
+    changeset.conjoin_file_hash(file_hashes)?;
+
     let mut spans = Vec::<SpanOp>::new();
     for (index, operation) in operations.iter().enumerate() {
-        if let TransformTarget::File { expected_file_hash }
-        | TransformTarget::FileStart { expected_file_hash }
-        | TransformTarget::FileEnd { expected_file_hash } = operation.target()
-        {
-            changeset.conjoin_file_hash(Some(expected_file_hash.clone()))?;
-        }
-
         if matches!(operation.op(), OpKind::Move { .. }) {
             continue;
         }

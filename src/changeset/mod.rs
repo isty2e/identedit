@@ -105,22 +105,27 @@ impl FileChange {
 
     pub(crate) fn conjoin_file_hash(
         &self,
-        expected_hash: Option<ContentHash>,
+        expected_hashes: impl IntoIterator<Item = ContentHash>,
     ) -> Result<Option<ContentHash>, crate::error::IdenteditError> {
-        match (&self.expected_file_hash, expected_hash) {
-            (Some(current), Some(incoming)) if current != &incoming => {
-                Err(crate::error::IdenteditError::InvalidRequest {
-                    message: format!(
-                        "Conflicting file hash preconditions for '{}': {} and {}",
-                        self.file.display(),
-                        current,
-                        incoming,
-                    ),
-                })
+        let mut conjoined = self.expected_file_hash.clone();
+        for incoming in expected_hashes {
+            match &conjoined {
+                Some(current) if current != &incoming => {
+                    return Err(crate::error::IdenteditError::InvalidRequest {
+                        message: format!(
+                            "Conflicting file hash preconditions for '{}': {} and {}",
+                            self.file.display(),
+                            current,
+                            incoming,
+                        ),
+                    });
+                }
+                None => conjoined = Some(incoming),
+                Some(_) => {}
             }
-            (None, incoming) => Ok(incoming),
-            (Some(current), _) => Ok(Some(current.clone())),
         }
+
+        Ok(conjoined)
     }
 }
 
@@ -559,6 +564,35 @@ mod tests {
     };
     use crate::handle::Span;
     use crate::hash::{ContentHash, HASH_HEX_LEN, hash_text};
+
+    #[test]
+    fn file_hash_conjunction_checks_late_conditions_without_changing_the_file_condition() {
+        let expected = hash_text("same source");
+        let conflicting = hash_text("other source");
+        for condition in [None, Some(expected.clone())] {
+            let change = super::FileChange {
+                file: PathBuf::from("not-read-from-disk.txt"),
+                expected_file_hash: condition.clone(),
+                operations: vec![],
+            };
+            assert_eq!(change.conjoin_file_hash([]).unwrap(), condition);
+            assert_eq!(
+                change
+                    .conjoin_file_hash([expected.clone(), expected.clone()])
+                    .unwrap(),
+                Some(expected.clone())
+            );
+
+            let error = change
+                .conjoin_file_hash([expected.clone(), expected.clone(), conflicting.clone()])
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                crate::error::IdenteditError::InvalidRequest { .. }
+            ));
+            assert_eq!(change.expected_file_hash, condition);
+        }
+    }
 
     #[test]
     fn multi_file_changeset_defaults_transaction_mode_to_all_or_nothing() {

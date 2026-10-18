@@ -434,6 +434,100 @@ fn merge_checks_file_conditions_against_file_boundary_targets() {
 }
 
 #[test]
+fn merge_rejects_conflicting_boundary_hashes_without_a_file_condition() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let original = "{\"value\":1}\n";
+    let changed = "{\"value\":2}\n";
+    std::fs::write(&file, original).unwrap();
+    let start = successful_json(common::run_identedit(&[
+        "edit",
+        file.to_str().unwrap(),
+        "--at",
+        "file-start",
+        "--insert",
+        "\n",
+    ]));
+    std::fs::write(&file, changed).unwrap();
+    let end = successful_json(common::run_identedit(&[
+        "edit",
+        file.to_str().unwrap(),
+        "--at",
+        "file-end",
+        "--insert",
+        "\n",
+    ]));
+    let mut combined = start.clone();
+    combined["files"][0]["operations"]
+        .as_array_mut()
+        .unwrap()
+        .extend(end["files"][0]["operations"].as_array().unwrap().clone());
+    let repeated_entries = json!({"files":[start["files"][0], end["files"][0]]});
+
+    for plans in [
+        vec![start.clone(), end.clone()],
+        vec![end, start],
+        vec![combined],
+        vec![repeated_entries],
+    ] {
+        let output = merge(directory.path(), &plans);
+        assert!(
+            !output.status.success(),
+            "merge must reject contradictory source revisions"
+        );
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["type"], "invalid_request");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+    }
+}
+
+#[test]
+fn merge_preserves_consistent_raw_boundary_plans_without_promoting_file_conditions() {
+    let directory = TempDir::new().unwrap();
+    let file = directory.path().join("settings.json");
+    let source = "{\"value\":1}\n";
+    std::fs::write(&file, source).unwrap();
+    let plans = ["file-start", "file-end"].map(|boundary| {
+        successful_json(common::run_identedit(&[
+            "edit",
+            file.to_str().unwrap(),
+            "--at",
+            boundary,
+            "--insert",
+            "\n",
+        ]))
+    });
+
+    for ordered in [&plans, &[plans[1].clone(), plans[0].clone()]] {
+        let mut expected_entry = ordered[0]["files"][0].clone();
+        expected_entry["operations"].as_array_mut().unwrap().extend(
+            ordered[1]["files"][0]["operations"]
+                .as_array()
+                .unwrap()
+                .clone(),
+        );
+        let merged = successful_json(merge(directory.path(), ordered));
+        assert_eq!(merged["files"][0], expected_entry);
+        successful_json(apply(&merged, &["--dry-run"]));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    }
+
+    let changed = "{\"value\":2}\n";
+    std::fs::write(&file, changed).unwrap();
+    let merged = successful_json(merge(directory.path(), &plans));
+    assert_precondition_failure(apply(&merged, &["--dry-run"]));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+
+    std::fs::write(&file, source).unwrap();
+    let response = successful_json(apply(&merged, &[]));
+    assert_eq!(response["summary"]["operations_applied"], 2);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        format!("\n{source}\n")
+    );
+}
+
+#[test]
 fn guarded_empty_entries_check_arbitrary_bytes_without_parsing_or_writing() {
     use std::fs::FileTimes;
     use std::time::{Duration, UNIX_EPOCH};
