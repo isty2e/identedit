@@ -417,3 +417,81 @@ fn assert_external_round_trip(
         );
     }
 }
+
+#[test]
+#[ignore = "requires an external patch executable; CI runs this explicitly"]
+fn external_patch_replays_apply_preview_and_committed_diff() {
+    use serde_json::{Value, json};
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let root = tempfile::tempdir().unwrap();
+    let originals = [
+        ("a file.py", "def first():\r\n    return 1\r\n"),
+        ("z.py", "def first():\n    return 1"),
+    ];
+    for (name, source) in originals {
+        fs::write(root.path().join(name), source).unwrap();
+    }
+    let request = json!({"command":"edit","files":originals.iter().map(|(name,_)| json!({"file":name,"operations":[{"target":{"type":"symbol","name":"first"},"op":{"type":"replace","new_text":"def first():\n    return 9"}}]})).collect::<Vec<_>>()});
+    let execute = |args: &[&str], input: &str| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_identedit"))
+            .current_dir(root.path())
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let plan = execute(&["edit", "--json"], &request.to_string());
+    let preview = execute(&["apply", "--dry-run", "--diff", "--color", "never"], &plan);
+    let committed: Value = serde_json::from_str(&execute(&["apply"], &plan)).unwrap();
+    assert_eq!(committed["diff"]["text"], preview);
+    let expected: Vec<_> = originals
+        .iter()
+        .map(|(name, _)| fs::read(root.path().join(name)).unwrap())
+        .collect();
+    for (name, source) in originals {
+        fs::write(root.path().join(name), source).unwrap();
+    }
+    let tool = std::env::var_os("IDENTEDIT_TEST_PATCH").unwrap_or_else(|| "patch".into());
+    let mut child = Command::new(tool)
+        .current_dir(root.path())
+        .args(["-p0", "--batch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(preview.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for ((name, _), expected) in originals.iter().zip(expected) {
+        assert_eq!(fs::read(root.path().join(name)).unwrap(), expected);
+    }
+}

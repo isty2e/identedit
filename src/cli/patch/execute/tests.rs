@@ -110,11 +110,12 @@ fn node_patch_routes_share_source_work_but_always_validate_the_result() {
 
     for scoped_regex in [false, true] {
         for execution in [
-            ApplyBackedExecution::json(true, false),
-            ApplyBackedExecution::json(false, false),
+            ApplyBackedExecution::json(true, false, true),
+            ApplyBackedExecution::json(false, false, true),
             ApplyBackedExecution {
                 dry_run: true,
                 verbose: false,
+                include_diff: true,
                 output: PatchOutputMode::Diff {
                     color: ColorMode::Never,
                 },
@@ -183,7 +184,7 @@ fn target_to_build_changes_reparse_instead_of_applying_a_stale_observation() {
             resolved.file,
             resolved.operation,
             None,
-            ApplyBackedExecution::json(false, false),
+            ApplyBackedExecution::json(false, false, true),
             None,
             &context,
         );
@@ -225,7 +226,7 @@ fn target_to_build_invalid_source_does_not_hide_behind_a_successful_observation(
             resolved.file,
             resolved.operation,
             None,
-            ApplyBackedExecution::json(false, false),
+            ApplyBackedExecution::json(false, false, true),
             None,
             &context,
         );

@@ -1,9 +1,47 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
+use clap::ValueEnum;
+use serde::Serialize;
 use similar::{Algorithm, ChangeTag, DiffOp, capture_diff, group_diff_ops};
 
-use super::ColorMode;
+use crate::apply::{CommittedChanges, FileMoveChange};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+pub(super) enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DiffResponse {
+    text: String,
+    file_moves: Vec<FileMoveChange>,
+}
+
+impl DiffResponse {
+    pub(super) fn from_changes(changes: CommittedChanges) -> Self {
+        Self {
+            text: changes
+                .files
+                .iter()
+                .map(|file| {
+                    render_file_diff(&file.file, &file.before, &file.after, ColorMode::Never)
+                })
+                .collect(),
+            file_moves: changes.file_moves,
+        }
+    }
+
+    pub(super) fn from_text(file: &Path, before: &str, after: &str) -> Self {
+        Self {
+            text: render_file_diff(file, before, after, ColorMode::Never),
+            file_moves: Vec::new(),
+        }
+    }
+}
 
 const RESET: &str = "\x1b[0m";
 const RED: &str = "\x1b[31m";

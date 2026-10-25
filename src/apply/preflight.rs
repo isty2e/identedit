@@ -71,12 +71,18 @@ impl PreflightFilePlan {
 
     pub(super) fn into_text_preview(self) -> Option<super::TextPreview> {
         match self {
-            Self::Text(plan) => Some(super::TextPreview {
-                file: plan.file,
-                before: plan.original_text,
-                after: plan.updated_text,
-            }),
+            Self::Text(plan) => Some(plan.into_text_preview()),
             Self::GuardOnly(_) => None,
+        }
+    }
+}
+
+impl PreflightTextPlan {
+    fn into_text_preview(self) -> super::TextPreview {
+        super::TextPreview {
+            file: self.file,
+            before: self.original_text,
+            after: self.updated_text,
         }
     }
 }
@@ -316,6 +322,7 @@ pub(super) struct CommittedEditBatch {
     pub(super) rollback_snapshots: Vec<FileRollbackSnapshot>,
     pub(super) committed_files: Vec<CommittedFileRollback>,
     pub(super) guard_plans: Vec<PreflightGuardPlan>,
+    pub(super) files: Vec<super::TextPreview>,
 }
 
 #[derive(Debug, Clone)]
@@ -441,6 +448,7 @@ where
     let mut applied = Vec::with_capacity(batch.preflight_plans.len());
     let mut committed_files = Vec::with_capacity(batch.preflight_plans.len());
     let mut guard_plans = Vec::new();
+    let mut files = Vec::new();
     let mut snapshot_index = 0;
     for plan in batch.preflight_plans {
         let index = snapshot_index;
@@ -466,8 +474,9 @@ where
             }
         };
         match committed {
-            Ok((applied_result, expected_guard)) => {
+            Ok((applied_result, expected_guard, preview)) => {
                 applied.push(applied_result);
+                files.push(preview);
                 committed_files.push(CommittedFileRollback {
                     snapshot_index: index,
                     expected_guard,
@@ -503,6 +512,7 @@ where
         rollback_snapshots,
         committed_files,
         guard_plans,
+        files,
     })
 }
 
@@ -547,7 +557,7 @@ fn commit_preflight_plan<After, Write>(
     plan: PreflightTextPlan,
     mut after_verify_hook: After,
     mut write_plan: Write,
-) -> Result<(ApplyFileResult, ApplyGuardState), AtomicWriteFailure>
+) -> Result<(ApplyFileResult, ApplyGuardState, super::TextPreview), AtomicWriteFailure>
 where
     After: FnMut() -> Result<(), IdenteditError>,
     Write: FnMut(&PreflightTextPlan) -> Result<ApplyGuardState, AtomicWriteFailure>,
@@ -564,5 +574,6 @@ where
             status: ApplyFileStatus::Applied,
         },
         expected_guard,
+        plan.into_text_preview(),
     ))
 }

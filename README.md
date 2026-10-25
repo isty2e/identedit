@@ -147,14 +147,16 @@ For every match of a structural pattern, use `ast-grep`.
 
 ```bash
 identedit edit --json < request.json > changeset.json
-identedit apply --dry-run changeset.json
+identedit apply --dry-run --diff --color never changeset.json
 identedit apply changeset.json
 ```
+
+Successful `patch` and `apply` commits include the actual change as JSON `diff: {text, file_moves}`. Use `--no-diff` to omit it, for example after inspecting the same change. Large edits can produce large responses; see the [change diff contract](skills/identedit/references/protocol.md#committed-change-diffs).
 
 ## Safety boundary
 
 - `edit` and `apply --dry-run` never modify files.
-- `patch --dry-run --diff` prints a unified diff of the validated before/after file text with three context lines, without writing. See [diff preview details](skills/identedit/references/protocol.md#text-diff-previews) for replay and newline behavior.
+- `patch --dry-run --diff` and `apply --dry-run --diff` print unified diffs of validated before/after text without writing. Whole-file renames use ordinary JSON dry-run instead. See [diff preview details](skills/identedit/references/protocol.md#text-diff-previews) for ordering, replay and newline behavior.
 - Failed-diff handoff discovers candidates but never applies them.
 - Line repair is opt-in and fails rather than choosing an ambiguous remap.
 - Node-operation files must pass a final parse by their selected syntax provider before any transaction writes, including in dry-run. Line/file-boundary-only files and fallback edits are excluded; see the [scope and limitations](skills/identedit/references/protocol.md#node-result-parsing).

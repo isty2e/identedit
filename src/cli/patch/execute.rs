@@ -15,12 +15,9 @@ use crate::patch::engine::run_resolve_verify_apply;
 use crate::patch::scoped_regex::rewrite_node_target_with_scoped_regex;
 use crate::transform::build::build_changeset_with_context;
 
-use super::super::line_patch::{
-    HashlinePatchExecution, HashlinePatchResponse, execute_hashline_patch,
-    execute_hashline_patch_with_preview,
-};
-use super::diff::render_file_diff;
+use super::super::line_patch::{HashlinePatchExecution, execute_hashline_patch_with_preview};
 use super::{ColorMode, PatchArgs, PatchCommandOutput};
+use crate::cli::diff::{DiffResponse, render_file_diff};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PatchExecution {
@@ -42,6 +39,7 @@ pub struct ApplyBackedExecution {
     pub dry_run: bool,
     pub verbose: bool,
     output: PatchOutputMode,
+    pub(super) include_diff: bool,
 }
 
 impl ApplyBackedExecution {
@@ -50,14 +48,16 @@ impl ApplyBackedExecution {
             dry_run: args.dry_run,
             verbose: args.verbose,
             output: PatchOutputMode::from_args(args),
+            include_diff: !args.no_diff,
         }
     }
 
-    pub(super) fn json(dry_run: bool, verbose: bool) -> Self {
+    pub(super) fn json(dry_run: bool, verbose: bool, include_diff: bool) -> Self {
         Self {
             dry_run,
             verbose,
             output: PatchOutputMode::Json,
+            include_diff,
         }
     }
 }
@@ -67,6 +67,7 @@ pub struct LineExecution {
     pub dry_run: bool,
     pub auto_repair: bool,
     output: PatchOutputMode,
+    include_diff: bool,
 }
 
 impl LineExecution {
@@ -75,6 +76,7 @@ impl LineExecution {
             dry_run: args.dry_run,
             auto_repair: args.auto_repair,
             output: PatchOutputMode::from_args(args),
+            include_diff: !args.no_diff,
         }
     }
 }
@@ -117,13 +119,14 @@ pub(super) fn execute_flag_patch_request(
         ),
         PreparedEditIntent::Line(intent) => match execution.line.output {
             PatchOutputMode::Json => {
-                let response = execute_hashline_patch(
+                let response = execute_hashline_patch_with_preview(
                     intent.file,
                     vec![intent.edit],
                     execution.line.auto_repair,
                     execution.line.dry_run,
                 )?;
-                serialize_line_patch_response(response).map(PatchCommandOutput::Json)
+                serialize_line_patch_response(response, execution.line.include_diff)
+                    .map(PatchCommandOutput::Json)
             }
             PatchOutputMode::Diff { color } => {
                 let execution = execute_hashline_patch_with_preview(
@@ -208,8 +211,13 @@ fn run_patch_edit_operation(
                 } else {
                     apply_multi_file_changeset_with_context(&changeset, context)
                 }?;
-                serialize_node_patch_response(response, execution.verbose, regex_replacements)
-                    .map(PatchCommandOutput::Json)
+                serialize_node_patch_response(
+                    response,
+                    execution.verbose,
+                    execution.include_diff,
+                    regex_replacements,
+                )
+                .map(PatchCommandOutput::Json)
             }
         },
     )
@@ -219,14 +227,13 @@ pub(super) fn run_patch_edit_operation_json(
     file: PathBuf,
     operation: EditOperation,
     expected_file_hash: Option<crate::hash::ContentHash>,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     let output = run_patch_edit_operation(
         file,
         operation,
         expected_file_hash,
-        ApplyBackedExecution::json(dry_run, verbose),
+        execution,
         None,
         &ExecutionContext::new(),
     )?;
@@ -247,15 +254,14 @@ pub(super) fn run_patch_node_operation_json(
     file: PathBuf,
     target: TransformTarget,
     op: OpKind,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
     regex_replacements: Option<usize>,
 ) -> Result<Value, IdenteditError> {
     let output = run_patch_node_operation(
         file,
         target,
         op,
-        ApplyBackedExecution::json(dry_run, verbose),
+        execution,
         regex_replacements,
         &ExecutionContext::new(),
     )?;
@@ -267,8 +273,7 @@ pub(super) fn run_patch_scoped_regex_node_operation(
     target: TransformTarget,
     pattern: String,
     replacement: String,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     let context = ExecutionContext::new();
     let rewritten =
@@ -279,7 +284,7 @@ pub(super) fn run_patch_scoped_regex_node_operation(
         OpKind::Replace {
             new_text: rewritten.new_text,
         },
-        ApplyBackedExecution::json(dry_run, verbose),
+        execution,
         Some(rewritten.replacements),
         &context,
     )?;
@@ -289,9 +294,10 @@ pub(super) fn run_patch_scoped_regex_node_operation(
 fn serialize_node_patch_response(
     response: ApplyResponse,
     verbose: bool,
+    include_diff: bool,
     regex_replacements: Option<usize>,
 ) -> Result<Value, IdenteditError> {
-    let mut value = serde_json::to_value(shape_apply_response(response, verbose))
+    let mut value = serde_json::to_value(shape_apply_response(response, verbose, include_diff))
         .map_err(|source| IdenteditError::ResponseSerialization { source })?;
     if let Some(replacements) = regex_replacements
         && let Some(object) = value.as_object_mut()
@@ -305,10 +311,25 @@ fn serialize_node_patch_response(
 }
 
 pub(super) fn serialize_line_patch_response(
-    response: HashlinePatchResponse,
+    execution: HashlinePatchExecution,
+    include_diff: bool,
 ) -> Result<Value, IdenteditError> {
-    serde_json::to_value(response)
-        .map_err(|source| IdenteditError::ResponseSerialization { source })
+    let diff = if include_diff && !execution.response.dry_run {
+        Some(DiffResponse::from_text(
+            &execution.response.file,
+            &execution.source,
+            &execution.applied_content,
+        ))
+    } else {
+        None
+    };
+    let mut value = serde_json::to_value(execution.response)
+        .map_err(|source| IdenteditError::ResponseSerialization { source })?;
+    if let Some(diff) = diff {
+        value["diff"] = serde_json::to_value(diff)
+            .map_err(|source| IdenteditError::ResponseSerialization { source })?;
+    }
+    Ok(value)
 }
 
 fn render_line_patch_diff(execution: HashlinePatchExecution, color: ColorMode) -> String {

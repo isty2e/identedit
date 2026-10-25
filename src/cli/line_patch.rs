@@ -48,15 +48,6 @@ pub(crate) struct HashlinePatchExecution {
     pub applied_content: String,
 }
 
-pub(crate) fn execute_hashline_patch(
-    file: PathBuf,
-    edits: Vec<HashlineEdit>,
-    auto_repair: bool,
-    dry_run: bool,
-) -> Result<HashlinePatchResponse, IdenteditError> {
-    Ok(execute_hashline_patch_with_preview(file, edits, auto_repair, dry_run)?.response)
-}
-
 pub(crate) fn execute_hashline_patch_with_preview(
     file: PathBuf,
     edits: Vec<HashlineEdit>,
