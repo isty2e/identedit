@@ -22,7 +22,8 @@ Run `identedit <command> --help` for the complete flag surface. Identedit does n
 - Invalid subcommands, flags, and argument shapes are reported by the argument parser on stderr and exit non-zero without a JSON envelope.
 - `read` defaults to human-readable text in AST and line modes. Add `--json` for structured output.
 - `edit`, `apply`, and `patch` emit JSON by default.
-- `patch --dry-run --diff` emits unified diff text.
+- `patch --dry-run --diff` and `apply --dry-run --diff` emit unified diff text.
+- Successful `patch`/`apply` commits include a [change diff](#committed-change-diffs) in JSON by default; `--no-diff` omits it.
 - Failed-diff handoff emits JSON and never writes files.
 
 Consumers should parse documented JSON output rather than grep its rendered text. Capture stderr separately when command construction itself may be invalid.
@@ -131,17 +132,31 @@ Both fields default to the empty string. Empty fields are omitted from compiled 
 
 The same composition applies to same-file and cross-file moves. Same-file changesets retain nonempty affixes on the move operation; their preview still describes the source deletion. Cross-file moves lower to source deletion and destination insertion, whose `new_text` and preview contain the composed text. Use an `apply` binary that understands the new fields for same-file changesets with nonempty affixes.
 
-These are raw moves with explicit surrounding text, not formatting-aware or semantically safe relocation. Reindenting the moved body, repairing an emptied source block and deciding whether comments or decorators belong to the selection remain the caller's responsibility. Affixes do not relax target compatibility, overlap checks, destination preconditions, [result parsing](#node-result-parsing), or transaction behavior. Existing target support is unchanged; cross-file moves still require node destinations. Whole-file renames do not accept these fields. Structural moves remain an `edit` -> `apply` workflow, without a `patch` JSON or unified `--diff` entry point.
+These are raw moves with explicit surrounding text, not formatting-aware or semantically safe relocation. Reindenting the moved body, repairing an emptied source block and deciding whether comments or decorators belong to the selection remain the caller's responsibility. Affixes do not relax target compatibility, overlap checks, destination preconditions, [result parsing](#node-result-parsing), or transaction behavior. Existing target support is unchanged; cross-file moves still require node destinations. Whole-file renames do not accept these fields. Structural moves remain an `edit` -> `apply` workflow, without a `patch` JSON entry point. Preview the compiled plan with `apply --dry-run --diff`.
 
 ## Text diff previews
 
-`patch --dry-run --diff` compares the validated original and proposed full-file text, not isolated node spans. It shows actual surrounding indentation, combines edits into one diff per file, includes three context lines, and merges nearby hunks. No-op edits emit no diff. The renderer does not alter the proposed bytes or JSON response format.
+`patch --dry-run --diff` and `apply --dry-run --diff` compare the validated original and proposed full-file text, not isolated node spans. They show actual surrounding indentation, combine edits into one diff per file, include three context lines, and merge nearby hunks. No-op edits emit no diff after validation. A failure emits the usual JSON error, never a partial successful diff.
+
+For `apply`, provide a plan file or raw plan on stdin; wrapped `apply --json` input also supports this output selection. Files appear in canonical absolute source-path sort order, while headers retain the plan's path spelling. `--repair` retains its existing guard rules and shows the repaired plan's validated result. Any whole-file move rejects the entire text-preview request; use ordinary `apply --dry-run` for its JSON preview instead.
+
+`--diff` requires `--dry-run`; `--color auto|always|never` requires `--diff` and defaults to terminal-based `auto`. `--verbose` does not append JSON to diff text. `--diff` and `--no-diff` cannot be combined. Patch JSON mode continues to return JSON and does not accept `--diff`.
 
 For portable replay, generate the diff using `--color never` and paths relative to the replay working directory, with no `..` components; run `patch -p0` from that same directory against the unchanged original. Identedit accepts absolute paths, but GNU patch can reject absolute or parent-traversing names in diff headers. CR bytes are preserved, including CRLF and mixed endings; missing final LF is marked with `\ No newline at end of file`. GNU patch also accepts `--binary`. Replay equivalence is to the proposed bytes, not a guarantee of valid syntax or behavior. Whole-file move previews are unsupported.
 
 Hunk coordinates count LF-delimited physical lines. Read anchors and resolved locations also recognize standalone CR as a terminator, so their line numbers can differ from hunk numbers. **Do not use hunk coordinates as edit anchors.**
 
 The renderer uses Myers alignment after trimming equal outer lines. If the unmatched inputs exceed fixed line-count or byte limits, it emits one exact trimmed replacement hunk with context. Output is never truncated and does not depend on elapsed-time deadlines; global minimality is not guaranteed. A dry-run snapshot does not reserve a later write: applying still rechecks normal preconditions.
+
+## Committed change diffs
+
+Successful `patch` and `apply` commit JSON includes `diff: {text, file_moves}` by default. `text` is a color-free unified diff of the actual pre-write and written buffers, using the same formatter as text previews; it is not reconstructed by rereading after commit. Multiple text files use preflight path order. The text is complete, without the locations/report detail caps or automatic size-based summaries. Large deletions can produce large responses.
+
+`file_moves` lists every whole-file rename as `{source, destination}`, in validated execution order with the same normalized paths as move locations. Renames are not represented as text hunks, and binary move sources are not decoded as text. Text changes and renames can coexist in a successful commit response. A successful content no-op or guard-only plan has empty `text` and `file_moves` when it contains no rename.
+
+Use CLI `--no-diff` to omit the field and skip rendering, for example when the change view is already available or an automated caller does not need it. Patch JSON also accepts `options.no_diff`; either it or the CLI flag suppresses the field. Suppression does not change guards, validation or execution. Ordinary dry-run JSON, discovery responses and errors do not contain a committed diff; a failed transaction or incomplete rollback never publishes a success diff.
+
+This view describes the tool's change, not every external change since an earlier observation or the current contents after another writer acts. It provides neither a new validity guarantee nor fresh edit anchors. Hunk coordinates count LF-delimited lines and must not be used as edit anchors. `locations` remains the bounded, pre-edit checked-target view described below; it is not a substitute for the actual text diff.
 
 ## Resolved edit locations
 
@@ -174,7 +189,7 @@ Successful edit execution and dry-run validation through `patch` or `apply` incl
 
 Locations describe checked targets, not a minimal byte diff: config edits can replace a containing object, and line edits can adjust adjacent line terminators. A no-op may still report a checked location. Use the existing `changed`, `dry_run`, or `transaction.status` fields to interpret the outcome; locations alone do not mean a file was changed. Error responses, including rollback failures, do not include success locations.
 
-Post-edit coordinates, fresh edit anchors, source snippets, and semantic validation are outside this receipt contract. The bounded receipt supports a quick location check, not a second read view; richer output is deferred until usage shows a concrete need. For edits supported by `patch`, use `patch --dry-run --diff` for full text preview; read again for current edit addresses.
+Post-edit coordinates, fresh edit anchors, full source views, and semantic validation are outside this bounded location receipt. Use committed change diffs for actual changed lines, `patch --dry-run --diff` or `apply --dry-run --diff` for proposed text changes, and read again for current edit addresses.
 
 ## Hashes and identities
 

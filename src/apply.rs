@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::path::Path;
 
-use crate::changeset::{FileChange, MultiFileChangeset, OpKind, TransactionMode};
+use crate::changeset::{FileChange, MultiFileChangeset, TransactionMode};
 use crate::error::IdenteditError;
 use crate::execution_context::ExecutionContext;
 
@@ -52,12 +52,27 @@ pub struct ApplyResponse {
     pub structure_changes: StructureChanges,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<ApplyDryRunSummary>,
+    #[serde(skip)]
+    pub(crate) committed_changes: Option<CommittedChanges>,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct TextPreview {
     pub file: std::path::PathBuf,
     pub before: String,
     pub after: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CommittedChanges {
+    pub files: Vec<TextPreview>,
+    pub file_moves: Vec<FileMoveChange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct FileMoveChange {
+    pub source: String,
+    pub destination: String,
 }
 
 pub(crate) struct DryRunPreview {
@@ -235,7 +250,7 @@ pub(crate) fn preview_multi_file_changeset_with_context(
     let edit_changesets = changeset
         .files
         .iter()
-        .filter(|changeset| !changeset_has_move(changeset))
+        .filter(|changeset| !changeset.has_file_move())
         .cloned()
         .collect::<Vec<_>>();
 
@@ -280,6 +295,7 @@ pub(crate) fn preview_multi_file_changeset_with_context(
             summary,
             transaction,
             dry_run: Some(dry_run),
+            committed_changes: None,
             locations,
             structure_changes,
         },
@@ -390,7 +406,7 @@ where
     validate_unique_changeset_files(changesets)?;
     let edit_changesets = changesets
         .iter()
-        .filter(|changeset| !changeset_has_move(changeset))
+        .filter(|changeset| !changeset.has_file_move())
         .cloned()
         .collect::<Vec<_>>();
 
@@ -409,6 +425,7 @@ where
             rollback_snapshots: Vec::new(),
             committed_files: Vec::new(),
             guard_plans: Vec::new(),
+            files: Vec::new(),
         }
     } else {
         commit_preflight_batch(commit_batch, &mut before_write_hook, &mut after_verify_hook)?
@@ -417,6 +434,7 @@ where
         mut applied,
         rollback_snapshots: edit_rollback_snapshots,
         committed_files: committed_edit_files,
+        files,
         // Retain guard-only locks through moves without making them rollback targets.
         guard_plans: _guard_plans,
     } = committed_edits;
@@ -461,14 +479,17 @@ where
         dry_run: None,
         locations,
         structure_changes,
+        committed_changes: Some(CommittedChanges {
+            files,
+            file_moves: move_plans
+                .iter()
+                .map(|plan| FileMoveChange {
+                    source: plan.source.display().to_string(),
+                    destination: plan.destination.display().to_string(),
+                })
+                .collect(),
+        }),
     })
-}
-
-fn changeset_has_move(changeset: &FileChange) -> bool {
-    changeset
-        .operations
-        .iter()
-        .any(|operation| matches!(operation.op(), OpKind::Move { .. }))
 }
 
 #[cfg(test)]

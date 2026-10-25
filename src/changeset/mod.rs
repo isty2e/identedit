@@ -84,6 +84,12 @@ pub struct FileChange {
 }
 
 impl FileChange {
+    pub(crate) fn has_file_move(&self) -> bool {
+        self.operations
+            .iter()
+            .any(|operation| operation.as_file_move().is_some())
+    }
+
     pub(crate) fn is_file_guard_only(&self) -> bool {
         self.operations.is_empty() && self.expected_file_hash.is_some()
     }

@@ -10,6 +10,7 @@ use crate::apply::{
     ApplyDryRunSummary, ApplyFailureInjection, ApplyFileResult, ApplyResponse, ApplySummary,
     ApplyTransaction, EditLocations, StructureChanges, apply_multi_file_changeset,
     apply_multi_file_changeset_with_injection, dry_run_multi_file_changeset,
+    preview_multi_file_changeset,
 };
 use crate::changeset::{FileChange, MultiFileChangeset, TransformTarget};
 use crate::error::IdenteditError;
@@ -18,12 +19,25 @@ use crate::hashline::{
     HashlineCheckError, HashlineCheckResult, HashlineMismatchStatus, LineAnchor, check_line_anchors,
 };
 
+use super::diff::{ColorMode, DiffResponse, render_file_diff};
+
 #[derive(Debug, Args)]
 pub struct ApplyArgs {
     #[arg(long, help = "Read wrapped apply request JSON from stdin")]
     pub json: bool,
     #[arg(long, help = "Validate and preview without writing files")]
     pub dry_run: bool,
+    #[arg(long, help = "Emit dry-run preview as unified diff instead of JSON")]
+    pub diff: bool,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "WHEN",
+        help = "Colorize --diff output (auto|always|never)"
+    )]
+    pub color: Option<ColorMode>,
+    #[arg(long, help = "Omit the committed-change diff from the JSON response")]
+    pub no_diff: bool,
     #[arg(
         long,
         help = "Enable line-target anchor remap/repair for deterministic stale anchors"
@@ -57,9 +71,17 @@ pub struct ApplyCliResponse {
     pub dry_run: Option<ApplyDryRunSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied: Option<Vec<ApplyFileResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<DiffResponse>,
 }
 
-pub fn run_apply(args: ApplyArgs) -> Result<ApplyCliResponse, IdenteditError> {
+pub(super) enum ApplyCommandOutput {
+    Json(Box<ApplyCliResponse>),
+    Text(String),
+}
+
+pub(super) fn run_apply(args: ApplyArgs) -> Result<ApplyCommandOutput, IdenteditError> {
+    validate_output_options(&args)?;
     let failure_injection = parse_failure_injection(args.inject_failure_after_writes)?;
     if args.dry_run && failure_injection.is_some() {
         return Err(IdenteditError::InvalidRequest {
@@ -74,15 +96,54 @@ pub fn run_apply(args: ApplyArgs) -> Result<ApplyCliResponse, IdenteditError> {
     } else {
         read_changeset_from_stdin()?
     };
+    if args.diff && changeset.files.iter().any(FileChange::has_file_move) {
+        return Err(IdenteditError::InvalidRequest {
+            message: "Unified text diff does not support whole-file moves; use apply --dry-run without --diff for the JSON preview.".to_string(),
+        });
+    }
     if args.repair {
         repair_line_targets_in_changeset(&mut changeset)?;
         refresh_line_previews_after_repair(&mut changeset)?;
     }
 
+    if args.diff {
+        let preview = preview_multi_file_changeset(&changeset)?;
+        let color = args.color.unwrap_or(ColorMode::Auto);
+        let output = preview
+            .files
+            .iter()
+            .map(|file| render_file_diff(&file.file, &file.before, &file.after, color))
+            .collect();
+        return Ok(ApplyCommandOutput::Text(output));
+    }
+
     let response =
         apply_changeset_with_optional_injection(&changeset, failure_injection, args.dry_run)?;
 
-    Ok(shape_apply_response(response, args.verbose))
+    Ok(ApplyCommandOutput::Json(Box::new(shape_apply_response(
+        response,
+        args.verbose,
+        !args.no_diff,
+    ))))
+}
+
+fn validate_output_options(args: &ApplyArgs) -> Result<(), IdenteditError> {
+    if args.diff && !args.dry_run {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--diff requires --dry-run so preview output cannot be confused with an applied edit.".to_string(),
+        });
+    }
+    if args.color.is_some() && !args.diff {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--color is only meaningful with --diff.".to_string(),
+        });
+    }
+    if args.diff && args.no_diff {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--diff cannot be combined with --no-diff.".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn run_apply_json_mode() -> Result<MultiFileChangeset, IdenteditError> {
@@ -330,7 +391,11 @@ fn hashline_precondition_failed_error(check: HashlineCheckResult) -> IdenteditEr
     }
 }
 
-pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> ApplyCliResponse {
+pub(crate) fn shape_apply_response(
+    response: ApplyResponse,
+    verbose: bool,
+    include_diff: bool,
+) -> ApplyCliResponse {
     let ApplyResponse {
         applied,
         summary,
@@ -338,6 +403,7 @@ pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> Ap
         dry_run,
         locations,
         structure_changes,
+        committed_changes,
     } = response;
 
     ApplyCliResponse {
@@ -347,6 +413,11 @@ pub(crate) fn shape_apply_response(response: ApplyResponse, verbose: bool) -> Ap
         applied: verbose.then_some(applied),
         locations,
         structure_changes,
+        diff: if include_diff {
+            committed_changes.map(DiffResponse::from_changes)
+        } else {
+            None
+        },
     }
 }
 

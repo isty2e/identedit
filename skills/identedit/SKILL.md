@@ -19,7 +19,7 @@ Use `ast-grep` for pattern-wide structural rewrites; its rewrite workflow is sep
 | Replace a function by name, without looking up an identity | `patch file --symbol Class.method --replace --text-file body.txt` | [Symbols](#function-or-method) |
 | Regex-replace raw text inside one function/class | `patch file --symbol name --scoped-regex 'old' --scoped-replacement 'new'` | [Symbols](#function-or-method) |
 | Edit an exact line/range among repeated text | `read --mode line file`, then `patch file --at "LINE:HASH" --replace 'new text'` | [Lines](#exact-line-or-range) |
-| Preview a patch without writing | Add `--dry-run --diff` | [Preview](#text-preview-and-verification) |
+| Preview a patch or saved plan | `patch --dry-run --diff` or `apply --dry-run --diff plan.json` | [Preview](#text-preview-and-verification) |
 | Supply multiline text without shell escaping | `--text-file body.txt` or `--stdin-text` | [Text input](#text-preview-and-verification) |
 | Add code at the start/end of a file | `patch file --at file-end --insert --text-file code.txt` (or `file-start`) | [Text input](#text-preview-and-verification) |
 | Set/create a config key, append an array value, or delete a key | `patch file --config-path path`: `--set-value` (add `--create-missing` to create), `--append-value`, `--delete` | [Config](#config-value) |
@@ -113,7 +113,9 @@ Apply validation takes exclusive locks and requires write access even for dry-ru
 
 Diffs show actual validated file bytes, including surrounding indentation, with three context lines. No-ops emit no diff; very large changes may use one non-minimal hunk. For portable replay, use `--color never` and paths relative to the replay directory, without `..` components. Hunk numbers count LF lines, not read anchors (which also count standalone CR); never copy hunk coordinates as anchors. Preview does not reserve a later write.
 
-For a short location check, omit `--diff`. Successful `patch`/`apply` JSON (including dry-run) reports up to 16 resolved `locations` with original byte/line coordinates, plus omitted counts. These are **pre-edit targets**, not fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [protocol](references/protocol.md#resolved-edit-locations) for field definitions.
+Successful commits include JSON `diff: {text, file_moves}` showing the actual change, not every change since an earlier read. Inspect it before attributing unexpected content to the tool. Large name-selected deletions are especially worth inspecting: the diff exposes the actual removed range. `--no-diff` omits the view, for example after you have inspected the same change; patch JSON also accepts `options.no_diff`. Diffs are not automatically truncated. See [change diffs](references/protocol.md#committed-change-diffs).
+
+Successful JSON (including dry-run) also reports up to 16 `locations` with original byte/line coordinates and omitted counts. These are **pre-edit checked targets**, not actual changed lines, fresh anchors or proof of a write; check `dry_run`, `transaction.status`, or `changed`. Read again before a later edit. Discovery-only `--from-diff` returns candidates instead. See [locations](references/protocol.md#resolved-edit-locations).
 
 Files with node-target operations must pass a final parse by their selected syntax provider before any writes, including in dry-run. The check includes other edits in the same file; line/file-boundary-only files and fallback edits are excluded. Bundled Python also rejects empty required blocks in the final result, even if they existed before the edit; repair them in the same batch or use line editing. A `parse_failure` with `error.stage: "proposed_result"` means no transaction files were changed: inspect the reported location, correct the final result, and retry with `--dry-run`. `edit` only builds a plan and does not run this result check. See [node-result parsing](references/protocol.md#node-result-parsing).
 
@@ -130,11 +132,11 @@ Use this for multiple operations/files, handle tables, or structural moves. For 
 ```bash
 identedit read --kind function_definition example.py --json
 identedit edit --json < request.json > changeset.json
-identedit apply --dry-run changeset.json
+identedit apply --dry-run --diff --color never changeset.json
 identedit apply changeset.json
 ```
 
-`edit` builds a plan without writing. `apply --dry-run` validates without writing; `apply` commits. Pass the generated changeset to `apply`, not the original edit request.
+`edit` builds a plan without writing. `apply --dry-run --diff` validates and previews text changes; omit `--diff` for JSON validation, including whole-file renames. `apply` commits. Pass the generated changeset to `apply`, not the original edit request. Multi-file diffs use canonical source-path sort order, not request order.
 
 Single-file request shape (copy identities and hashes from `read`; these values are illustrative):
 
@@ -200,7 +202,7 @@ For `invalid_request` with `error.line_check`, inspect its mismatches and remap 
 
 - `read` defaults to text; `--json` returns structured handles or line anchors.
 - `edit`, `apply`, `patch`, and runtime request errors emit JSON unless a documented mode says otherwise. Parse JSON, not grep output.
-- `patch --dry-run --diff` emits unified diff. Invalid CLI syntax uses argument-parser diagnostics on stderr, not JSON.
+- `patch --dry-run --diff` and `apply --dry-run --diff` emit unified diff. Invalid CLI syntax uses argument-parser diagnostics on stderr, not JSON.
 - Node identities/content hashes: 16 hex characters. Line anchors: `LINE:8-hex`. Both serialize lowercase and match exactly; no prefix matching.
 - Runtime error shape: `{"error":{"type":"...","message":"...","suggestion":"..."}}`; `suggestion` is optional.
 

@@ -1,22 +1,14 @@
-use clap::{Args, ValueEnum};
+use clap::Args;
 use serde_json::Value;
 
+use crate::cli::diff::ColorMode;
 use crate::cli::edit_intent::{
     EditIntentArgs, parse_flag_edit_intent, prepare_failed_diff_handoff,
 };
 use crate::error::IdenteditError;
 
-mod diff;
 mod execute;
 mod json;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "snake_case")]
-pub enum ColorMode {
-    Auto,
-    Always,
-    Never,
-}
 
 #[derive(Debug, Args)]
 pub struct PatchArgs {
@@ -40,6 +32,8 @@ pub struct PatchArgs {
         help = "Colorize --diff output (auto|always|never)"
     )]
     pub color: Option<ColorMode>,
+    #[arg(long, help = "Omit the committed-change diff from the JSON response")]
+    pub no_diff: bool,
     #[arg(long, help = "Include per-file apply results in output (flag mode)")]
     pub verbose: bool,
 }
@@ -68,7 +62,7 @@ pub(super) fn run_patch(args: PatchArgs) -> Result<PatchCommandOutput, Identedit
                         .to_string(),
             });
         }
-        return json::run_patch_json_mode(args.dry_run).map(PatchCommandOutput::Json);
+        return json::run_patch_json_mode(args.dry_run, args.no_diff).map(PatchCommandOutput::Json);
     }
 
     let intent = parse_flag_edit_intent(&args.intent)?;
@@ -83,10 +77,11 @@ fn validate_failed_diff_options(args: &PatchArgs) -> Result<(), IdenteditError> 
         || args.diff
         || args.color.is_some()
         || args.verbose
+        || args.no_diff
     {
         return Err(IdenteditError::InvalidRequest {
             message:
-                "--from-diff is already preview-only and cannot be combined with --json, --auto-repair, --dry-run, --diff, --color, or --verbose."
+                "--from-diff is already preview-only and cannot be combined with --json, --auto-repair, --dry-run, --diff, --color, --verbose, or --no-diff."
                     .to_string(),
         });
     }
@@ -94,6 +89,11 @@ fn validate_failed_diff_options(args: &PatchArgs) -> Result<(), IdenteditError> 
 }
 
 fn validate_output_options(args: &PatchArgs) -> Result<(), IdenteditError> {
+    if args.diff && args.no_diff {
+        return Err(IdenteditError::InvalidRequest {
+            message: "--diff cannot be combined with --no-diff.".to_string(),
+        });
+    }
     if args.diff && args.json {
         return Err(IdenteditError::InvalidRequest {
             message:

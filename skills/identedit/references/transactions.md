@@ -11,6 +11,9 @@ identedit edit --json < request.json > changeset.json
 # Validate without writing.
 identedit apply --dry-run changeset.json
 
+# Preview text changes without writing (whole-file renames use JSON above).
+identedit apply --dry-run --diff --color never changeset.json
+
 # Commit from plan file.
 identedit apply changeset.json
 ```
@@ -31,6 +34,8 @@ jq -n --slurpfile plan changeset.json '{
 ```
 
 `apply --json` expects a compiled changeset, i.e. the output of `identedit edit --json`, not a raw edit request.
+
+Successful commits include an uncapped `diff: {text, file_moves}` in JSON. Use `--no-diff` to omit it. The diff describes the committed buffers, not a later file read; failures and rollbacks do not return success diffs. See [change diffs](protocol.md#committed-change-diffs) for rename and coordinate semantics.
 
 If any file fails, all files are rolled back to their original state.
 

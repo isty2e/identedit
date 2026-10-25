@@ -1,11 +1,13 @@
 use clap::{Parser, Subcommand};
 
+use crate::cli::apply::ApplyCommandOutput;
 use crate::cli::edit::EditCommandOutput;
 use crate::cli::patch::PatchCommandOutput;
 use crate::cli::read::ReadCommandOutput;
 use crate::error::IdenteditError;
 
 mod apply;
+mod diff;
 mod edit;
 mod edit_build;
 mod edit_intent;
@@ -59,11 +61,10 @@ pub fn run_cli(cli: Cli) -> Result<String, IdenteditError> {
             EditCommandOutput::Changeset(response) => serialize_response(&response),
             EditCommandOutput::FailedDiff(response) => serialize_response(&response),
         },
-        Commands::Apply(args) => {
-            let response = apply::run_apply(args)?;
-            serde_json::to_string_pretty(&response)
-                .map_err(|source| IdenteditError::ResponseSerialization { source })
-        }
+        Commands::Apply(args) => match apply::run_apply(args)? {
+            ApplyCommandOutput::Text(output) => Ok(output),
+            ApplyCommandOutput::Json(response) => serialize_response(&response),
+        },
         Commands::Merge(args) => {
             let response = merge::run_merge(args)?;
             serde_json::to_string_pretty(&response)

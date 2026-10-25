@@ -15,9 +15,9 @@ use crate::patch::config_path::{
     ConfigPathOperation, MissingPathPolicy, resolve_config_path_operation,
 };
 
-use super::super::line_patch::execute_hashline_patch;
+use super::super::line_patch::execute_hashline_patch_with_preview;
 use super::execute::{
-    run_patch_edit_operation_json, run_patch_node_operation_json,
+    ApplyBackedExecution, run_patch_edit_operation_json, run_patch_node_operation_json,
     run_patch_scoped_regex_node_operation, serialize_line_patch_response,
 };
 
@@ -41,6 +41,8 @@ struct StdinPatchOptions {
     dry_run: bool,
     #[serde(default)]
     verbose: bool,
+    #[serde(default)]
+    no_diff: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,7 +122,10 @@ enum ConfigPatchOp {
     Delete,
 }
 
-pub(super) fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditError> {
+pub(super) fn run_patch_json_mode(
+    cli_dry_run: bool,
+    cli_no_diff: bool,
+) -> Result<Value, IdenteditError> {
     let mut request_body = String::new();
     std::io::stdin()
         .read_to_string(&mut request_body)
@@ -139,6 +144,11 @@ pub(super) fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditE
     }
 
     let dry_run = cli_dry_run || request.options.dry_run;
+    let execution = ApplyBackedExecution::json(
+        dry_run,
+        request.options.verbose,
+        !(cli_no_diff || request.options.no_diff),
+    );
 
     match request.target {
         StdinPatchTarget::Node {
@@ -150,22 +160,19 @@ pub(super) fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditE
             request.file,
             TransformTarget::node(identity, kind, span_hint, expected_old_hash),
             request.op,
-            dry_run,
-            request.options.verbose,
+            execution,
         ),
         StdinPatchTarget::FileStart { expected_file_hash } => run_patch_json_file(
             request.file,
             TransformTarget::FileStart { expected_file_hash },
             request.op,
-            dry_run,
-            request.options.verbose,
+            execution,
         ),
         StdinPatchTarget::FileEnd { expected_file_hash } => run_patch_json_file(
             request.file,
             TransformTarget::FileEnd { expected_file_hash },
             request.op,
-            dry_run,
-            request.options.verbose,
+            execution,
         ),
         StdinPatchTarget::Line { anchor, end_anchor } => run_patch_json_line(
             request.file,
@@ -173,7 +180,7 @@ pub(super) fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditE
             end_anchor,
             request.op,
             request.options.auto_repair,
-            dry_run,
+            execution,
         ),
         StdinPatchTarget::ConfigPath {
             path,
@@ -185,8 +192,7 @@ pub(super) fn run_patch_json_mode(cli_dry_run: bool) -> Result<Value, IdenteditE
             expected_file_hash,
             document_index,
             request.op,
-            dry_run,
-            request.options.verbose,
+            execution,
         ),
     }
 }
@@ -195,8 +201,7 @@ fn run_patch_json_file(
     file: PathBuf,
     target: TransformTarget,
     op: Value,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     let file_op = serde_json::from_value::<FilePatchOp>(op).map_err(|error| {
         IdenteditError::InvalidRequest {
@@ -209,8 +214,7 @@ fn run_patch_json_file(
             file,
             target,
             OpKind::Insert { new_text },
-            dry_run,
-            verbose,
+            execution,
             None,
         ),
     }
@@ -220,8 +224,7 @@ fn run_patch_json_node(
     file: PathBuf,
     target: TransformTarget,
     op: Value,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     let node_op = serde_json::from_value::<NodePatchOp>(op).map_err(|error| {
         IdenteditError::InvalidRequest {
@@ -234,40 +237,30 @@ fn run_patch_json_node(
             file,
             target,
             OpKind::Replace { new_text },
-            dry_run,
-            verbose,
+            execution,
             None,
         ),
         NodePatchOp::Delete => {
-            run_patch_node_operation_json(file, target, OpKind::Delete, dry_run, verbose, None)
+            run_patch_node_operation_json(file, target, OpKind::Delete, execution, None)
         }
         NodePatchOp::InsertBefore { new_text } => run_patch_node_operation_json(
             file,
             target,
             OpKind::InsertBefore { new_text },
-            dry_run,
-            verbose,
+            execution,
             None,
         ),
         NodePatchOp::InsertAfter { new_text } => run_patch_node_operation_json(
             file,
             target,
             OpKind::InsertAfter { new_text },
-            dry_run,
-            verbose,
+            execution,
             None,
         ),
         NodePatchOp::ScopedRegex {
             pattern,
             replacement,
-        } => run_patch_scoped_regex_node_operation(
-            file,
-            target,
-            pattern,
-            replacement,
-            dry_run,
-            verbose,
-        ),
+        } => run_patch_scoped_regex_node_operation(file, target, pattern, replacement, execution),
     }
 }
 
@@ -277,7 +270,7 @@ fn run_patch_json_line(
     end_anchor: Option<LineAnchor>,
     op: Value,
     auto_repair: bool,
-    dry_run: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     let line_op = serde_json::from_value::<LinePatchOp>(op).map_err(|error| {
         IdenteditError::InvalidRequest {
@@ -313,8 +306,9 @@ fn run_patch_json_line(
             },
         },
     };
-    let patch_response = execute_hashline_patch(file, vec![edit], auto_repair, dry_run)?;
-    serialize_line_patch_response(patch_response)
+    let patch_response =
+        execute_hashline_patch_with_preview(file, vec![edit], auto_repair, execution.dry_run)?;
+    serialize_line_patch_response(patch_response, execution.include_diff)
 }
 
 fn run_patch_json_config(
@@ -323,8 +317,7 @@ fn run_patch_json_config(
     expected_file_hash: Option<ContentHash>,
     document_index: Option<usize>,
     op: Value,
-    dry_run: bool,
-    verbose: bool,
+    execution: ApplyBackedExecution,
 ) -> Result<Value, IdenteditError> {
     if let Some(object) = op.as_object()
         && object
@@ -378,7 +371,6 @@ fn run_patch_json_config(
         file,
         canonical.operation,
         Some(canonical.expected_file_hash),
-        dry_run,
-        verbose,
+        execution,
     )
 }
