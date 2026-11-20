@@ -16,6 +16,26 @@ pub(super) struct Candidate {
     pub(super) name: String,
     pub(super) boundary: BoundaryKind,
 }
+
+struct PendingStart<'source> {
+    line_index: usize,
+    indent: usize,
+    kind: &'static str,
+    name: &'source str,
+}
+
+impl PendingStart<'_> {
+    fn resolve(&self, boundary_line_index: usize, boundary: BoundaryKind) -> Candidate {
+        Candidate {
+            start_line_index: self.line_index,
+            boundary_line_index,
+            kind: self.kind,
+            name: self.name.to_string(),
+            boundary,
+        }
+    }
+}
+
 pub(super) fn detect_candidates(source: &[u8], lines: &[LineInfo<'_>]) -> Vec<Candidate> {
     let mut candidates = Vec::new();
     let python_multiline_mask = build_python_multiline_mask(lines);
@@ -111,11 +131,31 @@ fn detect_multiline_python_candidates(
     });
 
     let mut candidates = Vec::new();
-    for (start_line_index, line) in lines.iter().enumerate() {
-        if python_multiline_mask[start_line_index]
-            || block_comment_mask[start_line_index]
-            || template_literal_mask[start_line_index]
+    let mut pending = Vec::<PendingStart<'_>>::new();
+    for (line_index, line) in lines.iter().enumerate() {
+        if line.is_blank
+            || python_multiline_mask[line_index]
+            || block_comment_mask[line_index]
+            || template_literal_mask[line_index]
         {
+            continue;
+        }
+
+        while pending
+            .last()
+            .is_some_and(|start| start.indent > line.indent)
+        {
+            pending.pop();
+        }
+
+        let has_same_indent_start = pending
+            .last()
+            .is_some_and(|start| start.indent == line.indent);
+        if has_same_indent_start && python_signature_terminator_regex.is_match(line.text) {
+            while let Some(start) = pending.last().filter(|start| start.indent == line.indent) {
+                candidates.push(start.resolve(line_index, BoundaryKind::Indentation));
+                pending.pop();
+            }
             continue;
         }
 
@@ -129,43 +169,15 @@ fn detect_multiline_python_candidates(
         let Some(name_match) = name else {
             continue;
         };
-        if python_signature_terminator_regex.is_match(line.text) {
+        if !has_same_indent_start && python_signature_terminator_regex.is_match(line.text) {
             continue;
         }
 
-        let base_indent = line.indent;
-        let mut boundary_line_index = None;
-
-        for (line_index, next_line) in lines.iter().enumerate().skip(start_line_index + 1) {
-            if python_multiline_mask[line_index]
-                || block_comment_mask[line_index]
-                || template_literal_mask[line_index]
-            {
-                continue;
-            }
-            if next_line.is_blank {
-                continue;
-            }
-            if next_line.indent < base_indent {
-                break;
-            }
-            if next_line.indent == base_indent
-                && python_signature_terminator_regex.is_match(next_line.text)
-            {
-                boundary_line_index = Some(line_index);
-                break;
-            }
-        }
-
-        let Some(boundary_line_index) = boundary_line_index else {
-            continue;
-        };
-        candidates.push(Candidate {
-            start_line_index,
-            boundary_line_index,
+        pending.push(PendingStart {
+            line_index,
+            indent: line.indent,
             kind,
-            name: name_match.as_str().trim().to_string(),
-            boundary: BoundaryKind::Indentation,
+            name: name_match.as_str().trim(),
         });
     }
 
@@ -194,13 +206,40 @@ fn detect_multiline_arrow_candidates(
         });
 
     let mut candidates = Vec::new();
-    for (start_line_index, line) in lines.iter().enumerate() {
-        if python_multiline_mask[start_line_index]
-            || block_comment_mask[start_line_index]
-            || template_literal_mask[start_line_index]
+    let mut pending = Vec::<PendingStart<'_>>::new();
+    for (line_index, line) in lines.iter().enumerate() {
+        if line.is_blank
+            || python_multiline_mask[line_index]
+            || block_comment_mask[line_index]
+            || template_literal_mask[line_index]
         {
             continue;
         }
+
+        while pending
+            .last()
+            .is_some_and(|start| start.indent > line.indent)
+        {
+            pending.pop();
+        }
+
+        if !pending.is_empty() {
+            if line.text.contains("=>") {
+                let boundary = if line.text.contains('{') {
+                    BoundaryKind::Braces
+                } else {
+                    BoundaryKind::HeaderLine
+                };
+                candidates.extend(
+                    pending
+                        .drain(..)
+                        .map(|start| start.resolve(line_index, boundary)),
+                );
+            } else if line.text.contains(';') {
+                pending.clear();
+            }
+        }
+
         let Some(captures) = multiline_arrow_binding_start_regex.captures(line.text) else {
             continue;
         };
@@ -212,45 +251,11 @@ fn detect_multiline_arrow_candidates(
             continue;
         };
 
-        let base_indent = line.indent;
-        let mut matched_boundary = None;
-
-        for (line_index, next_line) in lines.iter().enumerate().skip(start_line_index + 1) {
-            if python_multiline_mask[line_index]
-                || block_comment_mask[line_index]
-                || template_literal_mask[line_index]
-            {
-                continue;
-            }
-            if next_line.is_blank {
-                continue;
-            }
-            if next_line.indent < base_indent {
-                break;
-            }
-            if next_line.text.contains("=>") {
-                let boundary = if next_line.text.contains('{') {
-                    BoundaryKind::Braces
-                } else {
-                    BoundaryKind::HeaderLine
-                };
-                matched_boundary = Some((line_index, boundary));
-                break;
-            }
-            if next_line.text.contains(';') {
-                break;
-            }
-        }
-
-        let Some((boundary_line_index, boundary)) = matched_boundary else {
-            continue;
-        };
-        candidates.push(Candidate {
-            start_line_index,
-            boundary_line_index,
+        pending.push(PendingStart {
+            line_index,
+            indent: line.indent,
             kind: "function_definition",
-            name: name_match.as_str().trim().to_string(),
-            boundary,
+            name: name_match.as_str().trim(),
         });
     }
 
@@ -446,7 +451,85 @@ fn is_disallowed_control_flow_keyword(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::source_lines::collect_lines, build_commonjs_exports_top_level_mask};
+    use super::{
+        super::source_lines::collect_lines, BoundaryKind, build_commonjs_exports_top_level_mask,
+        detect_candidates,
+    };
+
+    #[test]
+    fn python_terminators_resolve_only_their_indent_and_keep_start_order() {
+        let source = concat!(
+            "def outer(\n",
+            "    def inner(\n",
+            "\n",
+            "    \"\"\"\n",
+            "):\n",
+            "    \"\"\"\n",
+            "    ):\n",
+            "class Second(\n",
+            "):\n",
+            "def unfinished(\n",
+        );
+        let lines = collect_lines(source);
+        let candidates = detect_candidates(source.as_bytes(), &lines);
+        let headers = candidates
+            .iter()
+            .filter(|candidate| candidate.start_line_index != candidate.boundary_line_index)
+            .map(|candidate| {
+                assert!(matches!(candidate.boundary, BoundaryKind::Indentation));
+                (
+                    candidate.name.as_str(),
+                    candidate.kind,
+                    candidate.boundary_line_index,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            headers,
+            [
+                ("outer", "function_definition", 8),
+                ("inner", "function_definition", 6),
+                ("Second", "class_definition", 8),
+            ]
+        );
+    }
+
+    #[test]
+    fn typed_arrow_line_resolves_shallower_starts_before_opening_its_own() {
+        let source = concat!(
+            "const outer = (\n",
+            "  const nested = (\n",
+            "const callback: (value: number) => number =\n",
+            "  (value) => value + 1;\n",
+        );
+        let lines = collect_lines(source);
+        let candidates = detect_candidates(source.as_bytes(), &lines);
+        let headers = candidates
+            .iter()
+            .filter(|candidate| candidate.start_line_index != candidate.boundary_line_index)
+            .map(|candidate| {
+                assert!(matches!(candidate.boundary, BoundaryKind::HeaderLine));
+                (candidate.name.as_str(), candidate.boundary_line_index)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(headers, [("outer", 2), ("callback", 3)]);
+    }
+
+    #[test]
+    fn semicolon_stops_earlier_arrow_search_but_can_start_a_new_one() {
+        let source = "const earlier = (\nconst current = value;\n  (value) => value;\n";
+        let lines = collect_lines(source);
+        let candidates = detect_candidates(source.as_bytes(), &lines);
+        let headers = candidates
+            .iter()
+            .filter(|candidate| candidate.start_line_index != candidate.boundary_line_index)
+            .map(|candidate| (candidate.name.as_str(), candidate.boundary_line_index))
+            .collect::<Vec<_>>();
+
+        assert_eq!(headers, [("current", 2)]);
+    }
 
     #[test]
     fn commonjs_exports_top_level_mask_marks_exported_property_lines() {
