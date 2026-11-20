@@ -1,12 +1,13 @@
 use std::cmp::Reverse;
 
-use tree_sitter::Node;
+use tree_sitter::{Node, Tree};
 
 use crate::error::IdenteditError;
 use crate::handle::Span;
 use crate::transform::conflict::write_spans_conflict;
 
 use super::ConfigPathBatchError;
+use super::confinement::{RenderedWrite, ValueEdit, validate_value_edits};
 use super::resolve::span_from_node;
 use super::safety::{ConfigFormat, validate_rendered_config_document};
 
@@ -62,13 +63,18 @@ impl ConfigGuard {
     }
 }
 
-pub(super) struct ConfigEffect {
+pub(super) struct ConfigEffect<'tree> {
     guard: ConfigGuard,
     write: ConfigWrite,
+    value_edit: Option<ValueEdit<'tree>>,
 }
 
-impl ConfigEffect {
-    pub(super) fn syntax(mut node: Node<'_>, write: ConfigWrite) -> Self {
+impl<'tree> ConfigEffect<'tree> {
+    pub(super) fn syntax(
+        mut node: Node<'tree>,
+        write: ConfigWrite,
+        value_edit: Option<ValueEdit<'tree>>,
+    ) -> Self {
         let span = span_from_node(node);
         let kind = node.kind().to_string();
         let mut path = Vec::new();
@@ -87,6 +93,7 @@ impl ConfigEffect {
         Self {
             guard: ConfigGuard::Syntax { span, kind, path },
             write,
+            value_edit,
         }
     }
 
@@ -100,6 +107,7 @@ impl ConfigEffect {
                 },
                 new_text,
             },
+            value_edit: None,
         }
     }
 }
@@ -114,7 +122,8 @@ pub(super) struct ComposedConfigEffect {
 pub(super) fn compose_config_effects(
     format: &ConfigFormat,
     source: &str,
-    effects: Vec<ConfigEffect>,
+    original_tree: Option<&Tree>,
+    effects: Vec<ConfigEffect<'_>>,
 ) -> Result<Vec<ComposedConfigEffect>, ConfigPathBatchError> {
     let mut write_order = (0..effects.len()).collect::<Vec<_>>();
     write_order.sort_unstable_by_key(|&index| {
@@ -138,6 +147,8 @@ pub(super) fn compose_config_effects(
     }
 
     if effects.len() > 1 {
+        let check_values = effects.iter().any(|effect| effect.value_edit.is_some());
+        let mut writes = Vec::new();
         let updated = render_writes(
             source,
             Span {
@@ -146,8 +157,22 @@ pub(super) fn compose_config_effects(
             },
             &effects,
             &write_order,
+            |effect, output_start| {
+                if check_values {
+                    writes.push(RenderedWrite::new(
+                        &effect.write,
+                        output_start,
+                        effect.value_edit,
+                    ));
+                }
+            },
         )?;
-        validate_rendered_config_document(format, source, &updated)?;
+        let updated_tree =
+            validate_rendered_config_document(format, source, &updated, original_tree)?;
+        if check_values {
+            let original_tree = original_tree.expect("value edits are resolved against a tree");
+            validate_value_edits(original_tree, source, &updated_tree, &updated, &writes)?;
+        }
     }
 
     let mut guard_order = (0..effects.len()).collect::<Vec<_>>();
@@ -187,7 +212,7 @@ pub(super) fn compose_config_effects(
             let span = effects[index].write.span;
             (span.start, span.end, index)
         });
-        let new_text = render_writes(source, guard.span(), &effects, &group)?;
+        let new_text = render_writes(source, guard.span(), &effects, &group, |_, _| {})?;
         compiled.push(ComposedConfigEffect {
             guard,
             new_text,
@@ -199,11 +224,12 @@ pub(super) fn compose_config_effects(
     Ok(compiled)
 }
 
-fn render_writes(
+fn render_writes<'tree>(
     source: &str,
     span: Span,
-    effects: &[ConfigEffect],
+    effects: &[ConfigEffect<'tree>],
     indices: &[usize],
+    mut record_write: impl FnMut(&ConfigEffect<'tree>, usize),
 ) -> Result<String, IdenteditError> {
     let mut updated = String::new();
     let mut cursor = span.start;
@@ -221,6 +247,7 @@ fn render_writes(
             });
         }
         updated.push_str(prefix);
+        record_write(&effects[index], updated.len());
         updated.push_str(&write.new_text);
         cursor = write.span.end;
     }
@@ -258,6 +285,7 @@ mod tests {
                     },
                     new_text: "10".to_string(),
                 },
+                None,
             ),
             ConfigEffect::syntax(
                 document,
@@ -268,9 +296,11 @@ mod tests {
                     },
                     new_text: "20".to_string(),
                 },
+                None,
             ),
         ];
-        let compiled = compose_config_effects(&ConfigFormat::Toml, source, effects).unwrap();
+        let compiled =
+            compose_config_effects(&ConfigFormat::Toml, source, Some(&tree), effects).unwrap();
         assert_eq!(compiled.len(), 1);
         assert_eq!(compiled[0].first_request_index, 0);
         assert_eq!(compiled[0].guard_request_index, 1);
@@ -299,11 +329,70 @@ mod tests {
                         },
                         new_text: "[".to_string(),
                     },
+                    None,
                 )
             })
             .collect();
-        let failure = match compose_config_effects(&ConfigFormat::Json, source, effects) {
-            Ok(_) => panic!("the combined output must pass format validation"),
+        let failure =
+            match compose_config_effects(&ConfigFormat::Json, source, Some(&tree), effects) {
+                Ok(_) => panic!("the combined output must pass format validation"),
+                Err(failure) => failure,
+            };
+        assert!(matches!(
+            failure.error,
+            IdenteditError::InvalidRequest { .. }
+        ));
+        assert!(failure.request_indices.is_empty());
+    }
+
+    #[test]
+    fn config_composition_rechecks_the_value_contract_before_lowering() {
+        let source = "[0  ]";
+        let format = ConfigFormat::Json;
+        let tree = parse_tree_for_format(&format, source.as_bytes()).unwrap();
+        let sequence = tree.root_node().named_child(0).unwrap();
+        let edit = ValueEdit::Append {
+            sequence,
+            value_start: 2,
+        };
+        // Model disjoint renderings within the sequence's trailing whitespace.
+        // Each has a valid last element on its own, but only one can be last
+        // in the combined result. Test the composer independently of placement.
+        let effects = [(2, ", 1"), (4, ", 2")]
+            .into_iter()
+            .map(|(start, text)| {
+                let write = ConfigWrite {
+                    span: Span { start, end: start },
+                    new_text: text.to_string(),
+                };
+                let output = format!("{}{text}{}", &source[..start], &source[start..]);
+                let updated = parse_tree_for_format(&format, output.as_bytes()).unwrap();
+                validate_value_edits(
+                    &tree,
+                    source,
+                    &updated,
+                    &output,
+                    &[RenderedWrite::new(&write, start, Some(edit))],
+                )
+                .unwrap();
+                ConfigEffect::syntax(sequence, write, Some(edit))
+            })
+            .collect::<Vec<_>>();
+
+        let rendered = render_writes(
+            source,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+            &effects,
+            &[0, 1],
+            |_, _| {},
+        )
+        .unwrap();
+        parse_tree_for_format(&format, rendered.as_bytes()).unwrap();
+        let failure = match compose_config_effects(&format, source, Some(&tree), effects) {
+            Ok(_) => panic!("individually valid effects must still satisfy the combined contract"),
             Err(failure) => failure,
         };
         assert!(matches!(

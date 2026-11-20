@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::path::Path;
 
 use tree_sitter::Tree;
@@ -8,12 +9,14 @@ use crate::hash::{ContentHash, hash_bytes};
 use crate::transform::parse::parse_handles_for_source;
 
 mod composition;
+mod confinement;
 mod render;
 mod resolve;
 mod safety;
 mod syntax;
 
 use composition::{ConfigBoundary, ConfigEffect, ConfigGuard, ConfigWrite, compose_config_effects};
+use confinement::{RenderedWrite, ValueEdit, validate_value_edits};
 use render::render_append_array_write;
 use resolve::{
     ResolvedContainerEdit, find_handle_for_span, json_root_value,
@@ -56,9 +59,9 @@ impl MissingPathPolicy {
     }
 }
 
-struct CreateMissingSetRequest<'a> {
+struct CreateMissingSetRequest<'a, 'tree> {
     format: &'a ConfigFormat,
-    tree: &'a Tree,
+    tree: &'tree Tree,
     source: &'a [u8],
     source_text: &'a str,
     path_tokens: &'a [PathToken],
@@ -176,6 +179,7 @@ pub(crate) fn resolve_config_path_operations(
     })?;
 
     let format = detect_config_format(file)?;
+    let original_tree = OnceCell::new();
     let effects = requests
         .iter()
         .enumerate()
@@ -186,12 +190,13 @@ pub(crate) fn resolve_config_path_operations(
                 request.document_index,
                 &request.operation,
                 source_text,
+                &original_tree,
             )
             .map_err(|error| ConfigPathBatchError::for_request(error, index))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let composed =
-        compose_config_effects(&format, source_text, effects).map_err(|mut failure| {
+    let composed = compose_config_effects(&format, source_text, original_tree.get(), effects)
+        .map_err(|mut failure| {
             if let [first, second] = failure.request_indices.as_slice()
                 && let IdenteditError::InvalidRequest { message } = &mut failure.error
             {
@@ -262,13 +267,14 @@ pub(crate) fn resolve_config_path_operations(
     })
 }
 
-fn resolve_config_path_in_source(
+fn resolve_config_path_in_source<'tree>(
     format: &ConfigFormat,
     raw_path: &str,
     document_index: Option<usize>,
     operation: &ConfigPathOperation,
     source_text: &str,
-) -> Result<ConfigEffect, IdenteditError> {
+    original_tree: &'tree OnceCell<Tree>,
+) -> Result<ConfigEffect<'tree>, IdenteditError> {
     let source = source_text.as_bytes();
     if document_index.is_some() && !matches!(format, ConfigFormat::Yaml) {
         return Err(IdenteditError::InvalidRequest {
@@ -291,7 +297,7 @@ fn resolve_config_path_in_source(
         && json_effectively_empty_source(source_text)
     {
         let updated = render_missing_json_object(&path_tokens, raw_path, new_text)?;
-        validate_rendered_config_document(format, "", &updated)?;
+        validate_rendered_config_document(format, "", &updated, None)?;
         let side = if source.is_empty() {
             ConfigBoundary::Start
         } else {
@@ -330,7 +336,14 @@ fn resolve_config_path_in_source(
         return Ok(ConfigEffect::boundary(side, source.len(), updated));
     }
 
-    let tree = parse_tree_for_format(format, source)?;
+    // Resolve all ordinary requests against the same tree, after their ingress checks.
+    let tree = match original_tree.get() {
+        Some(tree) => tree,
+        None => {
+            let parsed = parse_tree_for_format(format, source)?;
+            original_tree.get_or_init(|| parsed)
+        }
+    };
     if let ConfigPathOperation::Set {
         new_text,
         missing_path: MissingPathPolicy::Create,
@@ -342,10 +355,10 @@ fn resolve_config_path_in_source(
         };
         let strict_resolved = match format {
             ConfigFormat::Json => {
-                resolve_json_path(&tree, source, &path_tokens, &strict_probe, raw_path)
+                resolve_json_path(tree, source, &path_tokens, &strict_probe, raw_path)
             }
             ConfigFormat::Yaml => resolve_yaml_path(
-                &tree,
+                tree,
                 source,
                 &path_tokens,
                 &strict_probe,
@@ -353,14 +366,14 @@ fn resolve_config_path_in_source(
                 document_index,
             ),
             ConfigFormat::Toml => {
-                resolve_toml_path(&tree, source, &path_tokens, &strict_probe, raw_path)
+                resolve_toml_path(tree, source, &path_tokens, &strict_probe, raw_path)
             }
         };
         match strict_resolved {
             Ok(resolved) => {
                 if matches!(format, ConfigFormat::Yaml) {
                     validate_yaml_config_path_reference_safety(
-                        &tree,
+                        tree,
                         source_text,
                         document_index,
                         resolved.replace_span,
@@ -370,6 +383,7 @@ fn resolve_config_path_in_source(
                 return prepare_container_effect(
                     format,
                     source_text,
+                    tree,
                     resolved,
                     operation,
                     raw_path,
@@ -381,7 +395,7 @@ fn resolve_config_path_in_source(
 
         return resolve_config_path_set_with_create_missing(CreateMissingSetRequest {
             format,
-            tree: &tree,
+            tree,
             source,
             source_text,
             path_tokens: &path_tokens,
@@ -392,20 +406,20 @@ fn resolve_config_path_in_source(
     }
 
     let resolved = match format {
-        ConfigFormat::Json => resolve_json_path(&tree, source, &path_tokens, operation, raw_path)?,
+        ConfigFormat::Json => resolve_json_path(tree, source, &path_tokens, operation, raw_path)?,
         ConfigFormat::Yaml => resolve_yaml_path(
-            &tree,
+            tree,
             source,
             &path_tokens,
             operation,
             raw_path,
             document_index,
         )?,
-        ConfigFormat::Toml => resolve_toml_path(&tree, source, &path_tokens, operation, raw_path)?,
+        ConfigFormat::Toml => resolve_toml_path(tree, source, &path_tokens, operation, raw_path)?,
     };
     if matches!(format, ConfigFormat::Yaml) {
         validate_yaml_config_path_reference_safety(
-            &tree,
+            tree,
             source_text,
             document_index,
             resolved.replace_span,
@@ -413,7 +427,7 @@ fn resolve_config_path_in_source(
         )?;
     }
 
-    prepare_container_effect(format, source_text, resolved, operation, raw_path)
+    prepare_container_effect(format, source_text, tree, resolved, operation, raw_path)
 }
 
 fn reject_yaml_create_missing_value_text(
@@ -445,13 +459,14 @@ fn set_replacement_text(
     }
 }
 
-fn prepare_container_effect(
+fn prepare_container_effect<'tree>(
     format: &ConfigFormat,
     source_text: &str,
-    resolved: ResolvedContainerEdit<'_>,
+    original_tree: &'tree Tree,
+    resolved: ResolvedContainerEdit<'tree>,
     operation: &ConfigPathOperation,
     raw_path: &str,
-) -> Result<ConfigEffect, IdenteditError> {
+) -> Result<ConfigEffect<'tree>, IdenteditError> {
     let container_span = span_from_node(resolved.container);
     let container_kind = resolved.container.kind();
     let append_write = if let ConfigPathOperation::Append { new_text } = operation {
@@ -474,7 +489,10 @@ fn prepare_container_effect(
             raw_path,
         )?,
         ConfigPathOperation::Append { .. } => {
-            let write = append_write.as_ref().expect("append has a rendered write");
+            let write = &append_write
+                .as_ref()
+                .expect("append has a rendered write")
+                .write;
             rewrite_container_text(source_text, container_span, write.span, &write.new_text)?
         }
         ConfigPathOperation::Delete => String::new(),
@@ -491,13 +509,52 @@ fn prepare_container_effect(
         rewrite_container_text(source_text, container_span, replace_span, &replacement)?;
     let updated_source =
         rewrite_full_source_text(source_text, container_span, &updated_container_text)?;
-    validate_rendered_config_document(format, source_text, &updated_source)?;
+    let updated_tree = validate_rendered_config_document(
+        format,
+        source_text,
+        &updated_source,
+        Some(original_tree),
+    )?;
 
-    let write = append_write.unwrap_or(ConfigWrite {
-        span: replace_span,
-        new_text: replacement,
-    });
-    Ok(ConfigEffect::syntax(resolved.container, write))
+    let (write, value_edit) = if let Some(append) = append_write {
+        (
+            append.write,
+            Some(ValueEdit::Append {
+                sequence: resolved.value,
+                value_start: append.value_start,
+            }),
+        )
+    } else {
+        let value_edit = if matches!(
+            (format, operation),
+            (ConfigFormat::Toml, ConfigPathOperation::Set { .. })
+        ) {
+            Some(ValueEdit::toml_set(resolved.value)?)
+        } else {
+            None
+        };
+        (
+            ConfigWrite {
+                span: replace_span,
+                new_text: replacement,
+            },
+            value_edit,
+        )
+    };
+    if let Some(value_edit) = value_edit {
+        validate_value_edits(
+            original_tree,
+            source_text,
+            &updated_tree,
+            &updated_source,
+            &[RenderedWrite::new(
+                &write,
+                write.span.start,
+                Some(value_edit),
+            )],
+        )?;
+    }
+    Ok(ConfigEffect::syntax(resolved.container, write, value_edit))
 }
 
 fn set_replace_span(
@@ -555,9 +612,9 @@ fn contains_yaml_plain_mapping_indicator(text: &str) -> bool {
     trimmed.ends_with(':') || text.contains(": ") || text.contains(":\t")
 }
 
-fn resolve_config_path_set_with_create_missing(
-    request: CreateMissingSetRequest<'_>,
-) -> Result<ConfigEffect, IdenteditError> {
+fn resolve_config_path_set_with_create_missing<'tree>(
+    request: CreateMissingSetRequest<'_, 'tree>,
+) -> Result<ConfigEffect<'tree>, IdenteditError> {
     if matches!(request.format, ConfigFormat::Yaml) {
         validate_yaml_create_missing_safety(
             request.tree,
@@ -624,7 +681,12 @@ fn resolve_config_path_set_with_create_missing(
     } else {
         &updated_root_text
     };
-    validate_rendered_config_document(request.format, request.source_text, validation_source)?;
+    validate_rendered_config_document(
+        request.format,
+        request.source_text,
+        validation_source,
+        Some(request.tree),
+    )?;
 
     if matches!(request.format, ConfigFormat::Toml)
         && toml_effectively_empty_source(request.source_text)
@@ -677,6 +739,7 @@ fn resolve_config_path_set_with_create_missing(
             span: root_span,
             new_text: replacement_text,
         },
+        None,
     ))
 }
 

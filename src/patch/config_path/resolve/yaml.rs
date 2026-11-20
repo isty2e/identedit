@@ -108,6 +108,7 @@ fn resolve_yaml_path_from_root<'tree>(
                     return Ok(match operation {
                         ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
                             container: current,
+                            value: value_node,
                             replace_span: span_from_node(value_node),
                         },
                         ConfigPathOperation::Append { .. } => {
@@ -121,11 +122,13 @@ fn resolve_yaml_path_from_root<'tree>(
                             }
                             ResolvedContainerEdit {
                                 container: value_node,
+                                value: value_node,
                                 replace_span: span_from_node(value_node),
                             }
                         }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
                             container: current,
+                            value: value_node,
                             replace_span: adjusted_delete_span_for_container(
                                 source,
                                 span_from_node(current),
@@ -153,6 +156,7 @@ fn resolve_yaml_path_from_root<'tree>(
                         return Ok(match operation {
                             ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
                                 container: current,
+                                value: value_node,
                                 replace_span: span_from_node(value_node),
                             },
                             ConfigPathOperation::Append { .. } => {
@@ -166,11 +170,13 @@ fn resolve_yaml_path_from_root<'tree>(
                                 }
                                 ResolvedContainerEdit {
                                     container: value_node,
+                                    value: value_node,
                                     replace_span: span_from_node(value_node),
                                 }
                             }
                             ConfigPathOperation::Delete => ResolvedContainerEdit {
                                 container: current,
+                                value: value_node,
                                 replace_span: adjusted_delete_span_for_container(
                                     source,
                                     span_from_node(current),
@@ -192,6 +198,7 @@ fn resolve_yaml_path_from_root<'tree>(
                         return Ok(match operation {
                             ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
                                 container: current,
+                                value: next,
                                 replace_span: span_from_node(next),
                             },
                             ConfigPathOperation::Append { .. } => {
@@ -201,11 +208,13 @@ fn resolve_yaml_path_from_root<'tree>(
                                 }
                                 ResolvedContainerEdit {
                                     container: next,
+                                    value: next,
                                     replace_span: span_from_node(next),
                                 }
                             }
                             ConfigPathOperation::Delete => ResolvedContainerEdit {
                                 container: current,
+                                value: next,
                                 replace_span: adjusted_delete_span_for_container(
                                     source,
                                     span_from_node(current),

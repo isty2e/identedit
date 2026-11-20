@@ -81,6 +81,7 @@ pub(in crate::patch::config_path) fn resolve_toml_path<'tree>(
 
     Ok(ResolvedContainerEdit {
         container,
+        value: selected.value,
         replace_span,
     })
 }
