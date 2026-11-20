@@ -177,8 +177,7 @@ fn normalize_move_edges(
 ) -> Result<Vec<NormalizedMoveEdge>, IdenteditError> {
     let mut normalized = Vec::with_capacity(move_edges.len());
     for edge in move_edges {
-        let source = fs::canonicalize(&edge.source)
-            .map_err(|error| IdenteditError::io(&edge.source, error))?;
+        let source = normalize_move_source_path(&edge.source)?;
         let destination = normalize_move_destination_path(&edge.destination)?;
         normalized.push(NormalizedMoveEdge {
             source,
@@ -190,10 +189,25 @@ fn normalize_move_edges(
     Ok(normalized)
 }
 
+fn normalize_move_source_path(path: &Path) -> Result<PathBuf, IdenteditError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| IdenteditError::io(path, error))?;
+    if metadata.is_symlink() {
+        return Err(IdenteditError::InvalidRequest {
+            message: format!(
+                "Refusing to move through symbolic link '{}'; name the file to move directly",
+                path.display()
+            ),
+        });
+    }
+
+    fs::canonicalize(path).map_err(|error| IdenteditError::io(path, error))
+}
+
 fn normalize_move_destination_path(path: &Path) -> Result<PathBuf, IdenteditError> {
-    match fs::canonicalize(path) {
-        Ok(canonical_path) => Ok(canonical_path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_symlink() => Err(move_destination_exists_error(path)),
+        Ok(_) => fs::canonicalize(path).map_err(|error| IdenteditError::io(path, error)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let absolute = if path.is_absolute() {
                 path.to_path_buf()
             } else {
@@ -237,16 +251,17 @@ fn validate_move_destination_existence(
         .collect::<BTreeSet<PathBuf>>();
     for destination in source_to_destination.values() {
         if move_path_exists(destination)? && !sources.contains(destination) {
-            return Err(IdenteditError::InvalidRequest {
-                message: format!(
-                    "Destination path already exists: '{}'",
-                    destination.display()
-                ),
-            });
+            return Err(move_destination_exists_error(destination));
         }
     }
 
     Ok(())
+}
+
+fn move_destination_exists_error(path: &Path) -> IdenteditError {
+    IdenteditError::InvalidRequest {
+        message: format!("Destination path already exists: '{}'", path.display()),
+    }
 }
 
 fn move_path_exists(path: &Path) -> Result<bool, IdenteditError> {
@@ -541,24 +556,13 @@ where
     after_verify_hook()?;
 
     if move_path_exists(&plan.destination)? {
-        return Err(IdenteditError::InvalidRequest {
-            message: format!(
-                "Destination path already exists: '{}'",
-                plan.destination.display()
-            ),
-        }
-        .into());
+        return Err(move_destination_exists_error(&plan.destination).into());
     }
 
     before_rename_hook()?;
     rename_file(&plan.source, &plan.destination).map_err(|error| {
         let error = if error.kind() == io::ErrorKind::AlreadyExists {
-            IdenteditError::InvalidRequest {
-                message: format!(
-                    "Destination path already exists: '{}'",
-                    plan.destination.display()
-                ),
-            }
+            move_destination_exists_error(&plan.destination)
         } else {
             IdenteditError::io(&plan.source, error)
         };
@@ -791,4 +795,50 @@ pub(super) fn rollback_committed_moves(
     }
 
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod endpoint_tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use tempfile::tempdir;
+
+    use super::{IdenteditError, normalize_move_destination_path, normalize_move_source_path};
+
+    #[test]
+    fn move_endpoint_normalization_rejects_final_links() {
+        let workspace = tempdir().unwrap();
+        let real_file = workspace.path().join("file.txt");
+        fs::write(&real_file, "contents").unwrap();
+
+        for (name, target) in [
+            ("file-link.txt", real_file),
+            ("dangling-link.txt", workspace.path().join("missing.txt")),
+        ] {
+            let link = workspace.path().join(name);
+            symlink(target, &link).unwrap();
+
+            for result in [
+                normalize_move_source_path(&link),
+                normalize_move_destination_path(&link),
+            ] {
+                assert!(matches!(
+                    result,
+                    Err(IdenteditError::InvalidRequest { message })
+                        if message.contains(link.to_str().unwrap())
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn move_source_normalization_preserves_directory_requirement() {
+        let workspace = tempdir().unwrap();
+        fs::write(workspace.path().join("file.txt"), "contents").unwrap();
+
+        for spelling in ["file.txt/", "file.txt/."] {
+            assert!(normalize_move_source_path(&workspace.path().join(spelling)).is_err());
+        }
+    }
 }
