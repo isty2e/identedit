@@ -167,7 +167,7 @@ Successful `patch` and `apply` commits include the actual change as JSON `diff: 
 
 Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL, Dockerfile
 
-Additional tree-sitter grammars can be installed on supported hosts.
+On macOS and Linux, [install additional grammars](skills/identedit/references/languages.md#dynamic-grammar-install) by name from the pinned catalog or from a Git repository you trust.
 
 ## Documentation
 

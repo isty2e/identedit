@@ -102,7 +102,7 @@ pub(super) fn ensure_grammar_install_supported() -> Result<(), IdenteditError> {
     #[cfg(target_os = "windows")]
     {
         Err(IdenteditError::GrammarInstall {
-            message: "grammar install is not yet supported on Windows hosts. Use bundled grammars or run install on macOS/Linux and copy the compiled library and manifest entry.".to_string(),
+            message: "grammar install is not yet supported on Windows hosts. Use bundled grammars or add a manifest entry for a trusted Windows-built library (grammars/manifest.json under IDENTEDIT_HOME, or .identedit/grammars/manifest.json under your home directory).".to_string(),
         })
     }
 

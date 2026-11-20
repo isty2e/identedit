@@ -11,7 +11,7 @@ The supported commands are:
 - `apply`: validate or commit a compiled changeset;
 - `patch`: build and optionally apply one single-target operation;
 - `merge`: combine non-conflicting changesets;
-- `grammar`: install a dynamic tree-sitter grammar.
+- `grammar`: [install a dynamic Tree-sitter grammar](languages.md#dynamic-grammar-install).
 
 Run `identedit <command> --help` for the complete flag surface. Identedit does not expose a supported Rust library API.
 

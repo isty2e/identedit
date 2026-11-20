@@ -8,11 +8,11 @@ Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#
 
 ## Dynamic Grammar Install
 
-`identedit grammar install` builds and loads native Tree-sitter code with your permissions. Later commands may load installed grammars while setting up providers.
+The installer runs on macOS and Linux and requires Git and a local compiler: `cc` for C grammars or `c++` for grammars with a C++ scanner.
 
-The installer runs on macOS and Linux. On Windows, bundled grammars remain available. Manually registered libraries must be built for the host platform.
+Installation builds and loads native code with your permissions. Later commands may load installed grammars while setting up providers.
 
-Install a pinned grammar by name:
+Install one of the three catalog grammars by name:
 
 ```bash
 identedit grammar install elixir
@@ -20,10 +20,12 @@ identedit grammar install zig
 identedit grammar install dart
 ```
 
-These installs use the exact repository revisions selected for the Identedit release. If the selected source cannot be retrieved or verified, the installer does not use the latest revision instead.
+Identedit checks the fetched revision against the commit pinned in its catalog before building. If it cannot fetch or verify that revision, it fails without falling back to the latest code.
 
-For other grammars, pass `--repo` with a Git URL or local repository you trust. This also overrides a catalog pin. The repository must contain generated C source at `src/parser.c`. Specify `--ext` for languages without default extensions and `--symbol` if the grammar exports a nonstandard symbol.
+For a grammar outside the catalog or to override a pin, pass `--repo` with a Git URL or local repository you trust. Identedit builds the cloned checkout without a catalog pin check. The repository must include a generated `src/parser.c`. Use `--ext` for a language without default extensions and `--symbol` for a nonstandard grammar symbol.
 
 ```bash
 identedit grammar install mylang --repo ./tree-sitter-mylang --ext ml
 ```
+
+On Windows, use bundled grammars or add a manifest entry for a trusted library built for Windows. The manifest is `grammars/manifest.json` under `IDENTEDIT_HOME` or, by default, `.identedit/grammars/manifest.json` under your home directory. Add the entry to the `grammars` array with `lang`, `repo`, `symbol`, `extensions`, and the local `library_path`.
