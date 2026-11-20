@@ -286,6 +286,126 @@ fn append_combines_with_a_disjoint_original_element_write() {
 }
 
 #[test]
+fn config_append_preserves_surviving_order_after_a_disjoint_delete() {
+    let directory = tempdir().unwrap();
+    for (extension, before, after) in [
+        (
+            "json",
+            "{\"items\":[1, 2, 2]}",
+            "{\"items\":[2, 2, [3, 4]]}",
+        ),
+        ("toml", "items = [1, 2, 2]\n", "items = [2, 2, [3, 4]]\n"),
+        ("yaml", "items: [1, 2, 2]\n", "items: [2, 2, [3, 4]]\n"),
+    ] {
+        let file = directory.path().join(format!("settings.{extension}"));
+        fs::write(&file, before).unwrap();
+        let plan = compile(&json!({"command":"edit","file":file,"operations":[
+            config("items", json!({"type":"append", "new_text":"[3, 4]"})),
+            config("items[0]", json!({"type":"delete"}))
+        ]}));
+        replay(&file, before, after, &plan);
+    }
+}
+
+#[test]
+fn config_append_without_an_explicit_value_rejects_the_whole_plan() {
+    let directory = tempdir().unwrap();
+    let other_file = directory.path().join("other.json");
+    let other_source = "{\"value\":1}";
+    fs::write(&other_file, other_source).unwrap();
+
+    for (extension, before) in [
+        ("json", "{\"items\":[]}"),
+        ("toml", "items = []\n"),
+        ("yaml", "items: []\n"),
+        ("yml", "items:\n  - old\n"),
+    ] {
+        let file = directory.path().join(format!("settings.{extension}"));
+        fs::write(&file, before).unwrap();
+        let response = reject(
+            &json!({"command":"edit","files":[
+                {"file":other_file,"operations":[set("value", "2")]},
+                {"file":file,"operations":[config("items", json!({"type":"append","new_text":" "}))]}
+            ]}),
+            "invalid_request",
+            &["/files/1/operations/0"],
+        );
+        assert!(response.get("files").is_none());
+        assert_eq!(fs::read(&file).unwrap(), before.as_bytes());
+        assert_eq!(fs::read(&other_file).unwrap(), other_source.as_bytes());
+    }
+}
+
+#[test]
+fn config_toml_existing_key_accepts_multiline_value_with_create_missing() {
+    let directory = tempdir().unwrap();
+    let file = directory.path().join("settings.toml");
+    let before = "[service]\noptions = [1] # keep\nretries = 2\n";
+    let after = "[service]\noptions = [\n  3, # new item\n  4,\n] # keep\nretries = 2\n";
+    fs::write(&file, before).unwrap();
+
+    let plan = compile(&json!({"command":"edit","file":file,"operations":[
+        create("service.options", "[\n  3, # new item\n  4,\n]")
+    ]}));
+    replay(&file, before, after, &plan);
+}
+
+#[test]
+fn config_yaml_append_accepts_explicit_null_after_a_block_value() {
+    let directory = tempdir().unwrap();
+    let file = directory.path().join("settings.yaml");
+    let before = "items:\n  - |\n    existing text\nkeep: ready\n";
+    let original: serde_yaml::Value = serde_yaml::from_str(before).unwrap();
+    fs::write(&file, before).unwrap();
+
+    let plan = compile(&json!({"command":"edit","file":file,"operations":[
+        config("items", json!({"type":"append","new_text":"null"}))
+    ]}));
+    assert_eq!(fs::read(&file).unwrap(), before.as_bytes());
+    successful(apply(&plan, &[]));
+
+    let actual: serde_yaml::Value = serde_yaml::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let items = actual["items"].as_sequence().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0], original["items"][0]);
+    assert!(items[1].is_null());
+    assert_eq!(actual["keep"], original["keep"]);
+}
+
+#[test]
+fn config_yaml_append_preserves_the_final_line_break_of_existing_block_values() {
+    let directory = tempdir().unwrap();
+    let file = directory.path().join("settings.yaml");
+    let before = "items:\n  - |\n    existing text";
+    let original: serde_yaml::Value = serde_yaml::from_str(before).unwrap();
+    assert_eq!(original["items"][0].as_str(), Some("existing text"));
+    fs::write(&file, before).unwrap();
+
+    // Separating the new item needs a line break. With the existing clip
+    // header that break would become part of the preceding value.
+    reject(
+        &json!({"command":"edit","file":file,"operations":[
+            config("items", json!({"type":"append","new_text":"null"}))
+        ]}),
+        "invalid_request",
+        &["/operations/0"],
+    );
+    assert_eq!(fs::read(&file).unwrap(), before.as_bytes());
+
+    let strip = "items:\n  - |-\n    existing text";
+    fs::write(&file, strip).unwrap();
+    let plan = compile(&json!({"command":"edit","file":file,"operations":[
+        config("items", json!({"type":"append","new_text":"null"}))
+    ]}));
+    replay(
+        &file,
+        strip,
+        "items:\n  - |-\n    existing text\n  - null",
+        &plan,
+    );
+}
+
+#[test]
 fn conflicting_writes_keep_noops_delimiters_points_and_opaque_creates() {
     let directory = tempdir().unwrap();
     let file = directory.path().join("settings.json");

@@ -68,6 +68,7 @@ pub(in crate::patch::config_path) fn resolve_json_path<'tree>(
                     return Ok(match operation {
                         ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
                             container: current,
+                            value: value_node,
                             replace_span: span_from_node(value_node),
                         },
                         ConfigPathOperation::Append { .. } => {
@@ -79,11 +80,13 @@ pub(in crate::patch::config_path) fn resolve_json_path<'tree>(
                             }
                             ResolvedContainerEdit {
                                 container: value_node,
+                                value: value_node,
                                 replace_span: span_from_node(value_node),
                             }
                         }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
                             container: current,
+                            value: value_node,
                             replace_span: adjusted_delete_span_for_container(
                                 source,
                                 span_from_node(current),
@@ -114,6 +117,7 @@ pub(in crate::patch::config_path) fn resolve_json_path<'tree>(
                     return Ok(match operation {
                         ConfigPathOperation::Set { .. } => ResolvedContainerEdit {
                             container: current,
+                            value: *entry,
                             replace_span: span_from_node(*entry),
                         },
                         ConfigPathOperation::Append { .. } => {
@@ -122,11 +126,13 @@ pub(in crate::patch::config_path) fn resolve_json_path<'tree>(
                             }
                             ResolvedContainerEdit {
                                 container: *entry,
+                                value: *entry,
                                 replace_span: span_from_node(*entry),
                             }
                         }
                         ConfigPathOperation::Delete => ResolvedContainerEdit {
                             container: current,
+                            value: *entry,
                             replace_span: adjusted_delete_span_for_container(
                                 source,
                                 span_from_node(current),

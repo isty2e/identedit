@@ -101,7 +101,8 @@ pub(super) fn validate_rendered_config_document(
     format: &ConfigFormat,
     original_source: &str,
     updated_source: &str,
-) -> Result<(), IdenteditError> {
+    original_tree: Option<&Tree>,
+) -> Result<Tree, IdenteditError> {
     let tree =
         parse_tree_for_format(format, updated_source.as_bytes()).map_err(|error| match error {
             IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
@@ -113,15 +114,22 @@ pub(super) fn validate_rendered_config_document(
             other => other,
         })?;
     if matches!(format, ConfigFormat::Yaml) {
-        let original_tree = parse_tree_for_format(format, original_source.as_bytes()).map_err(
-            |error| match error {
-                IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
-                    message: "Config path edit could not validate the original YAML document"
-                        .to_string(),
-                },
-                other => other,
-            },
-        )?;
+        let parsed_original;
+        let original_tree =
+            if let Some(original_tree) = original_tree {
+                original_tree
+            } else {
+                parsed_original = parse_tree_for_format(format, original_source.as_bytes())
+                    .map_err(|error| match error {
+                        IdenteditError::ParseFailure { .. } => IdenteditError::InvalidRequest {
+                            message:
+                                "Config path edit could not validate the original YAML document"
+                                    .to_string(),
+                        },
+                        other => other,
+                    })?;
+                &parsed_original
+            };
         let original_document_count = count_nodes_by_kind(original_tree.root_node(), "document");
         let updated_document_count = count_nodes_by_kind(tree.root_node(), "document");
         if updated_document_count > original_document_count {
@@ -143,7 +151,7 @@ pub(super) fn validate_rendered_config_document(
             });
         }
     }
-    Ok(())
+    Ok(tree)
 }
 
 pub(super) fn detect_config_format(file: &Path) -> Result<ConfigFormat, IdenteditError> {

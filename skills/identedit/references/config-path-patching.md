@@ -77,8 +77,9 @@ The same target and operation forms work in the `files` envelope and may be mixe
 - Disjoint writes within overlapping guard scopes are combined under the outermost original contributing syntax scope. Existing guard coverage is not reduced; several sibling settings can therefore share one compiled replacement.
 - Overlapping writes are rejected, including repeated sets of the same path, overlapping no-ops, shared deletion commas and shared insertion points. Two appends to one array conflict. An append can also conflict with a value edit ending at its insertion point.
 - Missing-path creation retains the existing opaque root rewrite. Two creates, or a create and another edit under that root, generally conflict even when their logical paths differ. Separate YAML document roots can remain disjoint. Use separate edit/apply cycles, recompiling each plan, when later requests need earlier results.
-- Individual format checks still apply, and a composed config result is checked again. Co-resident raw operations keep their existing rules and may conflict with the entire lowered config container, even if their smaller writes would be disjoint. No general configuration-validity guarantee is added for raw edits.
-- Compilation returns a whole plan or an error without writing. Compiled-operation and apply-receipt counts can be smaller than the input request count. Errors refer to original request positions; a final combined-format failure may identify the file rather than invent a conflicting pair.
+- Individual format checks still apply, and the combined config result is checked again. For a file with an `append` or an existing-path TOML `set`, the planner also checks that each of these edits affects one value and that the combined config edits preserve surviving entries and values outside the requested changes.
+- Co-resident raw operations keep their existing rules and may conflict with the entire lowered config container, even if their smaller writes would be disjoint. These planning checks neither cover raw edits nor revalidate saved plans.
+- Compilation returns a whole plan or an error without writing. Compiled-operation and apply-receipt counts can be smaller than the input request count. Errors refer to original request positions; a failure detected only in the combined result may identify the file rather than particular operations.
 
 Pass the resulting changeset, not the edit request, to `apply --dry-run` and then `apply`. Each config file retains its [original full-file condition](protocol.md#file-source-preconditions), including mixed-operation files; supplied hashes are checked, never refreshed.
 
@@ -115,7 +116,8 @@ EOF
 ## Rules
 
 - `set` updates an existing path; use `create_missing: true` or `--create-missing` only when creating missing map/table keys.
-- `append` requires the resolved target path to be an existing array/sequence.
+- `append` adds one explicit value to the end of an existing array or sequence. A nested collection is one value. An empty fragment is not a value; write `null` explicitly where the format supports it.
+- TOML `set` at an existing path replaces one value in the same slot, even with `create_missing` enabled. These operations preserve other entries and their order, except for other requested edits. Supported multiline values remain allowed.
 - `delete` and `append` reject `create_missing`.
 - Missing paths, ambiguous matches, malformed syntax, and out-of-range indices fail with explicit `invalid_request` errors.
 - Config path edits are validated against the target format before writing.

@@ -36,13 +36,32 @@ pub(super) fn array_index_out_of_bounds_error(
     }
 }
 
+pub(super) struct RenderedAppend {
+    pub(super) write: ConfigWrite,
+    pub(super) value_start: usize,
+}
+
+impl RenderedAppend {
+    fn new(span: Span, mut prefix: String, value: &str) -> Self {
+        let value_start = prefix.len();
+        prefix.push_str(value);
+        Self {
+            write: ConfigWrite {
+                span,
+                new_text: prefix,
+            },
+            value_start,
+        }
+    }
+}
+
 pub(super) fn render_append_array_write(
     source_text: &str,
     container_span: Span,
     container_kind: &str,
     new_text: &str,
     raw_path: &str,
-) -> Result<ConfigWrite, IdenteditError> {
+) -> Result<RenderedAppend, IdenteditError> {
     let array_text = source_text
         .get(container_span.start..container_span.end)
         .ok_or_else(|| IdenteditError::InvalidRequest {
@@ -83,7 +102,7 @@ fn append_to_comma_delimited_array_text(
     offset: usize,
     new_text: &str,
     raw_path: &str,
-) -> Result<ConfigWrite, IdenteditError> {
+) -> Result<RenderedAppend, IdenteditError> {
     let open = array_text
         .find('[')
         .ok_or_else(|| append_requires_array_error(raw_path, "unknown"))?;
@@ -96,13 +115,14 @@ fn append_to_comma_delimited_array_text(
 
     let inner = &array_text[open + 1..close];
     if inner.trim().is_empty() {
-        return Ok(ConfigWrite {
-            span: Span {
+        return Ok(RenderedAppend::new(
+            Span {
                 start: offset + open + 1,
                 end: offset + close,
             },
-            new_text: new_text.to_string(),
-        });
+            String::new(),
+            new_text,
+        ));
     }
 
     let mut insert_at = close;
@@ -115,20 +135,21 @@ fn append_to_comma_delimited_array_text(
         }
     }
 
-    let insertion = if inner.contains('\n') || inner.contains('\r') {
+    let prefix = if inner.contains('\n') || inner.contains('\r') {
         let line_ending = line_ending_literal(array_text);
         let indent = indentation_of_last_value_line(array_text, insert_at);
-        format!(",{line_ending}{indent}{new_text}")
+        format!(",{line_ending}{indent}")
     } else {
-        format!(", {new_text}")
+        ", ".to_string()
     };
-    Ok(ConfigWrite {
-        span: Span {
+    Ok(RenderedAppend::new(
+        Span {
             start: offset + insert_at,
             end: offset + insert_at,
         },
-        new_text: insertion,
-    })
+        prefix,
+        new_text,
+    ))
 }
 
 fn append_to_block_sequence_text(
@@ -137,7 +158,7 @@ fn append_to_block_sequence_text(
     raw_path: &str,
     base_indent: &str,
     offset: usize,
-) -> Result<ConfigWrite, IdenteditError> {
+) -> Result<RenderedAppend, IdenteditError> {
     let indent = first_block_sequence_item_indent(sequence_text)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| base_indent.to_string());
@@ -149,13 +170,14 @@ fn append_to_block_sequence_text(
     } else {
         line_ending_literal(sequence_text)
     };
-    Ok(ConfigWrite {
-        span: Span {
+    Ok(RenderedAppend::new(
+        Span {
             start: offset,
             end: offset,
         },
-        new_text: format!("{separator}{indent}- {new_text}"),
-    })
+        format!("{separator}{indent}- "),
+        new_text,
+    ))
 }
 
 fn first_block_sequence_item_indent(sequence_text: &str) -> Option<String> {
