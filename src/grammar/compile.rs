@@ -1,20 +1,12 @@
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use libloading::Library;
 
 use crate::error::IdenteditError;
 
 pub(super) fn clone_repo(repo: &str, destination: &Path) -> Result<(), IdenteditError> {
-    let output = Command::new("git")
-        .arg("clone")
-        .arg("--depth")
-        .arg("1")
-        .arg(repo)
-        .arg(destination)
+    let output = clone_repo_command(repo, destination)
         .output()
         .map_err(|error| IdenteditError::GrammarInstall {
             message: format!("failed to invoke git clone for '{repo}': {error}"),
@@ -30,6 +22,14 @@ pub(super) fn clone_repo(repo: &str, destination: &Path) -> Result<(), Identedit
             String::from_utf8_lossy(&output.stderr).trim()
         ),
     })
+}
+
+fn clone_repo_command(repo: &str, destination: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args(["clone", "--depth", "1", "--", repo])
+        .arg(destination);
+    command
 }
 
 pub(super) fn compile_grammar_repository(
@@ -206,42 +206,30 @@ fn shared_library_extension() -> &'static str {
     "so"
 }
 
-pub(super) struct InstallWorkspace {
-    path: PathBuf,
-}
-
-impl InstallWorkspace {
-    pub(super) fn new(lang: &str) -> Result<Self, IdenteditError> {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| IdenteditError::GrammarInstall {
-                message: format!("system clock error while preparing install workspace: {error}"),
-            })?
-            .as_nanos();
-        let path = env::temp_dir().join(format!("identedit-grammar-install-{lang}-{nonce}"));
-        fs::create_dir_all(&path).map_err(|error| IdenteditError::GrammarInstall {
-            message: format!(
-                "failed to create install workspace '{}': {error}",
-                path.display()
-            ),
-        })?;
-        Ok(Self { path })
-    }
-
-    pub(super) fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for InstallWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ensure_grammar_install_supported, shared_library_extension};
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use super::{clone_repo_command, ensure_grammar_install_supported, shared_library_extension};
+
+    #[test]
+    fn clone_repo_passes_repository_as_one_operand_after_options() {
+        let destination = Path::new("install workspace").join("source");
+        // Inspect the command without invoking Git.
+        for repo in ["relative grammar", "--example-repository"] {
+            let command = clone_repo_command(repo, &destination);
+            assert_eq!(command.get_program(), "git");
+            assert!(command.get_args().eq([
+                OsStr::new("clone"),
+                OsStr::new("--depth"),
+                OsStr::new("1"),
+                OsStr::new("--"),
+                OsStr::new(repo),
+                destination.as_os_str(),
+            ]));
+        }
+    }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]

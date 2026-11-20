@@ -5,11 +5,32 @@ use std::process::{Command, Output};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-fn run_identedit(arguments: &[&str], kanna_home: &Path) -> Output {
+fn identedit_command(kanna_home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_identedit"));
-    command.args(arguments);
     command.env("IDENTEDIT_HOME", kanna_home);
-    command.output().expect("failed to run identedit binary")
+    command
+}
+
+fn run_identedit(arguments: &[&str], kanna_home: &Path) -> Output {
+    identedit_command(kanna_home)
+        .args(arguments)
+        .output()
+        .expect("failed to run identedit binary")
+}
+
+#[cfg(unix)]
+fn assert_install_workspaces_removed(temp_root: &Path) {
+    for entry in fs::read_dir(temp_root).unwrap() {
+        let entry = entry.unwrap();
+        assert!(
+            !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("identedit-grammar-install-"),
+            "an install workspace leaked: {}",
+            entry.path().display()
+        );
+    }
 }
 
 fn command_available(name: &str) -> bool {
@@ -199,29 +220,30 @@ fn grammar_install_with_local_repo_enables_runtime_selection_and_result_validati
         return;
     }
 
-    let grammar_repo_dir = tempdir().expect("grammar repo tempdir should be created");
-    prepare_local_grammar_repo(grammar_repo_dir.path());
-    initialize_git_repository(grammar_repo_dir.path());
-
+    let fixtures = tempdir().expect("fixture directory should be created");
+    let repo_name = "local grammar";
+    let grammar_repo = fixtures.path().join(repo_name);
+    prepare_local_grammar_repo(&grammar_repo);
+    initialize_git_repository(&grammar_repo);
     let kanna_home = tempdir().expect("identedit home tempdir should be created");
+    let install_temp_root = tempdir().expect("install temp root should be created");
 
-    let install_output = run_identedit(
-        &[
+    let install_output = identedit_command(kanna_home.path())
+        .current_dir(fixtures.path())
+        .env("TMPDIR", install_temp_root.path())
+        .args([
             "grammar",
             "install",
             "jsonlocal",
             "--repo",
-            grammar_repo_dir
-                .path()
-                .to_str()
-                .expect("path should be utf-8"),
+            repo_name,
             "--symbol",
             "tree_sitter_json",
             "--ext",
             "jlocal",
-        ],
-        kanna_home.path(),
-    );
+        ])
+        .output()
+        .expect("failed to run identedit binary");
     assert!(
         install_output.status.success(),
         "grammar install failed: {}",
@@ -233,9 +255,9 @@ fn grammar_install_with_local_repo_enables_runtime_selection_and_result_validati
     assert_eq!(install_response["installed"]["lang"], "jsonlocal");
     assert_eq!(install_response["installed"]["symbol"], "tree_sitter_json");
     assert_eq!(install_response["installed"]["extensions"][0], "jlocal");
+    assert_install_workspaces_removed(install_temp_root.path());
 
-    let workspace = tempdir().expect("workspace tempdir should be created");
-    let target_file = workspace.path().join("fixture.jlocal");
+    let target_file = fixtures.path().join("fixture.jlocal");
     fs::write(
         &target_file,
         "{\n  \"config\": {\n    \"enabled\": true\n  },\n  \"threshold\": 1e+09\n}\n",
@@ -308,9 +330,11 @@ fn grammar_install_symbol_mismatch_does_not_create_manifest_or_library() {
     initialize_git_repository(grammar_repo_dir.path());
 
     let kanna_home = tempdir().expect("identedit home tempdir should be created");
+    let install_temp_root = tempdir().expect("install temp root should be created");
 
-    let install_output = run_identedit(
-        &[
+    let install_output = identedit_command(kanna_home.path())
+        .env("TMPDIR", install_temp_root.path())
+        .args([
             "grammar",
             "install",
             "jsonbad",
@@ -323,9 +347,9 @@ fn grammar_install_symbol_mismatch_does_not_create_manifest_or_library() {
             "tree_sitter_json_typo",
             "--ext",
             "jbad",
-        ],
-        kanna_home.path(),
-    );
+        ])
+        .output()
+        .expect("failed to run identedit binary");
     assert!(
         !install_output.status.success(),
         "install should fail when symbol does not exist"
@@ -357,6 +381,7 @@ fn grammar_install_symbol_mismatch_does_not_create_manifest_or_library() {
         !library_path.exists(),
         "library file must not remain after failed install"
     );
+    assert_install_workspaces_removed(install_temp_root.path());
 }
 
 #[test]
