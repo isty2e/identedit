@@ -144,28 +144,86 @@ pub(super) fn collect_named_nodes(
 }
 
 fn visit_nodes<'tree>(
-    node: Node<'tree>,
+    root: Node<'tree>,
     source: &[u8],
     visit: &mut impl FnMut(Node<'tree>, Option<String>),
 ) -> bool {
+    let mut cursor = root.walk();
     let mut valid = true;
-    if node.is_named() {
-        if node.start_byte() <= node.end_byte() && node.end_byte() <= source.len() {
-            visit(node, extract_node_name(node, source));
-        } else {
-            valid = false;
+
+    loop {
+        let node = cursor.node();
+        if node.is_named() {
+            if node.start_byte() <= node.end_byte() && node.end_byte() <= source.len() {
+                visit(node, extract_node_name(node, source));
+            } else {
+                valid = false;
+            }
+        }
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return valid;
+            }
         }
     }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        valid &= visit_nodes(child, source, visit);
-    }
-    valid
 }
 
 fn extract_node_name(node: Node<'_>, source: &[u8]) -> Option<String> {
     node.child_by_field_name("name")
         .and_then(|name_node| node_text(name_node, source))
         .filter(|name| !name.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NameProjectionError, Parser, Path, collect_named_nodes, collect_nodes};
+
+    #[test]
+    fn subtree_projection_keeps_nested_names_without_visiting_outside_siblings() {
+        let source =
+            b"function outer() { if (ready) { function inner() {} } }\nfunction outside() {}";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let outer = tree.root_node().named_child(0).unwrap();
+
+        let names = collect_named_nodes(outer, source).unwrap();
+        let declarations = names
+            .iter()
+            .filter(|node| node.kind == "function_declaration")
+            .map(|node| node.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(declarations, ["outer", "inner"]);
+    }
+
+    #[test]
+    fn out_of_range_ancestor_keeps_valid_handles_but_invalidates_named_projection() {
+        let prefix = b"def kept():\n    pass\n";
+        let source = b"def kept():\n    pass\ndef outside():\n    pass\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+
+        assert!(matches!(
+            collect_named_nodes(root, prefix),
+            Err(NameProjectionError::InvalidSpan)
+        ));
+        let mut handles = Vec::new();
+        collect_nodes(root, Path::new("fixture.py"), prefix, &mut handles);
+        let declarations = handles
+            .iter()
+            .filter(|handle| handle.kind == "function_definition")
+            .map(|handle| handle.name.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(declarations, [Some("kept")]);
+    }
 }
