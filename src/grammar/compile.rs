@@ -9,12 +9,7 @@ use libloading::Library;
 use crate::error::IdenteditError;
 
 pub(super) fn clone_repo(repo: &str, destination: &Path) -> Result<(), IdenteditError> {
-    let output = Command::new("git")
-        .arg("clone")
-        .arg("--depth")
-        .arg("1")
-        .arg(repo)
-        .arg(destination)
+    let output = clone_repo_command(repo, destination)
         .output()
         .map_err(|error| IdenteditError::GrammarInstall {
             message: format!("failed to invoke git clone for '{repo}': {error}"),
@@ -30,6 +25,14 @@ pub(super) fn clone_repo(repo: &str, destination: &Path) -> Result<(), Identedit
             String::from_utf8_lossy(&output.stderr).trim()
         ),
     })
+}
+
+fn clone_repo_command(repo: &str, destination: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args(["clone", "--depth", "1", "--", repo])
+        .arg(destination);
+    command
 }
 
 pub(super) fn compile_grammar_repository(
@@ -241,7 +244,28 @@ impl Drop for InstallWorkspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_grammar_install_supported, shared_library_extension};
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use super::{clone_repo_command, ensure_grammar_install_supported, shared_library_extension};
+
+    #[test]
+    fn clone_repo_passes_repository_as_one_operand_after_options() {
+        let destination = Path::new("install workspace").join("source");
+        // Inspect the command without invoking Git.
+        for repo in ["relative grammar", "--example-repository"] {
+            let command = clone_repo_command(repo, &destination);
+            assert_eq!(command.get_program(), "git");
+            assert!(command.get_args().eq([
+                OsStr::new("clone"),
+                OsStr::new("--depth"),
+                OsStr::new("1"),
+                OsStr::new("--"),
+                OsStr::new(repo),
+                destination.as_os_str(),
+            ]));
+        }
+    }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
