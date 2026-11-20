@@ -481,6 +481,45 @@ fn file_move_receipt_canonicalizes_existing_chain_destinations() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn file_move_accepts_symlinked_ancestors_in_preview_and_commit() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempdir().unwrap();
+    let incoming = dir.path().join("incoming");
+    let outgoing = dir.path().join("outgoing");
+    let incoming_alias = dir.path().join("incoming-alias");
+    let outgoing_alias = dir.path().join("outgoing-alias");
+    fs::create_dir(&incoming).unwrap();
+    fs::create_dir(&outgoing).unwrap();
+    symlink(&incoming, &incoming_alias).unwrap();
+    symlink(&outgoing, &outgoing_alias).unwrap();
+    let source = incoming.join("source.txt");
+    let destination = outgoing_alias.join("destination.txt");
+    fs::write(&source, "original").unwrap();
+    let files = vec![move_plan(
+        &incoming_alias.join("source.txt"),
+        &destination,
+        "original",
+    )];
+    let entry = json!({"kind":"file_move","source":fs::canonicalize(&source).unwrap(),
+        "destination":destination,"operation_index":0});
+
+    let preview = apply_plan_in_directory(dir.path(), files.clone(), true);
+    assert_locations(&preview, vec![entry.clone()], 1);
+    assert_eq!(fs::read_to_string(&source).unwrap(), "original");
+    assert!(!destination.exists());
+
+    let committed = apply_plan_in_directory(dir.path(), files, false);
+    assert_locations(&committed, vec![entry], 1);
+    assert!(!source.exists());
+    assert_eq!(
+        fs::read_to_string(outgoing.join("destination.txt")).unwrap(),
+        "original"
+    );
+}
+
 #[test]
 fn same_file_move_reports_source_and_destination_under_one_operation() {
     let dir = tempdir().unwrap();

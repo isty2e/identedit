@@ -624,6 +624,50 @@ fn apply_json_mode_move_rejects_duplicate_source_alias_paths() {
 }
 #[cfg(unix)]
 #[test]
+fn apply_json_mode_rejects_dangling_move_source_before_other_edits() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempdir().unwrap();
+    let edit = workspace.path().join("notes.txt");
+    let link = workspace.path().join("link.txt");
+    let target = workspace.path().join("missing.txt");
+    let destination = workspace.path().join("destination.txt");
+    let before = "notes\n";
+    fs::write(&edit, before).unwrap();
+    symlink(&target, &link).unwrap();
+
+    let edit_request = json!({
+        "command":"edit","file":edit,"operations":[{
+            "target":{"type":"file_end","expected_file_hash":common::hash_text(before)},
+            "op":{"type":"insert","new_text":"more notes\n"}
+        }]
+    });
+    let compiled = common::run_identedit_with_stdin(&["edit", "--json"], &edit_request.to_string());
+    assert!(compiled.status.success(), "{:?}", compiled);
+    let mut changeset: Value = serde_json::from_slice(&compiled.stdout).unwrap();
+    changeset["files"].as_array_mut().unwrap().push(json!({
+        "file":link,"operations":[{
+            "target":{"type":"file","expected_file_hash":common::hash_text("expected source")},
+            "op":{"type":"move","to":destination},
+            "preview":{"move":{"from":link,"to":destination}}
+        }]
+    }));
+    let input = json!({"command":"apply","changeset":changeset}).to_string();
+
+    for args in [&["apply", "--json", "--dry-run"][..], &["apply", "--json"]] {
+        let output = run_identedit_with_stdin(args, &input);
+        assert!(!output.status.success());
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["error"]["type"], "invalid_request");
+        assert_eq!(fs::read_to_string(&edit).unwrap(), before);
+        assert_eq!(fs::read_link(&link).unwrap(), target);
+        assert!(!target.exists());
+        assert!(!destination.exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn apply_json_mode_move_rejects_existing_symlink_destination() {
     use std::os::unix::fs::symlink;
 
@@ -661,25 +705,32 @@ fn apply_json_mode_move_rejects_existing_symlink_destination() {
         }
     });
 
-    let output = run_identedit_with_stdin(&["apply", "--json"], &request.to_string());
-    assert!(
-        !output.status.success(),
-        "existing symlink destination should be treated as occupied path"
-    );
+    let input = request.to_string();
+    for args in [&["apply", "--json", "--dry-run"][..], &["apply", "--json"]] {
+        let output = run_identedit_with_stdin(args, &input);
+        assert!(!output.status.success());
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["error"]["type"], "invalid_request");
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(symlink_destination.to_str().unwrap())
+        );
 
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(response["error"]["type"], "invalid_request");
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| { message.contains("Destination path already exists") }),
-        "expected destination-exists rejection for symlink path"
-    );
-    assert!(
-        source_path.exists(),
-        "source should not be moved on rejection"
-    );
+        assert_eq!(
+            fs::read_link(&symlink_destination).unwrap(),
+            real_destination
+        );
+        assert_eq!(
+            fs::read_to_string(&source_path).unwrap(),
+            "def keep():\n    return 1\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&real_destination).unwrap(),
+            "def already_here():\n    return 9\n"
+        );
+    }
 }
 #[test]
 fn apply_json_mode_executes_move_with_relative_paths_in_json_mode() {
