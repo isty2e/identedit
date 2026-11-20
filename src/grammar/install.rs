@@ -6,12 +6,13 @@ use tempfile::{Builder, TempDir};
 
 use crate::error::IdenteditError;
 
-use super::catalog::{InstallResolution, ResolutionSource, resolve_install_request};
+use super::catalog::{InstallResolution, InstallSources, resolve_install_request};
 use super::compile::{
-    clone_repo, compile_grammar_repository, ensure_grammar_install_supported, resolve_symbol,
+    compile_grammar_repository, ensure_grammar_install_supported, resolve_symbol,
     shared_library_filename,
 };
 use super::manifest::{ensure_grammars_dir, upsert_manifest_entry};
+use super::source::acquire_source;
 use super::{InstallGrammarRequest, InstalledGrammar};
 
 pub(super) fn install_grammar(
@@ -20,29 +21,31 @@ pub(super) fn install_grammar(
     ensure_grammar_install_supported()?;
     let resolution = resolve_install_request(&request)?;
     let grammars_dir = ensure_grammars_dir()?;
+
     let mut failures = Vec::new();
 
-    for repo in &resolution.repo_candidates {
+    for source in resolution.sources.candidates() {
+        let repo = source.repo();
         let workspace = create_install_workspace()?;
         let source_dir = workspace.path().join("source");
         let build_output = workspace
             .path()
             .join(shared_library_filename(&resolution.lang));
 
-        if let Err(error) = clone_repo(repo, &source_dir) {
+        if let Err(error) = acquire_source(source, workspace.path(), &source_dir) {
             failures.push(format!("{repo}: {error}"));
             continue;
         }
 
         if let Err(error) = compile_grammar_repository(&source_dir, &build_output) {
-            failures.push(format!("{repo}: {error}"));
+            failures.push(format!("{repo}: build: {error}"));
             continue;
         }
 
         let resolved_symbol = match resolve_symbol(&build_output, &resolution.symbol_candidates) {
             Ok(symbol) => symbol,
             Err(error) => {
-                failures.push(format!("{repo}: {error}"));
+                failures.push(format!("{repo}: symbol: {error}"));
                 continue;
             }
         };
@@ -59,7 +62,7 @@ pub(super) fn install_grammar(
 
         let installed = InstalledGrammar {
             lang: resolution.lang.clone(),
-            repo: repo.clone(),
+            repo: repo.to_owned(),
             symbol: resolved_symbol,
             extensions: resolution.extensions.clone(),
             library_path: installed_path,
@@ -91,14 +94,11 @@ fn create_install_workspace() -> Result<TempDir, IdenteditError> {
         })
 }
 
-fn install_guidance(resolution: &InstallResolution) -> String {
-    match resolution.source {
-        ResolutionSource::Builtin => {
-            "You can override source details with --repo, --symbol, and --ext.".to_string()
-        }
-        ResolutionSource::Convention => {
-            "Convention fallback failed. Retry with --repo and --symbol for explicit source details."
-                .to_string()
+fn install_guidance(resolution: &InstallResolution<'_>) -> &'static str {
+    match resolution.sources {
+        InstallSources::Pinned(_) => "Use --repo to install from a different repository you trust.",
+        InstallSources::Explicit(_) => {
+            "Check the --repo source and use --symbol if it exports a different language symbol."
         }
     }
 }

@@ -148,7 +148,7 @@ fn shared_library_extension() -> &'static str {
 }
 
 #[test]
-fn grammar_install_convention_language_without_ext_returns_invalid_request() {
+fn grammar_install_unknown_language_without_ext_returns_invalid_request() {
     let kanna_home = tempdir().expect("identedit home tempdir should be created");
 
     let output = run_identedit(&["grammar", "install", "unknownlang"], kanna_home.path());
@@ -172,6 +172,26 @@ fn grammar_install_convention_language_without_ext_returns_invalid_request() {
         message.contains("unknownlang"),
         "message should mention rejected language, got: {message}"
     );
+}
+
+#[test]
+fn grammar_install_unpinned_name_requires_an_explicit_source_without_creating_install_files() {
+    let home = tempdir().unwrap();
+    let output = run_identedit(
+        &["grammar", "install", "unknownlang", "--ext", "unknown"],
+        home.path(),
+    );
+
+    assert!(!output.status.success());
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["type"], "invalid_request");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--repo")
+    );
+    assert!(!home.path().join("grammars").exists());
 }
 
 #[test]
@@ -208,8 +228,8 @@ fn grammar_install_invalid_repo_returns_grammar_install_failed_with_guidance() {
         "message should mention failing language, got: {message}"
     );
     assert!(
-        message.contains("Convention fallback failed. Retry with --repo and --symbol"),
-        "message should include convention guidance, got: {message}"
+        message.contains("--repo"),
+        "message should identify the repository option, got: {message}"
     );
 }
 

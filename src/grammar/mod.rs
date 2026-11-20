@@ -8,6 +8,7 @@ mod catalog;
 mod compile;
 mod install;
 mod manifest;
+mod source;
 
 pub use manifest::installed_grammars_for_runtime;
 

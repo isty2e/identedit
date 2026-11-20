@@ -11,15 +11,19 @@ pub struct GrammarArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GrammarCommands {
-    #[command(about = "Install a tree-sitter grammar and register it for runtime loading")]
+    #[command(about = "Build and load a pinned or caller-selected native tree-sitter grammar")]
     Install(GrammarInstallArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct GrammarInstallArgs {
-    #[arg(value_name = "LANG", help = "Language name (e.g. toml, yaml, ruby)")]
+    #[arg(value_name = "LANG", help = "Language name; use --repo if not pinned")]
     pub language: String,
-    #[arg(long, value_name = "URL", help = "Override grammar repository URL")]
+    #[arg(
+        long,
+        value_name = "SOURCE",
+        help = "Build and load native code from this trusted Git URL or path instead of a catalog pin"
+    )]
     pub repo: Option<String>,
     #[arg(long, value_name = "SYMBOL", help = "Override language symbol name")]
     pub symbol: Option<String>,

@@ -3,16 +3,48 @@ use crate::error::IdenteditError;
 use super::InstallGrammarRequest;
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum ResolutionSource {
-    Builtin,
-    Convention,
+pub(super) struct PinnedSource<'a> {
+    pub repo: &'a str,
+    pub commit: &'a str,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct InstallResolution {
-    pub source: ResolutionSource,
+#[derive(Debug)]
+pub(super) enum InstallSources<'a> {
+    Pinned(&'a [PinnedSource<'a>]),
+    Explicit(&'a str),
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum InstallSource<'a> {
+    Pinned(PinnedSource<'a>),
+    Explicit(&'a str),
+}
+
+impl<'a> InstallSource<'a> {
+    pub fn repo(self) -> &'a str {
+        match self {
+            Self::Pinned(pin) => pin.repo,
+            Self::Explicit(repo) => repo,
+        }
+    }
+}
+
+impl<'a> InstallSources<'a> {
+    pub fn candidates(&self) -> impl Iterator<Item = InstallSource<'a>> + use<'a> {
+        let (explicit, pins): (_, &[_]) = match *self {
+            Self::Explicit(repo) => (Some(InstallSource::Explicit(repo)), &[]),
+            Self::Pinned(pins) => (None, pins),
+        };
+        explicit
+            .into_iter()
+            .chain(pins.iter().copied().map(InstallSource::Pinned))
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct InstallResolution<'a> {
+    pub sources: InstallSources<'a>,
     pub lang: String,
-    pub repo_candidates: Vec<String>,
     pub symbol_candidates: Vec<String>,
     pub extensions: Vec<String>,
 }
@@ -316,22 +348,13 @@ const BUILTIN_GRAMMARS: &[BuiltinGrammar] = &[
 
 pub(super) fn resolve_install_request(
     request: &InstallGrammarRequest,
-) -> Result<InstallResolution, IdenteditError> {
+) -> Result<InstallResolution<'_>, IdenteditError> {
     let lang = normalize_language_name(&request.lang)?;
     let maybe_builtin = BUILTIN_GRAMMARS.iter().find(|entry| entry.lang == lang);
 
-    let source = if maybe_builtin.is_some() {
-        ResolutionSource::Builtin
-    } else {
-        ResolutionSource::Convention
-    };
-
     if maybe_builtin.is_none() && request.extensions.is_empty() {
         return Err(IdenteditError::InvalidRequest {
-            message: format!(
-                "--ext is required for convention fallback languages ('{}' is not in the built-in registry)",
-                lang
-            ),
+            message: format!("--ext is required for '{lang}' because it has no default extensions"),
         });
     }
 
@@ -346,10 +369,21 @@ pub(super) fn resolve_install_request(
         normalize_extensions(&request.extensions)?
     };
 
-    let repo_candidates = if let Some(repo) = &request.repo {
-        vec![repo.clone()]
+    let sources = if let Some(repo) = request.repo.as_deref() {
+        InstallSources::Explicit(repo)
     } else {
-        default_repository_candidates(&lang)
+        let pins = pinned_sources(&lang);
+        if pins.is_empty() {
+            return Err(IdenteditError::InvalidRequest {
+                message: format!(
+                    "No pinned grammar for '{lang}'; use --repo with a repository you trust. \
+                     Convention-based suggestions (not verified): \
+                     https://github.com/tree-sitter/tree-sitter-{lang}, \
+                     https://github.com/tree-sitter-grammars/tree-sitter-{lang}."
+                ),
+            });
+        }
+        InstallSources::Pinned(pins)
     };
 
     let symbol_candidates = if let Some(symbol) = &request.symbol {
@@ -359,9 +393,8 @@ pub(super) fn resolve_install_request(
     };
 
     Ok(InstallResolution {
-        source,
+        sources,
         lang,
-        repo_candidates,
         symbol_candidates,
         extensions,
     })
@@ -402,11 +435,22 @@ fn normalize_extensions(values: &[String]) -> Result<Vec<String>, IdenteditError
     Ok(normalized)
 }
 
-fn default_repository_candidates(lang: &str) -> Vec<String> {
-    vec![
-        format!("https://github.com/tree-sitter/tree-sitter-{lang}.git"),
-        format!("https://github.com/tree-sitter-grammars/tree-sitter-{lang}.git"),
-    ]
+fn pinned_sources(lang: &str) -> &'static [PinnedSource<'static>] {
+    match lang {
+        "elixir" => &[PinnedSource {
+            repo: "https://github.com/elixir-lang/tree-sitter-elixir.git",
+            commit: "cb32ccbe17c67037b09e31bf9beb22cdae6ed8e9",
+        }],
+        "zig" => &[PinnedSource {
+            repo: "https://github.com/tree-sitter-grammars/tree-sitter-zig.git",
+            commit: "6479aa13f32f701c383083d8b28360ebd682fb7d",
+        }],
+        "dart" => &[PinnedSource {
+            repo: "https://github.com/UserNobody14/tree-sitter-dart.git",
+            commit: "0038280b774b65c1b89ba7fec50624d8baed9fe1",
+        }],
+        _ => &[],
+    }
 }
 
 fn default_symbol_candidates(lang: &str) -> Vec<String> {
@@ -421,29 +465,27 @@ fn default_symbol_candidates(lang: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{InstallResolution, ResolutionSource, resolve_install_request};
+    use super::{InstallSource, InstallSources, PinnedSource, resolve_install_request};
     use crate::grammar::InstallGrammarRequest;
 
     #[test]
-    fn resolve_builtin_language_uses_default_extensions() {
+    fn resolve_pinned_language_uses_default_extensions() {
         let request = InstallGrammarRequest {
-            lang: "toml".to_string(),
+            lang: "Elixir".to_string(),
             repo: None,
             symbol: None,
             extensions: Vec::new(),
         };
-        let resolved: InstallResolution =
-            resolve_install_request(&request).expect("builtin resolution should succeed");
+        let resolved = resolve_install_request(&request).unwrap();
 
-        assert!(matches!(resolved.source, ResolutionSource::Builtin));
-        assert_eq!(resolved.lang, "toml");
-        assert_eq!(resolved.extensions, vec!["toml".to_string()]);
-        assert_eq!(resolved.repo_candidates.len(), 2);
-        assert_eq!(resolved.symbol_candidates[0], "tree_sitter_toml");
+        assert!(matches!(resolved.sources, InstallSources::Pinned([_])));
+        assert_eq!(resolved.lang, "elixir");
+        assert_eq!(resolved.extensions, ["ex", "exs"]);
+        assert_eq!(resolved.symbol_candidates, ["tree_sitter_elixir"]);
     }
 
     #[test]
-    fn resolve_convention_fallback_requires_extension_override() {
+    fn resolve_unknown_language_requires_extension_override() {
         let request = InstallGrammarRequest {
             lang: "unknownlang".to_string(),
             repo: None,
@@ -451,7 +493,7 @@ mod tests {
             extensions: Vec::new(),
         };
         let error = resolve_install_request(&request)
-            .expect_err("convention fallback without --ext should fail");
+            .expect_err("a language without default extensions needs --ext");
 
         match error {
             crate::error::IdenteditError::InvalidRequest { message } => {
@@ -462,29 +504,45 @@ mod tests {
     }
 
     #[test]
-    fn resolve_convention_fallback_uses_repo_and_symbol_candidates() {
+    fn explicit_repository_overrides_pins_without_discarding_routing_defaults() {
         let request = InstallGrammarRequest {
-            lang: "foo-bar".to_string(),
-            repo: None,
+            lang: "zig".to_string(),
+            repo: Some("local grammar".to_string()),
             symbol: None,
-            extensions: vec!["foo".to_string()],
+            extensions: Vec::new(),
         };
-        let resolved = resolve_install_request(&request).expect("resolution should succeed");
+        let resolved = resolve_install_request(&request).unwrap();
 
-        assert!(matches!(resolved.source, ResolutionSource::Convention));
-        assert_eq!(
-            resolved.repo_candidates,
-            vec![
-                "https://github.com/tree-sitter/tree-sitter-foo-bar.git".to_string(),
-                "https://github.com/tree-sitter-grammars/tree-sitter-foo-bar.git".to_string()
-            ]
-        );
-        assert_eq!(
-            resolved.symbol_candidates,
-            vec![
-                "tree_sitter_foo-bar".to_string(),
-                "tree_sitter_foo_bar".to_string()
-            ]
-        );
+        let mut candidates = resolved.sources.candidates();
+        assert!(matches!(
+            candidates.next(),
+            Some(InstallSource::Explicit("local grammar"))
+        ));
+        assert!(candidates.next().is_none());
+        assert_eq!(resolved.extensions, ["zig"]);
+        assert_eq!(resolved.symbol_candidates, ["tree_sitter_zig"]);
+    }
+
+    #[test]
+    fn catalog_fallback_keeps_each_candidate_with_its_pin() {
+        let pins = [
+            PinnedSource {
+                repo: "first grammar",
+                commit: "1111111111111111111111111111111111111111",
+            },
+            PinnedSource {
+                repo: "second grammar",
+                commit: "2222222222222222222222222222222222222222",
+            },
+        ];
+        let sources = InstallSources::Pinned(&pins);
+        let resolved = sources
+            .candidates()
+            .map(|source| match source {
+                InstallSource::Pinned(pin) => (pin.repo, pin.commit),
+                InstallSource::Explicit(_) => panic!("only pins may enter catalog fallback"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(resolved, pins.map(|pin| (pin.repo, pin.commit)));
     }
 }
