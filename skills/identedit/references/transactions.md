@@ -2,16 +2,16 @@
 
 ## Multi-File Transactions
 
-Use `edit` to compile a changeset first, then apply it atomically.
+Compile code or config edits with `edit`, then validate and commit the changeset with `apply`. [Whole-file moves](protocol.md#whole-file-moves) are specified directly in the changeset and use JSON preview, even when combined with text edits to other files.
 
 ```bash
 # request.json contains the edit request, either single-file or files[] batch shape.
 identedit edit --json < request.json > changeset.json
 
-# Validate without writing.
+# Validate and preview in JSON without writing.
 identedit apply --dry-run changeset.json
 
-# Preview text changes without writing (whole-file renames use JSON above).
+# Alternatively, preview a text-only plan as a unified diff.
 identedit apply --dry-run --diff --color never changeset.json
 
 # Commit from plan file.
@@ -33,11 +33,11 @@ jq -n --slurpfile plan changeset.json '{
 }' | identedit apply --json
 ```
 
-`apply --json` expects a compiled changeset, i.e. the output of `identedit edit --json`, not a raw edit request.
+`apply --json` expects a changeset under `changeset`, not a raw edit request. For code or config edits, pass the output of `identedit edit --json` there.
 
 Successful commits include an uncapped `diff: {text, file_moves}` in JSON. Use `--no-diff` to omit it. The diff describes the committed buffers, not a later file read; failures and rollbacks do not return success diffs. See [change diffs](protocol.md#committed-change-diffs) for rename and coordinate semantics.
 
-If any file fails, all files are rolled back to their original state.
+If validation fails, no transaction writes begin. If a commit fails after making changes, Identedit attempts to undo those changes and reports incomplete recovery as `rollback_failed`.
 
 ## Staging-Only Rollback Drill
 
@@ -56,7 +56,7 @@ Use this only for operational drills. It injects a deterministic commit-stage fa
 | `ambiguous_target` | Multiple matches for a selector | Inspect candidates and any `candidate_summary`; for omitted targets, use `read --json` without `--symbol` or filters, adding `--verbose` for bodies. Use the chosen guards and JSON `span_hint` for duplicate identities; see the [candidate contract](protocol.md#ambiguity-candidate-details) |
 | `path_changed` | File modified during apply | Re-run full pipeline (`read`, `edit`, `apply`) |
 | `resource_busy` | Apply lock held, e.g. by another identedit preview or apply | Wait briefly, then retry once within the [shared target limit](../SKILL.md#recovery-and-output-contracts) |
-| `rollback_failed` | Apply failed and rollback incomplete | Inspect files manually, then re-run pipeline |
+| `rollback_failed` | Apply failed and rollback was incomplete | Inspect the affected files and rebuild the plan from their current state before retrying |
 | `parse_failure`, `error.stage: "source"` | Provider rejected the original source | Repair the source with direct editing, then retry |
 | `parse_failure`, `error.stage: "proposed_result"` | Provider rejected the proposed file; no transaction writes started | Correct replacement text or other edits, then retry once with `--dry-run` |
 | Other `parse_failure` | Provider setup failed or stage is unspecified | Inspect diagnostics; do not infer that the original file is invalid |

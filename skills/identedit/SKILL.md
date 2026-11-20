@@ -1,6 +1,6 @@
 ---
 name: identedit
-description: "Precision code editing with precondition safety. USE WHEN: multi-file atomic edits, repeated target text, config-path edits, or a previous edit attempt failed or landed in the wrong place. NOT for: trivial one-line fixes, full-file rewrites, pattern-wide structural rewrites (use ast-grep), file-system renames."
+description: "Precision code editing with precondition safety. USE WHEN: transactional multi-file edits, repeated target text, config-path edits, or a previous edit attempt failed or landed in the wrong place. NOT for: trivial one-line fixes, full-file rewrites, pattern-wide structural rewrites (use ast-grep), file-system renames."
 ---
 
 # Identedit
@@ -63,9 +63,10 @@ Config paths support JSON, YAML and TOML; choose the set, append or delete actio
 
 - Bare keys: `service.retries`; array/sequence indices: `items[0].name`. Quote literal-key arguments: `--config-path 'services["sidecar.port"]'`.
 - JSON `--set-value` preserves payload whitespace, including file/stdin final newlines; omit unwanted final newlines.
-- `--create-missing`: map/standard-table keys, not array/sequence elements. Delete/append reject it; append needs an existing array/sequence. Multi-document YAML creation requires `--document-index <N>`.
+- `--append-value` adds one explicit value to an existing array or sequence. Use `null` explicitly where supported.
+- `--create-missing`: map/standard-table keys, not array/sequence elements. Delete and append reject it. Multi-document YAML creation requires `--document-index <N>`.
 - Multiple edits: original-source paths through `edit --json`; overlapping writes fail. See [batch rules](references/config-path-patching.md#batch-edit-intents).
-- Use line/direct editing for YAML anchors/merge keys/tags/sequence growth, TOML table arrays, or comment-dependent placement.
+- Use line/direct editing for changes that depend on YAML anchors, merge keys, or tags, for TOML table arrays, or for comment-dependent placement.
 - Config plans require unchanged full-file source bytes. Replan after changes; repair cannot substitute. See [file source preconditions](references/protocol.md#file-source-preconditions).
 
 ## Text, preview, and verification
@@ -101,7 +102,7 @@ identedit apply --dry-run --diff --color never changeset.json
 identedit apply changeset.json
 ```
 
-`edit` builds without writing; `apply --dry-run --diff` validates/previews text. Omit `--diff` for JSON validation, including whole-file renames. `apply` commits the generated changeset, not the original request. Multi-file diffs use canonical source-path sort order, not request order.
+`edit` builds without writing; `apply --dry-run --diff` validates/previews text. For [whole-file moves](references/protocol.md#whole-file-moves), use `apply --dry-run` without `--diff`. `apply` commits the generated changeset, not the original request. Multi-file diffs use canonical source-path sort order, not request order.
 
 Single-file request; copy identities/hashes from `read` (illustrative values below):
 

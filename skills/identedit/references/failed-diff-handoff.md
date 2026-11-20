@@ -112,4 +112,4 @@ jq '{
 
 For an ambiguous changed block, inspect every `candidate.preview`, select the intended candidate explicitly, and use its `target` and `op`. Do not select candidate zero by convention.
 
-Multiple change candidates are discovery output, not an atomic changeset. Build an `edit --json` request when several selected operations must commit together.
+Handoff candidates are discovery results. To apply several selected edits as a transaction, compile them into one changeset with `edit --json`.

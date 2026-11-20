@@ -11,7 +11,7 @@ Agents often edit code through text-oriented tools such as `sed`, unified patche
 Identedit treats edits as verified operations:
 
 - **Precondition-checked.** Edits validate their supplied target conditions before writing. A line-range edit checks its boundary anchors, not the lines between them; see the [line editing reference](skills/identedit/references/line-editing.md).
-- **Transactional.** Multi-file edits are preflighted together, and committed changes are rolled back if a later commit fails. Incomplete rollback is reported explicitly.
+- **Transactional.** Multi-file edits are checked before writing. If a later write fails, Identedit attempts to undo changes it has already made and reports incomplete recovery.
 - **Structural or line-anchored.** Agents can address functions and classes, exact lines, file boundaries, or nested config paths.
 - **Diagnosable.** Failures return structured errors with recovery information.
 
@@ -26,7 +26,7 @@ identedit patch src/example.py --symbol process_data \
 identedit patch config.yaml --config-path server.port --set-value 8080
 ```
 
-Use `edit` -> `apply` for multiple operations, moves, or multi-file transactions; see the [mixed code/config batch](#build-an-atomic-multi-file-edit) below.
+Use `edit` -> `apply` for multiple operations, structural moves, or multi-file edits; see the [mixed code/config batch](#build-a-multi-file-changeset) below.
 
 Use line anchors when structural targeting is too coarse:
 
@@ -116,7 +116,7 @@ identedit patch config.yaml \
   --config-path 'services["sidecar.port"].enabled' --set-value true
 ```
 
-### Build an atomic multi-file edit
+### Build a multi-file changeset
 
 `edit` only builds a changeset. `apply --dry-run` validates it without writing. If a later commit fails, `apply` attempts guarded rollback and reports any incomplete recovery.
 
@@ -156,7 +156,7 @@ Successful `patch` and `apply` commits include the actual change as JSON `diff: 
 ## Safety boundary
 
 - `edit` and `apply --dry-run` never modify files.
-- `patch --dry-run --diff` and `apply --dry-run --diff` print unified diffs of validated before/after text without writing. Whole-file renames use ordinary JSON dry-run instead. See [diff preview details](skills/identedit/references/protocol.md#text-diff-previews) for ordering, replay and newline behavior.
+- `patch --dry-run --diff` and `apply --dry-run --diff` print [unified diffs](skills/identedit/references/protocol.md#text-diff-previews) of validated changes without writing. Use `apply --dry-run` without `--diff` for [whole-file moves](skills/identedit/references/protocol.md#whole-file-moves).
 - Failed-diff handoff discovers candidates but never applies them.
 - Line repair is opt-in and fails rather than choosing an ambiguous remap.
 - Node-operation files must pass a final parse by their selected syntax provider before any transaction writes, including in dry-run. Line/file-boundary-only files and fallback edits are excluded; see the [scope and limitations](skills/identedit/references/protocol.md#node-result-parsing).
@@ -167,7 +167,7 @@ Successful `patch` and `apply` commits include the actual change as JSON `diff: 
 
 Python, JavaScript/JSX, TypeScript/TSX, Rust, Go, C, C++, Java, Kotlin, Ruby, C#, Swift, PHP, Perl, Lua, Bash, Zsh, Fish, HTML, CSS, SCSS, Markdown, JSON, YAML, TOML, XML, Protobuf, SQL, HCL, Dockerfile
 
-Additional tree-sitter grammars can be installed on supported hosts.
+On macOS and Linux, [install additional grammars](skills/identedit/references/languages.md#dynamic-grammar-install) by name from the pinned catalog or from a Git repository you trust.
 
 ## Documentation
 

@@ -11,7 +11,7 @@ The supported commands are:
 - `apply`: validate or commit a compiled changeset;
 - `patch`: build and optionally apply one single-target operation;
 - `merge`: combine non-conflicting changesets;
-- `grammar`: install a dynamic tree-sitter grammar.
+- `grammar`: [install a dynamic Tree-sitter grammar](languages.md#dynamic-grammar-install).
 
 Run `identedit <command> --help` for the complete flag surface. Identedit does not expose a supported Rust library API.
 
@@ -132,17 +132,27 @@ Both fields default to the empty string. Empty fields are omitted from compiled 
 
 The same composition applies to same-file and cross-file moves. Same-file changesets retain nonempty affixes on the move operation; their preview still describes the source deletion. Cross-file moves lower to source deletion and destination insertion, whose `new_text` and preview contain the composed text. Use an `apply` binary that understands the new fields for same-file changesets with nonempty affixes.
 
-These are raw moves with explicit surrounding text, not formatting-aware or semantically safe relocation. Reindenting the moved body, repairing an emptied source block and deciding whether comments or decorators belong to the selection remain the caller's responsibility. Affixes do not relax target compatibility, overlap checks, destination preconditions, [result parsing](#node-result-parsing), or transaction behavior. Existing target support is unchanged; cross-file moves still require node destinations. Whole-file renames do not accept these fields. Structural moves remain an `edit` -> `apply` workflow, without a `patch` JSON entry point. Preview the compiled plan with `apply --dry-run --diff`.
+These are raw moves with explicit surrounding text, not formatting-aware or semantically safe relocation. Reindenting the moved body, repairing an emptied source block and deciding whether comments or decorators belong to the selection remain the caller's responsibility. Affixes do not relax target compatibility, overlap checks, destination preconditions, [result parsing](#node-result-parsing), or transaction behavior. Cross-file moves require node destinations; [whole-file moves](#whole-file-moves) do not accept affixes. Compile structural moves with `edit` and preview them with `apply --dry-run --diff`; `patch` does not accept these operations.
+
+## Whole-file moves
+
+Whole-file moves are written directly in an `apply` changeset; `edit` and `patch` do not produce them. The source `files` entry has one operation: a `file` target with `expected_file_hash` for the exact source bytes, a `move` operation with `to`, and `preview.move` with `from` and `to` matching the entry's `file` path and the operation's destination. The same file entry cannot also contain text edits.
+
+Use `apply --dry-run` for a JSON preview. A changeset with any whole-file move, even alongside text edits to other files, cannot be previewed with `--diff`.
+
+Preview and commit both reject a symbolic link at the source or destination itself, including a dangling link. Symlinks in parent directories are allowed. To move the file a source link points to, name that file directly in the plan. A destination link is occupied even if its target will move out in the same transaction; choose a destination that is not a link.
+
+Identedit canonicalizes accepted existing endpoints. For a missing destination, it resolves relative paths against the working directory and removes `.` and `..` lexically, without resolving parent symlinks. The JSON location and committed move entries use these normalized paths.
 
 ## Text diff previews
 
 `patch --dry-run --diff` and `apply --dry-run --diff` compare the validated original and proposed full-file text, not isolated node spans. They show actual surrounding indentation, combine edits into one diff per file, include three context lines, and merge nearby hunks. No-op edits emit no diff after validation. A failure emits the usual JSON error, never a partial successful diff.
 
-For `apply`, provide a plan file or raw plan on stdin; wrapped `apply --json` input also supports this output selection. Files appear in canonical absolute source-path sort order, while headers retain the plan's path spelling. `--repair` retains its existing guard rules and shows the repaired plan's validated result. Any whole-file move rejects the entire text-preview request; use ordinary `apply --dry-run` for its JSON preview instead.
+For `apply`, provide a plan file or raw plan on stdin; wrapped `apply --json` input also supports this output selection. Files appear in canonical absolute source-path sort order, while headers retain the plan's path spelling. `--repair` retains its existing guard rules and shows the repaired plan's validated result. Use JSON preview for [whole-file moves](#whole-file-moves).
 
 `--diff` requires `--dry-run`; `--color auto|always|never` requires `--diff` and defaults to terminal-based `auto`. `--verbose` does not append JSON to diff text. `--diff` and `--no-diff` cannot be combined. Patch JSON mode continues to return JSON and does not accept `--diff`.
 
-For portable replay, generate the diff using `--color never` and paths relative to the replay working directory, with no `..` components; run `patch -p0` from that same directory against the unchanged original. Identedit accepts absolute paths, but GNU patch can reject absolute or parent-traversing names in diff headers. CR bytes are preserved, including CRLF and mixed endings; missing final LF is marked with `\ No newline at end of file`. GNU patch also accepts `--binary`. Replay equivalence is to the proposed bytes, not a guarantee of valid syntax or behavior. Whole-file move previews are unsupported.
+For portable replay, generate the diff using `--color never` and paths relative to the replay working directory, with no `..` components; run `patch -p0` from that same directory against the unchanged original. Identedit accepts absolute paths, but GNU patch can reject absolute or parent-traversing names in diff headers. CR bytes are preserved, including CRLF and mixed endings; missing final LF is marked with `\ No newline at end of file`. GNU patch also accepts `--binary`. Replay equivalence is to the proposed bytes, not a guarantee of valid syntax or behavior.
 
 Hunk coordinates count LF-delimited physical lines. Read anchors and resolved locations also recognize standalone CR as a terminator, so their line numbers can differ from hunk numbers. **Do not use hunk coordinates as edit anchors.**
 
@@ -184,10 +194,8 @@ Successful edit execution and dry-run validation through `patch` or `apply` incl
 - `span` is a half-open byte range. Line numbers are 1-based; for nonempty spans, `end_line` is the last intersecting line. CRLF counts as one terminator; standalone CR and LF also end a line.
 - Inserts have a zero-width span at the resolved insertion point. At EOF, the line number is the final line without a terminator, or the following line after a terminal newline; an empty file uses line 1.
 - `operation_index` is zero-based within each file's operations. A same-file move has two entries with the same index: the source range and the destination insertion point. Counts measure locations, not operations.
-- Whole-file moves have `kind: "file_move"`, `source`, `destination`, and `operation_index`, with no text coordinates. Paths are those of the validated execution plan, not the submitted spelling. Accepted existing endpoints are canonicalized. A missing destination becomes an absolute, lexically normalized path (`.` and `..` removed), with relative paths resolved from the command's working directory; its parent symlinks are not resolved by this normalization.
+- [Whole-file moves](#whole-file-moves) have `kind: "file_move"`, normalized `source` and `destination` paths, and `operation_index`, with no text coordinates.
 - At most 16 entries are returned across the whole response, even with `--verbose`. `total` includes all resolved locations; `omitted` counts those not shown. This limit does not limit execution. Text plans appear in preflight file order, then whole-file moves in execution order; within a text plan, entries follow operation order.
-
-Whole-file moves reject a symbolic link as the final entry of either endpoint, including a dangling link. A destination link counts as occupied even if the file it points to is being moved out in the same plan. Directory links in ancestor components are allowed. If you intend to move the file a source link points to, name the file directly in the plan. The same rules apply to JSON previews and commits.
 
 Locations describe checked targets, not a minimal byte diff: config edits can replace a containing object, and line edits can adjust adjacent line terminators. A no-op may still report a checked location. Use the existing `changed`, `dry_run`, or `transaction.status` fields to interpret the outcome; locations alone do not mean a file was changed. Error responses, including rollback failures, do not include success locations.
 
@@ -218,7 +226,7 @@ For a range, only the supplied boundary anchors are checked against the current 
 
 ## Edit verbs
 
-`patch` and `edit` flag/JSON requests use target-aware verbs. `replace`, `delete`, and `insert_after` accept node or line targets; line targets operate on logical lines rather than raw byte spans. `end_anchor` is accepted only with line `replace` or `delete`. Node `insert_before`, file-boundary `insert`, whole-file moves, and config-path operations keep their own contracts. A line `replace` with empty text leaves one blank line; `delete` removes the line or inclusive range. The compiled changeset may use internal line-operation tags; callers should pass `edit` output to `apply`, not construct changesets directly.
+`patch` and `edit` flag/JSON requests use target-aware verbs. `replace`, `delete`, and `insert_after` accept node or line targets; line targets operate on logical lines rather than raw byte spans. `end_anchor` is accepted only with line `replace` or `delete`. Node `insert_before`, file-boundary `insert`, and config-path operations keep their own contracts. A line `replace` with empty text leaves one blank line; `delete` removes the line or inclusive range. Use `edit` to compile line operations for `apply` rather than writing internal line-operation tags by hand. [Whole-file moves](#whole-file-moves) are entered directly in the changeset.
 
 ## Error envelope
 
