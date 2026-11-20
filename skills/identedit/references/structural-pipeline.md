@@ -1,6 +1,6 @@
 # Structural Pipeline Reference
 
-Use this when `patch` is not enough: multiple operations, multi-file atomic edits, moves, handle refs, or explicit edit-plan construction.
+Use this when `patch` is not enough: multiple operations, transactional multi-file edits, structural moves, handle refs, or explicit edit-plan construction.
 
 ## Flow
 
