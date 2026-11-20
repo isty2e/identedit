@@ -1,11 +1,15 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+use tempfile::{Builder, TempDir};
 
 use crate::error::IdenteditError;
 
 use super::catalog::{InstallResolution, ResolutionSource, resolve_install_request};
 use super::compile::{
-    InstallWorkspace, clone_repo, compile_grammar_repository, ensure_grammar_install_supported,
-    resolve_symbol, shared_library_filename,
+    clone_repo, compile_grammar_repository, ensure_grammar_install_supported, resolve_symbol,
+    shared_library_filename,
 };
 use super::manifest::{ensure_grammars_dir, upsert_manifest_entry};
 use super::{InstallGrammarRequest, InstalledGrammar};
@@ -19,7 +23,7 @@ pub(super) fn install_grammar(
     let mut failures = Vec::new();
 
     for repo in &resolution.repo_candidates {
-        let workspace = InstallWorkspace::new(&resolution.lang)?;
+        let workspace = create_install_workspace()?;
         let source_dir = workspace.path().join("source");
         let build_output = workspace
             .path()
@@ -74,6 +78,19 @@ pub(super) fn install_grammar(
     })
 }
 
+fn create_install_workspace() -> Result<TempDir, IdenteditError> {
+    let mut builder = Builder::new();
+    builder.prefix("identedit-grammar-install-");
+    #[cfg(unix)]
+    builder.permissions(fs::Permissions::from_mode(0o700));
+
+    builder
+        .tempdir()
+        .map_err(|error| IdenteditError::GrammarInstall {
+            message: format!("failed to create install workspace: {error}"),
+        })
+}
+
 fn install_guidance(resolution: &InstallResolution) -> String {
     match resolution.source {
         ResolutionSource::Builtin => {
@@ -83,5 +100,33 @@ fn install_guidance(resolution: &InstallResolution) -> String {
             "Convention fallback failed. Retry with --repo and --symbol for explicit source details."
                 .to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_workspaces_are_private_and_cleaned_up_independently() {
+        let first = create_install_workspace().unwrap();
+        let second = create_install_workspace().unwrap();
+        let first_path = first.path().to_owned();
+        let second_file = second.path().join("kept");
+
+        assert!(first.path().is_absolute());
+        assert_ne!(first.path(), second.path());
+        #[cfg(unix)]
+        for workspace in [&first, &second] {
+            let mode = fs::metadata(workspace.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0);
+        }
+        fs::write(first.path().join("staged"), b"first attempt").unwrap();
+        fs::write(&second_file, b"second attempt").unwrap();
+
+        drop(first);
+
+        assert!(!first_path.try_exists().unwrap());
+        assert_eq!(fs::read(second_file).unwrap(), b"second attempt");
     }
 }

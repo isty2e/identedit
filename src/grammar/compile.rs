@@ -1,8 +1,5 @@
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use libloading::Library;
 
@@ -207,39 +204,6 @@ fn shared_library_extension() -> &'static str {
 ))]
 fn shared_library_extension() -> &'static str {
     "so"
-}
-
-pub(super) struct InstallWorkspace {
-    path: PathBuf,
-}
-
-impl InstallWorkspace {
-    pub(super) fn new(lang: &str) -> Result<Self, IdenteditError> {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| IdenteditError::GrammarInstall {
-                message: format!("system clock error while preparing install workspace: {error}"),
-            })?
-            .as_nanos();
-        let path = env::temp_dir().join(format!("identedit-grammar-install-{lang}-{nonce}"));
-        fs::create_dir_all(&path).map_err(|error| IdenteditError::GrammarInstall {
-            message: format!(
-                "failed to create install workspace '{}': {error}",
-                path.display()
-            ),
-        })?;
-        Ok(Self { path })
-    }
-
-    pub(super) fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for InstallWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
 }
 
 #[cfg(test)]

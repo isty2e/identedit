@@ -17,6 +17,7 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 serde_yaml = "0.9"
+tempfile = "3"
 thiserror = "2"
 toml = "0.8"
 tree-sitter = "0.26"
@@ -60,4 +61,3 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 proptest = "1"
-tempfile = "3"
